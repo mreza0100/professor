@@ -1,0 +1,44 @@
+# placeholder-map.tsv — executable copy of the refresh placeholder table.
+# Human copy: docs/commands/pcm/references/refresh.md § Placeholders; token
+# registry: blueprint/PLACEHOLDERS.md. genericize.sh applies rows longest-
+# search-first; mode word = \b-bounded match, literal = raw substring.
+# Deliberately absent (LLM-judgment territory, per refresh.md): domain nouns
+# (therapist/patient/session — persona metaphors keep them), roster collapsing
+# (N concrete projects -> {project} PATTERN blocks), port numbers (stock
+# defaults, not identifying), multi-word stack headers ({BACKEND_STACK} etc.).
+reza@intuita.health	{FOUNDER_NAME}@{PROJECT_DOMAIN}	literal
+Mohammadreza Khosravivala	{FOUNDER_NAME}	literal
+Reza Khosravivala	{FOUNDER_NAME}	literal
+Khosravivala	{FOUNDER_NAME}	word
+Mohammadreza	{FOUNDER_NAME}	word
+Reza	{FOUNDER_NAME}	word
+/home/reza/work/intuita	{REPO_ROOT}	literal
+/Users/reza/work/intuita	{REPO_ROOT}	literal
+/home/reza/work/professor	{BLUEPRINT_CLONE_PATH}	literal
+/Users/reza/work/professor	{BLUEPRINT_CLONE_PATH}	literal
+~/work/professor	{BLUEPRINT_CLONE_PATH}	literal
+/home/reza	$HOME	literal
+/Users/reza	$HOME	literal
+mreza0100/professor	{BLUEPRINT_REPO}	literal
+mreza0100	{GH_USER}	word
+intuita.health	{PROJECT_DOMAIN}	literal
+intuita_test	{TEST_DB_NAME}	word
+intuita-cortex	{AI_PROJECT}	word
+intuita-infra	{INFRA_PROJECT}	word
+intuita-be	{project}	word
+intuita-fe	{project}	word
+intuita-web	{project}	word
+Intuita	{PROJECT_NAME}	word
+intuita	{PROJECT_NAME}	word
+Freudche	{PROJECT_NAME}	word
+freudche	{PROJECT_NAME}	word
+AssemblyAI	{TRANSCRIPTION_SERVICE}	word
+GEMINI_API_KEY	{LLM_API_KEY}	word
+Gemini	{LLM_PROVIDER}	word
+Resend	{EMAIL_SERVICE}	word
+europe-west4	{DATA_REGION}	word
+Drizzle	{ORM}	word
+LangChain	{AI_FRAMEWORK}	word
+LangGraph	{AI_FRAMEWORK}	word
+GraphQL Yoga	{API_FRAMEWORK}	literal
+PostgreSQL	{DATABASE}	word
