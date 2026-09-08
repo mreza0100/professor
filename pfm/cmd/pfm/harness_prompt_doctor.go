@@ -18,6 +18,7 @@ import (
 
 	config "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	headlessrun "hostops/pfm/internal/headless/run"
 )
 
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
@@ -111,18 +112,8 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 	return fmt.Sprintf("doctor: harness-prompt: DRIFT live=%s baseline=%s (%s) — harness instructions changed; review before re-pinning", live[:16], baselineSHA[:16], baselineName), true
 }
 
-// captureHarnessPrompt DELIBERATELY BYPASSES action.ClaudeSpawn, the one spawn
-// door. Every other Claude launch in this binary goes through it; this one
-// must not, because the door's job is to APPLY the configured prompt policy
-// and this capture exists to observe the CLI's PRODUCTION prompt with no
-// policy applied at all — it pins CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0, a dummy
-// endpoint and dummy credentials, none of which the door would ever emit. A
-// capture routed through the door would hash whatever the fleet configured and
-// report "no drift" forever.
-//
-// It spawns `claude -p` pointed at an ephemeral localhost listener that
-// records the request body and refuses it with a non-retryable 400 (a 500
-// would put the CLI into its retry loop).
+// captureHarnessPrompt uses the shared headless runner with the unmodified
+// harness prompt and a local sink that captures the request and returns 400.
 func captureHarnessPrompt(ctx context.Context, machine config.Config, model string) (harnessCapture, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -146,27 +137,26 @@ func captureHarnessPrompt(ctx context.Context, machine config.Config, model stri
 	if versionErr != nil {
 		return harnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	command := exec.CommandContext(runCtx, binary,
-		"-p", "x", "--model", model, "--output-format", "json",
-		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-		"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
-	)
-	command.Env = harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String())
+	_, runErr := headlessrun.Run(ctx, headlessrun.Request{
+		Config: config.Config{Claude: config.Claude{Binary: binary}},
+		Engine: pfmengine.Claude, Model: model, Prompt: "x", Native: true, WithoutAccount: true,
+		Timeout: 20 * time.Second,
+		Args: []string{"--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections"},
+		Env: harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String()),
+	})
 	// The CLI exits nonzero by design — the sink refused its request; the
 	// capture, not the exit code, is the result. The grace window covers the
 	// handler goroutine still finishing its send after Run returns; a ctx case
 	// is deliberately absent — a ready body racing an expired ctx in one
 	// select would drop real captures at random.
-	_ = command.Run()
 	select {
 	case body := <-bodies:
 		captured, err := decodeHarnessCapture(body)
 		captured.CLIVersion = strings.TrimSpace(string(versionRaw))
 		return captured, err
 	case <-time.After(2 * time.Second):
-		return harnessCapture{CLIVersion: strings.TrimSpace(string(versionRaw))}, errors.New("no API request reached the capture sink")
+		return harnessCapture{CLIVersion: strings.TrimSpace(string(versionRaw))}, errors.Join(errors.New("no API request reached the capture sink"), runErr)
 	}
 }
 

@@ -13,13 +13,14 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 )
 
-func TestHeadlessCompatibilityAliasIsHiddenAndDeprecated(t *testing.T) {
+func TestHeadlessCompatibilityAliasExposesPublicHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"headless", "help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "deprecated") ||
-		strings.Contains(stdout.String(), "headless") {
+	if !strings.Contains(stderr.String(), "headless exec") ||
+		!strings.Contains(stderr.String(), "--output-format text|json|native") ||
+		strings.Contains(stderr.String(), "deprecated") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

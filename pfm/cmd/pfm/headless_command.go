@@ -42,6 +42,15 @@ func runHeadless(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		return runHeadlessExec([]string{"--help"}, os.Stdin, stdout, stderr, runtime)
+	}
+	if args[0] == "exec" {
+		return runHeadlessExec(args[1:], os.Stdin, stdout, stderr, runtime)
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return runHeadlessExec(args, os.Stdin, stdout, stderr, runtime)
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "run":

@@ -57,7 +57,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "harvest":
 		return runHarvest(args[1:], stdout, stderr, runtime)
 	case "headless":
-		fmt.Fprintln(stderr, "pfm: 'headless' is deprecated; use 'pfm chat'")
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
 		return runIndex(args[1:], stdout, stderr, runtime)
@@ -576,6 +575,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "operator commands:")
 	fmt.Fprintln(w, "  ls        list or pick fleet chats")
 	fmt.Fprintln(w, "  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end")
+	fmt.Fprintln(w, "  headless  run Claude or Codex through one isolated process interface")
 	fmt.Fprintln(w, "  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path")
 	fmt.Fprintln(w, "  dream     build and inject repository memory organs")
 	fmt.Fprintln(w, "  index     refresh the transcript index")

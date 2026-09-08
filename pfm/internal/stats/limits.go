@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/action"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	headlessrun "hostops/pfm/internal/headless/run"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
@@ -711,28 +711,18 @@ func needsCredentialRefresh(err error) bool {
 }
 
 func defaultAck(ctx context.Context, account LimitAccount) error {
-	// One token in, one token out: this exchange exists to make the CLI
-	// refresh an OAuth credential, and the configured system prompt has no
-	// bearing on the answer. PurposeProbe pins the cheapest correct prompt and
-	// keeps the fleet's one hygiene strip. The sampler holds a config dir
-	// rather than a machine config, so it states that seat as a one-account
-	// roster — the door never takes a bare directory.
-	spawn := action.ClaudeSpawn{
-		Purpose: action.PurposeProbe,
-		Account: account.ID,
-		Model:   "claude-haiku-4-5",
-		Args:    []string{"-p", "ACK", "--max-turns", "1"},
-		Machine: pfmconfig.Config{
+	result, err := headlessrun.Run(ctx, headlessrun.Request{
+		Engine: pfmengine.Claude, Account: account.ID,
+		Model: "claude-haiku-4-5", Prompt: "ACK", Native: true,
+		Args: []string{"--max-turns", "1"},
+		Env:  append(os.Environ(), "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1"),
+		Config: pfmconfig.Config{
 			Claude:   pfmconfig.ClaudePrefs{Binary: account.ClaudeBinary},
 			Accounts: []pfmconfig.Account{{ID: account.ID, ConfigDir: account.ConfigDir}},
 		},
-	}
-	command, err := spawn.Command(ctx)
+	})
 	if err != nil {
-		return fmt.Errorf("build credential refresh for account %d: %w", account.ID, err)
-	}
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("refresh account %d OAuth token: %w (%s)", account.ID, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("refresh account %d OAuth token: %w (%s)", account.ID, err, strings.TrimSpace(result.Stdout+result.Stderr))
 	}
 	return nil
 }

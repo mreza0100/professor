@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package ask
+package run
 
 import (
 	"errors"
@@ -10,10 +10,9 @@ import (
 	"time"
 )
 
-// configureBoundedCommand puts the engine and every helper it starts in one
-// process group. Killing only the CLI process can leave a child holding the
-// stdout/stderr pipes open past the ask timeout, so cancellation owns the
-// whole group and WaitDelay bounds a pathological inherited descriptor.
+// configureBoundedCommand gives the engine and every helper it starts one
+// process group. Cancellation kills the group, and WaitDelay prevents an
+// inherited descriptor from keeping a bounded pipe open forever.
 func configureBoundedCommand(command *exec.Cmd) {
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error {
