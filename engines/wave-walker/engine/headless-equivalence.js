@@ -176,16 +176,27 @@ async function runHeadless(repository, bundle, workflowArgs, promptTemplate) {
     .replace('{{SCRIPT_PATH}}', bundle)
     .replace('{{ARGS_JSON}}', JSON.stringify(workflowArgs));
   const { stdout } = await execute(
-    'claude',
+    'pfm',
     [
-      '-p',
+      'headless',
+      'exec',
+      '--engine',
+      'claude',
+      '--prompt',
       prompt,
       '--output-format',
-      'json',
+      'native',
+      '--timeout',
+      '600',
       '--model',
       'haiku',
       '--effort',
       'medium',
+      '--config-dir',
+      claudeConfigRoot(),
+      '--',
+      '--output-format',
+      'json',
       '--tools',
       'Workflow',
       '--allowedTools',
@@ -195,7 +206,6 @@ async function runHeadless(repository, bundle, workflowArgs, promptTemplate) {
       cwd: repository,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
-      timeout: 10 * 60 * 1_000,
     },
   );
   const cli = JSON.parse(stdout);

@@ -8,4 +8,4 @@ and `(cost)` on any env / hook / permission / model-config delta.
 
 ## Pending
 
-_(empty — v0.72.0 shipped every pending bullet. DELETE this line when you append the next bullet: `/pfm:release` copies this list verbatim, so a marker left above a real bullet ships into the release notes.)_
+- Minor: PFM headless — shared Claude/Codex execution interface with system prompts, schemas, configurable timeouts, normalized results, and native streaming; prepared-source asks, harness capture, credential refresh, and Walker equivalence route through one internal process runner, with explicit errors for unsupported engine capabilities.

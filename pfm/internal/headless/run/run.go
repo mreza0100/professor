@@ -1,0 +1,909 @@
+// Package run owns the one-shot process boundary for every supported headless
+// engine. Callers may choose the normalized contract or ask the native client
+// to pass through its output, but process lifetime and account identity always
+// cross this package.
+package run
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+
+	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/paths"
+)
+
+const maxCapturedOutput = 8 << 20
+
+// ErrStructuredOutput means that a requested schema was not satisfied by the
+// engine envelope. It is deliberately separate from a process failure so CLI
+// callers can give this validation failure its own exit status.
+var ErrStructuredOutput = errors.New("structured output missing or invalid")
+
+// BinaryMissingError distinguishes a configured engine that is absent from an
+// engine binary that resolved but failed after launch.
+type BinaryMissingError struct {
+	Engine string
+	Binary string
+	Err    error
+}
+
+func (err *BinaryMissingError) Error() string {
+	return fmt.Sprintf("%s binary MISSING (%s)", err.Engine, err.Binary)
+}
+
+func (err *BinaryMissingError) Unwrap() error { return err.Err }
+
+// Request is the engine-neutral headless contract. Args are appended losslessly
+// after translated common options, allowing a caller to use any native option
+// the selected engine supports without teaching pfm every engine feature.
+type Request struct {
+	Config               pfmconfig.Config
+	Engine               pfmengine.ID
+	Account              int
+	ConfigDir            string
+	Model                string
+	Effort               string
+	Prompt               string
+	CWD                  string
+	TempDir              string
+	Timeout              time.Duration
+	SystemPrompt         *string
+	Schema               json.RawMessage
+	Tools                *string
+	SettingsSources      *string
+	StrictMCP            bool
+	NoSessionPersistence bool
+	Sealed               bool
+	AllowUnsupported     bool
+	Args                 []string
+	Env                  []string
+	// WithoutAccount is reserved for controlled diagnostic/native captures.
+	// It requires a complete explicit Env and never derives identity from a
+	// configured roster; ordinary callers must resolve a roster account.
+	WithoutAccount     bool
+	Stdin              io.Reader
+	Stdout             io.Writer
+	Stderr             io.Writer
+	Native             bool
+	systemPromptFile   string
+	schemaFilePath     string
+	unsupportedOptions []string
+}
+
+type TokenUsage struct {
+	Input       int `json:"input_tokens"`
+	CachedInput int `json:"cached_input_tokens"`
+	Output      int `json:"output_tokens"`
+}
+
+type Result struct {
+	Engine           pfmengine.ID    `json:"engine"`
+	Model            string          `json:"model"`
+	Effort           string          `json:"effort"`
+	Answer           string          `json:"result"`
+	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
+	Usage            *TokenUsage     `json:"usage,omitempty"`
+	TotalCostUSD     *float64        `json:"total_cost_usd"`
+	Duration         time.Duration   `json:"-"`
+	ExitCode         int             `json:"exit_code"`
+	IsError          bool            `json:"is_error"`
+	TimedOut         bool            `json:"timeout"`
+	Diagnostics      []string        `json:"diagnostics,omitempty"`
+	Stdout           string          `json:"-"`
+	Stderr           string          `json:"-"`
+}
+
+// Resolve applies engine, account, binary, model, effort, and filesystem
+// defaults without launching a process. The returned private fields are kept
+// out of the public API; Run resolves again so callers may use either seam.
+func Resolve(request Request) (Request, error) {
+	if request.Timeout < 0 {
+		return Request{}, fmt.Errorf("timeout must be zero or positive")
+	}
+	if request.WithoutAccount {
+		if request.Account != 0 || request.ConfigDir != "" || request.Env == nil {
+			return Request{}, fmt.Errorf("without-account headless runs require Account=0, no ConfigDir, and a complete Env")
+		}
+	}
+	if request.Engine == "" {
+		var err error
+		request.Engine, err = request.Config.DefaultEngine()
+		if err != nil {
+			return Request{}, err
+		}
+	}
+	if _, err := pfmengine.Lookup(request.Engine); err != nil {
+		return Request{}, err
+	}
+	if request.Engine == pfmengine.Opencode {
+		return Request{}, fmt.Errorf("OpenCode does not support headless runs")
+	}
+
+	var rosterDir, binary string
+	var rosterPresent bool
+	switch request.Engine {
+	case pfmengine.Claude:
+		binary = strings.TrimSpace(request.Config.Claude.Binary)
+		if binary == "" {
+			binary = pfmengine.MustLookup(request.Engine).Binary
+		}
+		if request.WithoutAccount {
+			// Diagnostics deliberately bypass the roster and use only the
+			// caller-provided complete environment.
+		} else if request.Account == 0 {
+			if len(request.Config.Accounts) > 0 {
+				request.Account = matchingClaudeAccount(request.Config.Accounts, request.ConfigDir)
+				if request.Account == 0 {
+					request.Account = request.Config.Accounts[0].ID
+				}
+				rosterPresent = true
+			}
+		} else {
+			rosterPresent = true
+		}
+		if account, ok := request.Config.AccountByID(request.Account); ok {
+			rosterDir = account.ConfigDir
+			prefs := request.Config.EffectiveClaude(request.Account)
+			if strings.TrimSpace(prefs.Binary) != "" {
+				binary = strings.TrimSpace(prefs.Binary)
+			}
+		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.Accounts) > 0) {
+			return Request{}, fmt.Errorf("Claude account %d is not in the configured roster", request.Account)
+		}
+	case pfmengine.Codex:
+		binary = strings.TrimSpace(request.Config.Codex.Binary)
+		if binary == "" {
+			binary = pfmengine.MustLookup(request.Engine).Binary
+		}
+		if request.WithoutAccount {
+			// Diagnostics deliberately bypass the roster and use only the
+			// caller-provided complete environment.
+		} else if request.Account == 0 {
+			if len(request.Config.CodexAccounts) > 0 {
+				request.Account = matchingCodexAccount(request.Config.CodexAccounts, request.ConfigDir)
+				if request.Account == 0 {
+					request.Account = request.Config.CodexAccounts[0].ID
+				}
+				rosterPresent = true
+			}
+		} else {
+			rosterPresent = true
+		}
+		if account, ok := request.Config.CodexAccountByID(request.Account); ok {
+			rosterDir = account.Home
+			prefs := request.Config.EffectiveCodex(request.Account)
+			if strings.TrimSpace(prefs.Binary) != "" {
+				binary = strings.TrimSpace(prefs.Binary)
+			}
+		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.CodexAccounts) > 0) {
+			return Request{}, fmt.Errorf("Codex account %d is not in the configured roster", request.Account)
+		}
+	}
+	if request.ConfigDir != "" && rosterDir != "" && filepath.Clean(request.ConfigDir) != filepath.Clean(rosterDir) {
+		return Request{}, fmt.Errorf("%s config dir %q does not match account %d roster dir %q", request.Engine, request.ConfigDir, request.Account, rosterDir)
+	}
+	if request.ConfigDir == "" {
+		request.ConfigDir = rosterDir
+	}
+	if request.WithoutAccount {
+		rosterPresent = true
+		name := pfmengine.MustLookup(request.Engine).HomeEnv
+		for _, entry := range request.Env {
+			if value, ok := strings.CutPrefix(entry, name+"="); ok {
+				request.ConfigDir = value
+			}
+		}
+	} else if !rosterPresent {
+		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
+	}
+	if _, err := deps.Resolve(binary); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return Request{}, &BinaryMissingError{Engine: pfmengine.MustLookup(request.Engine).LongName, Binary: binary, Err: err}
+		}
+		return Request{}, fmt.Errorf("resolve %s binary %q: %w", request.Engine, binary, err)
+	}
+
+	if !request.Native {
+		prefs := request.Config.Ask.PrefsFor(request.Engine)
+		if request.Model == "" {
+			request.Model = prefs.Model
+		}
+		if request.Effort == "" {
+			request.Effort = prefs.Effort
+		}
+	}
+	if request.Sealed {
+		if request.SystemPrompt == nil {
+			return Request{}, fmt.Errorf("sealed headless run requires a replacement system prompt")
+		}
+		if request.TempDir == "" {
+			resolved, err := paths.Resolve()
+			if err != nil {
+				return Request{}, fmt.Errorf("resolve headless scratch directory: %w", err)
+			}
+			request.TempDir = resolved.SIDDir
+		}
+		if request.CWD != "" {
+			// The caller may provide a scratch base, but Sealed always owns the
+			// actual cwd. It is created immediately before launch in Run.
+			request.CWD = ""
+		}
+		empty := ""
+		request.Tools = &empty
+		request.SettingsSources = &empty
+		request.StrictMCP = true
+		request.NoSessionPersistence = true
+		if len(request.Args) != 0 && !(request.Engine == pfmengine.Codex && request.AllowUnsupported) {
+			return Request{}, fmt.Errorf("sealed headless run does not accept native args")
+		}
+	}
+	if request.Engine == pfmengine.Codex {
+		var unsupported []string
+		if request.Sealed {
+			unsupported = append(unsupported, "--sealed (full isolation)")
+		}
+		if request.Tools != nil {
+			unsupported = append(unsupported, "--tools")
+		}
+		if request.SettingsSources != nil {
+			unsupported = append(unsupported, "--setting-sources")
+		}
+		if request.StrictMCP {
+			unsupported = append(unsupported, "--strict-mcp-config")
+		}
+		if len(unsupported) != 0 {
+			if !request.AllowUnsupported {
+				return Request{}, fmt.Errorf("Codex headless runs cannot guarantee tools or settings isolation: unsupported %s; use --allow-unsupported to continue without these controls", strings.Join(unsupported, ", "))
+			}
+			request.Tools, request.SettingsSources, request.StrictMCP = nil, nil, false
+			request.unsupportedOptions = unsupported
+		}
+	}
+	if request.Schema != nil {
+		if err := validateSchema(request.Schema); err != nil {
+			return Request{}, err
+		}
+	}
+	return request, nil
+}
+
+func matchingClaudeAccount(accounts []pfmconfig.Account, configDir string) int {
+	if configDir == "" {
+		return 0
+	}
+	want := filepath.Clean(configDir)
+	for _, account := range accounts {
+		if filepath.Clean(account.ConfigDir) == want {
+			return account.ID
+		}
+	}
+	return 0
+}
+
+func matchingCodexAccount(accounts []pfmconfig.CodexAccount, configDir string) int {
+	if configDir == "" {
+		return 0
+	}
+	want := filepath.Clean(configDir)
+	for _, account := range accounts {
+		if filepath.Clean(account.Home) == want {
+			return account.ID
+		}
+	}
+	return 0
+}
+
+func Run(parent context.Context, request Request) (result Result, runErr error) {
+	defer func() {
+		if runErr != nil {
+			result.IsError = true
+		}
+	}()
+	resolved, err := Resolve(request)
+	if err != nil {
+		return Result{Engine: request.Engine, ExitCode: -1}, err
+	}
+	request = resolved
+	result.Engine, result.Model, result.Effort, result.ExitCode = request.Engine, request.Model, request.Effort, -1
+	for _, option := range request.unsupportedOptions {
+		result.Diagnostics = append(result.Diagnostics, "unsupported control not applied for Codex: "+option)
+	}
+	started := time.Now()
+	ctx := parent
+	var cancel context.CancelFunc
+	if request.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(parent, request.Timeout)
+		defer cancel()
+	}
+
+	cwd := request.CWD
+	cleanup := func() error { return nil }
+	if request.Sealed {
+		base := request.TempDir
+		if base == "" {
+			resolvedPaths, pathErr := paths.Resolve()
+			if pathErr != nil {
+				return result, fmt.Errorf("resolve headless scratch directory: %w", pathErr)
+			}
+			base = resolvedPaths.SIDDir
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return result, fmt.Errorf("create headless scratch base %s: %w", base, err)
+		}
+		cwd, err = os.MkdirTemp(base, "pfm-headless-")
+		if err != nil {
+			return result, fmt.Errorf("create headless scratch directory in %s: %w", base, err)
+		}
+		cleanup = func() error { return os.RemoveAll(cwd) }
+	}
+	if cwd != "" {
+		if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
+			if statErr != nil {
+				return result, fmt.Errorf("headless cwd %s: %w", cwd, statErr)
+			}
+			return result, fmt.Errorf("headless cwd %s is not a directory", cwd)
+		}
+	}
+	defer func() {
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			if runErr == nil {
+				runErr = fmt.Errorf("cleanup headless scratch directory: %w", cleanupErr)
+			} else {
+				runErr = fmt.Errorf("%v; cleanup headless scratch directory: %w", runErr, cleanupErr)
+			}
+		}
+	}()
+	if request.SystemPrompt != nil && (request.Engine == pfmengine.Claude || request.Engine == pfmengine.Codex) {
+		base := request.TempDir
+		if base == "" {
+			resolvedPaths, pathErr := paths.Resolve()
+			if pathErr != nil {
+				return result, fmt.Errorf("resolve headless prompt scratch directory: %w", pathErr)
+			}
+			base = resolvedPaths.SIDDir
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return result, fmt.Errorf("create headless prompt scratch base %s: %w", base, err)
+		}
+		file, fileErr := os.CreateTemp(base, "pfm-headless-system-*.txt")
+		if fileErr != nil {
+			return result, fmt.Errorf("create headless system prompt file: %w", fileErr)
+		}
+		name := file.Name()
+		if _, fileErr = file.WriteString(*request.SystemPrompt); fileErr == nil {
+			fileErr = file.Close()
+		} else {
+			_ = file.Close()
+		}
+		if fileErr != nil {
+			_ = os.Remove(name)
+			return result, fmt.Errorf("write headless system prompt file: %w", fileErr)
+		}
+		request.systemPromptFile = name
+		previousCleanup := cleanup
+		cleanup = func() error {
+			removeErr := os.Remove(name)
+			if errors.Is(removeErr, os.ErrNotExist) {
+				removeErr = nil
+			}
+			scratchErr := previousCleanup()
+			if removeErr != nil && scratchErr != nil {
+				return fmt.Errorf("remove system prompt %s: %v; cleanup scratch: %w", name, removeErr, scratchErr)
+			}
+			if removeErr != nil {
+				return fmt.Errorf("remove system prompt %s: %w", name, removeErr)
+			}
+			return scratchErr
+		}
+	}
+	if request.Schema != nil && request.Engine == pfmengine.Codex {
+		base := request.TempDir
+		if base == "" {
+			resolvedPaths, pathErr := paths.Resolve()
+			if pathErr != nil {
+				return result, fmt.Errorf("resolve headless schema scratch directory: %w", pathErr)
+			}
+			base = resolvedPaths.SIDDir
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return result, fmt.Errorf("create headless schema scratch base %s: %w", base, err)
+		}
+		file, fileErr := os.CreateTemp(base, "pfm-headless-schema-*.json")
+		if fileErr != nil {
+			return result, fmt.Errorf("create headless output schema file: %w", fileErr)
+		}
+		name := file.Name()
+		if _, fileErr = file.Write(request.Schema); fileErr == nil {
+			fileErr = file.Close()
+		} else {
+			_ = file.Close()
+		}
+		if fileErr != nil {
+			_ = os.Remove(name)
+			return result, fmt.Errorf("write headless output schema file: %w", fileErr)
+		}
+		request.schemaFilePath = name
+		previousCleanup := cleanup
+		cleanup = func() error {
+			removeErr := os.Remove(name)
+			if errors.Is(removeErr, os.ErrNotExist) {
+				removeErr = nil
+			}
+			scratchErr := previousCleanup()
+			if removeErr != nil && scratchErr != nil {
+				return fmt.Errorf("remove output schema %s: %v; cleanup scratch: %w", name, removeErr, scratchErr)
+			}
+			if removeErr != nil {
+				return fmt.Errorf("remove output schema %s: %w", name, removeErr)
+			}
+			return scratchErr
+		}
+	}
+
+	binary, err := resolvedBinary(request)
+	if err != nil {
+		return result, err
+	}
+	argv, err := arguments(request)
+	if err != nil {
+		return result, err
+	}
+	command := exec.CommandContext(ctx, binary, argv...)
+	configureBoundedCommand(command)
+	if cwd != "" {
+		command.Dir = cwd
+	}
+	if request.Env == nil {
+		command.Env = os.Environ()
+	} else {
+		command.Env = append([]string(nil), request.Env...)
+	}
+	setEnvironment(command.Env, request.Engine, request.ConfigDir, request.Env != nil, &command.Env)
+	if request.Stdin != nil {
+		command.Stdin = request.Stdin
+	} else {
+		command.Stdin = strings.NewReader(request.Prompt)
+	}
+
+	stdout := boundedBuffer{limited: !request.Native}
+	stderr := boundedBuffer{limited: !request.Native}
+	command.Stdout = writerFor(request.Stdout, &stdout)
+	command.Stderr = writerFor(request.Stderr, &stderr)
+	runErr = command.Run()
+	result.Duration = time.Since(started)
+	result.Stdout, result.Stderr = stdout.String(), stderr.String()
+	result.ExitCode = exitCode(runErr)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.TimedOut = true
+		result.IsError = true
+		return result, fmt.Errorf("%s headless run timed out: %w", request.Engine, context.DeadlineExceeded)
+	}
+	if ctx.Err() != nil {
+		result.IsError = true
+		return result, fmt.Errorf("%s headless run canceled: %w", request.Engine, ctx.Err())
+	}
+	if request.Native {
+		result.Answer = result.Stdout
+		if runErr != nil {
+			result.IsError = true
+			return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024))
+		}
+		return result, nil
+	}
+	if stdout.truncated || stderr.truncated {
+		return result, fmt.Errorf("normalized headless output exceeded the %d-byte capture limit", maxCapturedOutput)
+	}
+	if runErr != nil {
+		result.IsError = true
+		return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024))
+	}
+	if err := parseOutput(&result, request); err != nil {
+		result.IsError = true
+		return result, err
+	}
+	return result, nil
+}
+
+func resolvedBinary(request Request) (string, error) {
+	var binary string
+	switch request.Engine {
+	case pfmengine.Claude:
+		binary = request.Config.Claude.Binary
+		if request.Account != 0 {
+			binary = request.Config.EffectiveClaude(request.Account).Binary
+		}
+	case pfmengine.Codex:
+		binary = request.Config.Codex.Binary
+		if request.Account != 0 {
+			binary = request.Config.EffectiveCodex(request.Account).Binary
+		}
+	}
+	if strings.TrimSpace(binary) == "" {
+		binary = pfmengine.MustLookup(request.Engine).Binary
+	}
+	return deps.Resolve(strings.TrimSpace(binary))
+}
+
+func arguments(request Request) ([]string, error) {
+	args := []string{}
+	switch request.Engine {
+	case pfmengine.Claude:
+		args = append(args, "-p")
+		if request.Sealed {
+			args = append(args, "--safe-mode")
+		}
+		if request.Model != "" {
+			args = append(args, "--model", request.Model)
+		}
+		if request.Effort != "" {
+			args = append(args, "--effort", request.Effort)
+		}
+		if !request.Native {
+			args = append(args, "--output-format", "json")
+		}
+		if request.SystemPrompt != nil {
+			if request.systemPromptFile != "" {
+				args = append(args, "--system-prompt-file", request.systemPromptFile)
+			} else {
+				args = append(args, "--system-prompt", *request.SystemPrompt)
+			}
+		}
+		if request.Schema != nil {
+			args = append(args, "--json-schema", string(request.Schema))
+		}
+		if request.Tools != nil {
+			args = append(args, "--tools", *request.Tools)
+		}
+		if request.SettingsSources != nil {
+			args = append(args, "--setting-sources", *request.SettingsSources)
+		}
+		if request.StrictMCP {
+			args = append(args, "--strict-mcp-config")
+		}
+		if request.NoSessionPersistence {
+			args = append(args, "--no-session-persistence")
+		}
+	case pfmengine.Codex:
+		args = append(args, "exec")
+		if request.Model != "" {
+			args = append(args, "--model", request.Model)
+		}
+		if request.Effort != "" {
+			args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(request.Effort))
+		}
+		if request.systemPromptFile != "" {
+			args = append(args, "-c", "model_instructions_file="+strconv.Quote(request.systemPromptFile))
+		}
+		if !request.Native {
+			args = append(args, "--json")
+		}
+		if request.Schema != nil {
+			if request.schemaFilePath == "" {
+				return nil, fmt.Errorf("output schema file was not materialized")
+			}
+			args = append(args, "--output-schema", request.schemaFilePath)
+		}
+		if request.NoSessionPersistence || request.Sealed {
+			args = append(args, "--ephemeral")
+		}
+		if request.Sealed {
+			args = append(args, "--ignore-user-config", "--ignore-rules")
+		}
+		if !request.Native {
+			args = append(args, "--skip-git-repo-check", "--color", "never")
+		}
+	default:
+		return nil, fmt.Errorf("engine %s does not support headless runs", request.Engine)
+	}
+	args = append(args, request.Args...)
+	return args, nil
+}
+
+func setEnvironment(environment []string, id pfmengine.ID, configDir string, explicit bool, target *[]string) {
+	dropped := map[string]struct{}{
+		"CLAUDE_CODE_SESSION_ID": {}, "CLAUDECODE": {}, "CLAUDE_CODE_CHILD_SESSION": {},
+		"CLAUDE_CONFIG_DIR": {}, "CODEX_THREAD_ID": {}, "TMUX": {}, "TMUX_PANE": {},
+	}
+	if !explicit {
+		for _, name := range []string{"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
+			"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
+			"OPENAI_API_KEY", "OPENAI_BASE_URL", "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
+			"CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+			"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"} {
+			dropped[name] = struct{}{}
+		}
+	}
+	name := pfmengine.MustLookup(id).HomeEnv
+	if name != "" {
+		dropped[name] = struct{}{}
+	}
+	filtered := make([]string, 0, len(environment)+1)
+	for _, value := range environment {
+		key, _, _ := strings.Cut(value, "=")
+		if _, remove := dropped[key]; remove {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	if configDir != "" && name != "" {
+		filtered = append(filtered, name+"="+configDir)
+	}
+	*target = filtered
+}
+
+type boundedBuffer struct {
+	bytes.Buffer
+	truncated bool
+	limited   bool
+}
+
+func (buffer *boundedBuffer) Write(value []byte) (int, error) {
+	if !buffer.limited {
+		return buffer.Buffer.Write(value)
+	}
+	remaining := maxCapturedOutput - buffer.Len()
+	if remaining <= 0 {
+		buffer.truncated = true
+		return len(value), nil
+	}
+	if len(value) > remaining {
+		_, _ = buffer.Buffer.Write(value[:remaining])
+		buffer.truncated = true
+		return len(value), nil
+	}
+	return buffer.Buffer.Write(value)
+}
+func writerFor(stream io.Writer, capture io.Writer) io.Writer {
+	if stream == nil {
+		return capture
+	}
+	return io.MultiWriter(stream, capture)
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+type claudeEnvelope struct {
+	Result     json.RawMessage `json:"result"`
+	Structured json.RawMessage `json:"structured_output"`
+	Usage      json.RawMessage `json:"usage"`
+	TotalCost  json.RawMessage `json:"total_cost_usd"`
+	IsError    bool            `json:"is_error"`
+}
+
+func parseOutput(result *Result, request Request) error {
+	switch request.Engine {
+	case pfmengine.Claude:
+		var envelope claudeEnvelope
+		if err := json.Unmarshal([]byte(result.Stdout), &envelope); err != nil {
+			return fmt.Errorf("parse Claude JSON envelope: %w", err)
+		}
+		result.IsError = envelope.IsError
+		if len(envelope.Result) > 0 && string(envelope.Result) != "null" {
+			if err := json.Unmarshal(envelope.Result, &result.Answer); err != nil {
+				return fmt.Errorf("parse Claude result: %w", err)
+			}
+		}
+		result.StructuredOutput = append(json.RawMessage(nil), envelope.Structured...)
+		var err error
+		result.Usage, err = parseUsage(envelope.Usage)
+		if err != nil {
+			return fmt.Errorf("parse Claude usage: %w", err)
+		}
+		result.TotalCostUSD, err = parseCost(envelope.TotalCost)
+		if err != nil {
+			return fmt.Errorf("parse Claude cost: %w", err)
+		}
+		if result.IsError {
+			return fmt.Errorf("Claude headless envelope reported an error")
+		}
+	case pfmengine.Codex:
+		if err := parseCodexJSONL(result, request); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("engine %s does not support normalized output", request.Engine)
+	}
+	if request.Schema != nil {
+		if len(result.StructuredOutput) == 0 {
+			return fmt.Errorf("%w: engine did not return structured_output", ErrStructuredOutput)
+		}
+		if err := validateInstance(request.Schema, result.StructuredOutput); err != nil {
+			return fmt.Errorf("%w: %v", ErrStructuredOutput, err)
+		}
+		if result.Answer == "" {
+			result.Answer = string(result.StructuredOutput)
+		}
+	} else if strings.TrimSpace(result.Answer) == "" {
+		return fmt.Errorf("%s headless output contains no answer", request.Engine)
+	}
+	return nil
+}
+
+func parseCodexJSONL(result *Result, request Request) error {
+	var terminal bool
+	for lineNo, line := range strings.Split(result.Stdout, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event struct {
+			Type    string          `json:"type"`
+			Message string          `json:"message"`
+			Item    json.RawMessage `json:"item"`
+			Usage   json.RawMessage `json:"usage"`
+			Error   json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			return fmt.Errorf("parse Codex JSONL event %d: %w", lineNo+1, err)
+		}
+		if event.Type == "" {
+			return fmt.Errorf("Codex event %d has no type", lineNo+1)
+		}
+		switch event.Type {
+		case "error":
+			// Codex uses error events for retries as well as failures. Only a
+			// subsequent terminal success proves that the engine recovered.
+			if terminal {
+				result.Answer = ""
+			}
+			terminal = false
+			message := event.Message
+			if message == "" {
+				message = "Codex reported an error"
+			}
+			result.Diagnostics = append(result.Diagnostics, message)
+		case "turn.failed", "thread.failed":
+			return fmt.Errorf("Codex headless event %s: %s", event.Type, event.Error)
+		case "turn.started":
+			terminal = false
+			result.Answer = ""
+		case "turn.completed":
+			if len(event.Error) != 0 && string(event.Error) != "null" {
+				return fmt.Errorf("Codex turn.completed contains an error")
+			}
+			terminal = true
+			var err error
+			result.Usage, err = parseUsage(event.Usage)
+			if err != nil {
+				return fmt.Errorf("parse Codex usage: %w", err)
+			}
+		case "item.completed":
+			var item struct {
+				Type    string `json:"type"`
+				Text    string `json:"text"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(event.Item, &item); err != nil {
+				return fmt.Errorf("parse Codex completed item: %w", err)
+			}
+			if item.Type == "agent_message" {
+				result.Answer = item.Text
+			} else if item.Type == "error" && item.Message != "" {
+				result.Diagnostics = append(result.Diagnostics, item.Message)
+			}
+		}
+	}
+	if !terminal {
+		return fmt.Errorf("Codex headless output missing terminal success event")
+	}
+	if strings.TrimSpace(result.Answer) == "" {
+		return fmt.Errorf("Codex headless output contains no completed answer")
+	}
+	if request.Schema != nil {
+		result.StructuredOutput = json.RawMessage(result.Answer)
+	}
+	return nil
+}
+
+func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	usage := &TokenUsage{}
+	known := false
+	for _, field := range []struct {
+		names  []string
+		target *int
+	}{
+		{[]string{"input_tokens", "prompt_tokens"}, &usage.Input},
+		{[]string{"cached_input_tokens", "cache_read_input_tokens", "cached_tokens"}, &usage.CachedInput},
+		{[]string{"output_tokens", "completion_tokens"}, &usage.Output},
+	} {
+		for _, name := range field.names {
+			value, present := values[name]
+			if !present || string(value) == "null" {
+				continue
+			}
+			if err := json.Unmarshal(value, field.target); err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			if *field.target < 0 {
+				return nil, fmt.Errorf("%s must be nonnegative", name)
+			}
+			known = true
+			break
+		}
+	}
+	if !known {
+		return nil, nil
+	}
+	return usage, nil
+}
+
+func parseCost(raw json.RawMessage) (*float64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var cost float64
+	if err := json.Unmarshal(raw, &cost); err != nil {
+		return nil, err
+	}
+	if cost < 0 {
+		return nil, fmt.Errorf("cost must be nonnegative")
+	}
+	return &cost, nil
+}
+
+func validateSchema(raw json.RawMessage) error {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return fmt.Errorf("invalid output schema: null is not a JSON Schema")
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return fmt.Errorf("invalid output schema: %w", err)
+	}
+	if _, err := schema.Resolve(nil); err != nil {
+		return fmt.Errorf("invalid output schema: %w", err)
+	}
+	return nil
+}
+
+func validateInstance(schemaRaw, instanceRaw json.RawMessage) error {
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
+		return err
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		return err
+	}
+	var instance any
+	if err := json.Unmarshal(instanceRaw, &instance); err != nil {
+		return err
+	}
+	return resolved.Validate(instance)
+}
+
+func boundedTail(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[len(value)-limit:]
+}

@@ -158,6 +158,8 @@ along with a legal skill shelf.
 
 ## The fleet CLI (`pfm/`)
 
+`pfm headless exec` provides a shared Claude/Codex interface for prompt files, system prompts, schemas, timeouts, normalized results, and native streaming. See [Headless execution](pfm/HEADLESS.md) for options and engine capabilities.
+
 One Go binary with embedded installer assets. Its installer writes machine state; `pfm init` is the
 explicit project-scaffold exception. It exists because a chat that scrolled off a closed terminal
 tab is not gone — it is a resumable transcript nobody can find.

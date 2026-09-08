@@ -124,7 +124,7 @@ func TestSettledRootInterface(t *testing.T) {
 			t.Fatalf("root help missing %q:\n%s", want, help)
 		}
 	}
-	for _, retired := range []string{"  open ", "  headless ", "  kill ", "  unkill ", "  killed ", "  resolve ", "  bb ", "chat bb"} {
+	for _, retired := range []string{"  open ", "  kill ", "  unkill ", "  killed ", "  resolve ", "  bb ", "chat bb"} {
 		if strings.Contains(help, retired) {
 			t.Fatalf("root help still advertises %q:\n%s", retired, help)
 		}
@@ -196,8 +196,15 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestKillKilledUnkillCLI(t *testing.T) {
-	jailTest(t)
+	root := jailTest(t)
 	const id = "99999999-9999-4999-8999-999999999999"
+	transcriptPath := filepath.Join(root, "claude", "project", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","cwd":"/work/example","message":{"content":"kill fixture"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +213,7 @@ func TestKillKilledUnkillCLI(t *testing.T) {
 		context.Background(),
 		store.Transcript{
 			UUID:        id,
-			Path:        "/jailed/" + id + ".jsonl",
+			Path:        transcriptPath,
 			PromptCount: 12,
 		},
 	); err != nil {
