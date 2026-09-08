@@ -39,9 +39,14 @@ type LimitAccount struct {
 }
 
 type LimitsSampler struct {
-	Accounts      []LimitAccount
-	Now           func() time.Time
-	TTL           time.Duration
+	Accounts []LimitAccount
+	Now      func() time.Time
+	TTL      time.Duration
+	// CodexTTL overrides TTL for Codex accounts only. Zero means "no
+	// override" — Codex falls back to TTL exactly like before, which is
+	// what the legacy Sample() callers (pfm doctor, the prompt hook) want.
+	// The interactive picker sets it to CodexLiveLimitsTTL.
+	CodexTTL      time.Duration
 	Client        *http.Client
 	Endpoint      string
 	CodexClient   *http.Client
@@ -78,8 +83,20 @@ const defaultLimitsTTL = 3 * time.Minute
 
 // LiveLimitsTTL is the picker cadence for provider-backed limits. The legacy
 // default remains deliberately longer because the prompt hook shares the
-// on-disk cache but does not use this sampler's live cadence.
+// on-disk cache but does not use this sampler's live cadence. Claude keeps
+// this tight cadence because its fetch is the disk-cache-backed HTTP path
+// (fetchClaudeCached) — cheap at 5s.
 const LiveLimitsTTL = 5 * time.Second
+
+// CodexLiveLimitsTTL is Codex's picker cadence for provider-backed limits.
+// Unlike Claude, a Codex fetch execs `codex app-server` and drives a JSON-RPC
+// handshake over it (internal/statusline/process.go), then kills the child —
+// roughly 5 CPU-seconds at ~50% of a core per call. Sharing Claude's 5s
+// LiveLimitsTTL respawned it about every 10s forever on an idle Limits tab
+// (2026-09-08 measurement, devbox: one thread at 70%, `codex app-server`
+// spawned every ~10s). 90s keeps the tab honest without paying that cost on
+// every tick.
+const CodexLiveLimitsTTL = 90 * time.Second
 
 // A last-good payload remains useful through a short provider outage. This is
 // the same stale horizon the prompt hook already applies; after it expires the
@@ -394,7 +411,7 @@ func (sampler *LimitsSampler) Sample(ctx context.Context) ([]AccountLimits, []st
 	warnings := make([]string, 0)
 	for _, account := range sampler.Accounts {
 		key := account.cacheKey()
-		cached, found := sampler.cached(key, now)
+		cached, found := sampler.cached(key, now, account.Engine)
 		if !found {
 			cached = sampler.refresh(ctx, account, key, now)
 		}
@@ -424,7 +441,7 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 			warnings = append(warnings, entry.warnings...)
 			continue
 		}
-		if entry, found := sampler.cached(key, now); found {
+		if entry, found := sampler.cached(key, now, account.Engine); found {
 			limits = append(limits, entry.limits)
 			warnings = append(warnings, entry.warnings...)
 			continue
@@ -442,11 +459,11 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 	return limits, warnings
 }
 
-func (sampler *LimitsSampler) cached(key string, now time.Time) (cachedLimits, bool) {
+func (sampler *LimitsSampler) cached(key string, now time.Time, engine pfmengine.ID) (cachedLimits, bool) {
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	entry, ok := sampler.cache[key]
-	if !ok || entry.when.After(now) || now.Sub(entry.when) >= sampler.ttl() {
+	if !ok || entry.when.After(now) || now.Sub(entry.when) >= sampler.ttlFor(engine) {
 		return cachedLimits{}, false
 	}
 	return cloneCachedLimits(entry), true
@@ -467,6 +484,16 @@ func (sampler *LimitsSampler) ttl() time.Duration {
 		return defaultLimitsTTL
 	}
 	return sampler.TTL
+}
+
+// ttlFor is ttl() narrowed to one engine. Only Codex, and only when the
+// caller opted in via CodexTTL, gets a different horizon than the rest of
+// this sampler — see CodexLiveLimitsTTL.
+func (sampler *LimitsSampler) ttlFor(engine pfmengine.ID) time.Duration {
+	if engine == pfmengine.Codex && sampler.CodexTTL > 0 {
+		return sampler.CodexTTL
+	}
+	return sampler.ttl()
 }
 
 func (sampler *LimitsSampler) refresh(ctx context.Context, account LimitAccount, key string, now time.Time) cachedLimits {
@@ -546,7 +573,7 @@ func (sampler *LimitsSampler) structuralAccount(account LimitAccount) bool {
 }
 
 func (sampler *LimitsSampler) startRefresh(ctx context.Context, account LimitAccount, key string) {
-	if ctx.Err() != nil || !sampler.beginFlight(key) {
+	if ctx.Err() != nil || !sampler.beginFlight(key, account.Engine) {
 		return
 	}
 	go func() {
@@ -555,11 +582,11 @@ func (sampler *LimitsSampler) startRefresh(ctx context.Context, account LimitAcc
 	}()
 }
 
-func (sampler *LimitsSampler) beginFlight(key string) bool {
+func (sampler *LimitsSampler) beginFlight(key string, engine pfmengine.ID) bool {
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	now := sampler.now()
-	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttl() {
+	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttlFor(engine) {
 		return false
 	}
 	if sampler.flights == nil {
@@ -1034,7 +1061,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		return codexUsage{}, time.Time{}, err
 	}
 	if matches && len(codexWindows(record.codexUsage)) > 0 &&
-		cacheFresh(record.FetchedAt, path, now, sampler.ttl()) {
+		cacheFresh(record.FetchedAt, path, now, sampler.ttlFor(pfmengine.Codex)) {
 		return record.codexUsage, confirmedAt, nil
 	}
 	previousUsage, previousFetchedAt := codexUsage{}, (*time.Time)(nil)

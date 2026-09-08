@@ -146,6 +146,9 @@ func runLS(
 		)
 		statsSampler.Limits = pfmstats.NewLimitsSampler(limitAccounts(runtime))
 		statsSampler.Limits.TTL = pfmstats.LiveLimitsTTL
+		// Codex's own fetch execs `codex app-server` (unlike Claude's cheap
+		// disk-cache-backed HTTP path) — see CodexLiveLimitsTTL.
+		statsSampler.Limits.CodexTTL = pfmstats.CodexLiveLimitsTTL
 		scan.Snapshot.StatsSampler = statsSampler
 		scan.Snapshot.CosmosSampler = cosmosSampler{reader: sharedState}
 		refreshContext, refreshCancel := context.WithCancel(ctx)

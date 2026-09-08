@@ -1054,6 +1054,85 @@ func TestLimitsSamplerLiveReturnsIndependentCachedValues(t *testing.T) {
 	}
 }
 
+// TestLimitsSamplerLiveHonorsSeparateCodexTTL pins the split introduced
+// 2026-09-08: Codex's own fetch execs `codex app-server` and drives a
+// JSON-RPC handshake over it (internal/statusline/process.go) — roughly 5
+// CPU-seconds at ~50% of a core per call — while Claude's fetch is the
+// disk-cache-backed HTTP path. Sharing LiveLimitsTTL (5s) between them
+// respawned the Codex process about every 10s forever on an idle Limits tab
+// (devbox measurement). Claude must keep refreshing at its own 5s cadence
+// the whole time; Codex must not be re-invoked again until CodexLiveLimitsTTL
+// (90s) has actually elapsed.
+func TestLimitsSamplerLiveHonorsSeparateCodexTTL(t *testing.T) {
+	var clock atomic.Int64
+	start := time.Unix(1_800_000_000, 0)
+	clock.Store(start.UnixNano())
+	var claudeCalls, codexCalls atomic.Int32
+	ctx := context.Background()
+	sampler := NewLimitsSampler([]LimitAccount{
+		{ID: 51, Engine: pfmengine.Claude, Label: "claude"},
+		{ID: 52, Engine: pfmengine.Codex, Label: "codex"},
+	})
+	sampler.TTL = LiveLimitsTTL
+	sampler.CodexTTL = CodexLiveLimitsTTL
+	sampler.Now = func() time.Time { return time.Unix(0, clock.Load()) }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return liveClaudeUsage(sampler.Now(), float64(claudeCalls.Add(1)%100)), nil
+	}
+	sampler.FetchCodex = func(context.Context, LimitAccount) (codexUsage, error) {
+		used := float64(codexCalls.Add(1) % 100)
+		return codexUsage{
+			PlanType: "pro",
+			RateLimit: &codexRateLimitBucket{
+				LimitID: "codex",
+				PrimaryWindow: &codexRateLimitWindow{
+					UsedPercent: used, LimitWindowSeconds: 604_800,
+					ResetAt: sampler.Now().Add(7 * 24 * time.Hour).Unix(),
+				},
+			},
+		}, nil
+	}
+
+	// t=0: both accounts are cold, so both fetch once.
+	sampler.SampleLive(ctx)
+	waitForCachedWindow(t, sampler, 51, float64(1))
+	waitForCachedWindow(t, sampler, 52, float64(1))
+	if got := claudeCalls.Load(); got != 1 {
+		t.Fatalf("t=0: claude calls=%d, want 1", got)
+	}
+	if got := codexCalls.Load(); got != 1 {
+		t.Fatalf("t=0: codex calls=%d, want 1", got)
+	}
+
+	// The picker's own result poll runs every LiveLimitsTTL (5s) while the
+	// Limits tab is being watched; step past it (6s, matching
+	// TestLimitsSamplerLiveKeepsRefreshingAcrossHours' margin) fourteen
+	// times — 84s total, still short of CodexLiveLimitsTTL (90s). Claude
+	// must refetch on every single step; Codex must not refetch on any of
+	// them.
+	const step = LiveLimitsTTL + time.Second
+	for tick := 1; tick <= 14; tick++ {
+		clock.Store(start.Add(time.Duration(tick) * step).UnixNano())
+		sampler.SampleLive(ctx)
+		waitForCachedWindow(t, sampler, 51, float64((tick+1)%100))
+		if got := claudeCalls.Load(); got != int32(tick+1) {
+			t.Fatalf("tick %d (elapsed %s): claude calls=%d, want %d", tick, time.Duration(tick)*step, got, tick+1)
+		}
+		if got := codexCalls.Load(); got != 1 {
+			t.Fatalf("tick %d (elapsed %s, still under CodexLiveLimitsTTL=%s): codex calls=%d, want 1 (no re-invocation within its TTL)",
+				tick, time.Duration(tick)*step, CodexLiveLimitsTTL, got)
+		}
+	}
+
+	// Cross CodexLiveLimitsTTL: the very next poll must finally refetch Codex.
+	clock.Store(start.Add(CodexLiveLimitsTTL + 2*time.Second).UnixNano())
+	sampler.SampleLive(ctx)
+	waitForCachedWindow(t, sampler, 52, float64(2))
+	if got := codexCalls.Load(); got != 2 {
+		t.Fatalf("after CodexLiveLimitsTTL elapsed: codex calls=%d, want 2", got)
+	}
+}
+
 func TestLimitsSamplerLiveKeepsRefreshingAcrossHours(t *testing.T) {
 	var clock atomic.Int64
 	start := time.Unix(1_800_000_000, 0)
