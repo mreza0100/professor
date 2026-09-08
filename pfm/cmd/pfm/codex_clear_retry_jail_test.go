@@ -182,7 +182,11 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("change fixture identity: %v: %s", err, output)
 	}
-	deadline := time.After(10 * time.Second)
+	// fleetRefreshParkPollInterval widened from 2s to 10s (2026-09-08 —
+	// see its doc comment), so the parked poll that observes this clear may
+	// not fire for a full 10s; give it enough headroom past that to stay
+	// stable rather than pinned to the interval itself.
+	deadline := time.After(fleetRefreshParkPollInterval + 15*time.Second)
 	for {
 		select {
 		case snapshot, ok := <-updates:
