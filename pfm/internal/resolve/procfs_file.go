@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,14 +30,18 @@ func (proc fileProcFS) Stat(pid int) (ProcStat, error) {
 	if err != nil {
 		return ProcStat{}, err
 	}
-	closeParen := strings.LastIndex(string(content), ") ")
+	raw := string(content)
+	closeParen := strings.LastIndex(raw, ") ")
 	if closeParen < 0 {
-		return ProcStat{}, os.ErrInvalid
+		return ProcStat{}, fmt.Errorf("malformed proc stat for pid %d: missing closing command delimiter", pid)
 	}
-	fields := strings.Fields(string(content[closeParen+2:]))
+	fields := strings.Fields(raw[closeParen+2:])
+	if len(fields) < 2 {
+		return ProcStat{}, fmt.Errorf("malformed proc stat for pid %d: expected parent field, got %d trailing fields", pid, len(fields))
+	}
 	parent, err := strconv.Atoi(fields[1])
 	if err != nil {
-		return ProcStat{}, err
+		return ProcStat{}, fmt.Errorf("malformed proc stat for pid %d: invalid parent pid %q: %w", pid, fields[1], err)
 	}
 	return ProcStat{ParentPID: parent}, nil
 }

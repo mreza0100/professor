@@ -106,7 +106,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 0
 	}
 	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.paths.TmuxDir)}
-	convergeTmuxTitles(
+	_, titlesUnverified := convergeTmuxTitles(
 		ctx,
 		titlesTmux,
 		liveSockets(live.Panes),
@@ -114,10 +114,15 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		stdout,
 		stderr,
 	)
+	if titlesUnverified != 0 {
+		fmt.Fprintf(stdout, "tmux titles unverified: %d\n", titlesUnverified)
+	}
 	converged, unverified := verifyRenames(ctx, runtime, live.Renames, stderr)
 	fmt.Fprintf(stdout, "windows converged: %d\n", converged)
 	if unverified != 0 {
 		fmt.Fprintf(stdout, "windows unverified: %d\n", unverified)
+	}
+	if titlesUnverified != 0 || unverified != 0 {
 		return 1
 	}
 	return 0
@@ -213,20 +218,22 @@ func convergeTmuxTitles(
 	sockets []string,
 	titles pfmconfig.TmuxTitles,
 	stdout, stderr io.Writer,
-) int {
+) (converged, unverified int) {
 	if !titles.Enabled {
-		return 0
+		return 0, 0
 	}
-	converged := 0
 	for _, socket := range sockets {
-		actualTitles, err := tmux.ShowGlobalOption(ctx, socket, "set-titles")
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles: %v\n", socket, err)
-			continue
+		actualTitles, titlesErr := tmux.ShowGlobalOption(ctx, socket, "set-titles")
+		if titlesErr != nil {
+			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles: %v\n", socket, titlesErr)
+			unverified++
 		}
-		actualString, err := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles-string: %v\n", socket, err)
+		actualString, stringErr := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
+		if stringErr != nil {
+			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles-string: %v\n", socket, stringErr)
+			unverified++
+		}
+		if titlesErr != nil || stringErr != nil {
 			continue
 		}
 		titlesOff := actualTitles != "on"
@@ -234,6 +241,30 @@ func convergeTmuxTitles(
 		if titlesOff || stringWrong {
 			if err := tmux.ApplyGlobalOptions(ctx, socket, titles.Options()); err != nil {
 				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: convergence failed: %v\n", socket, err)
+				unverified++
+				continue
+			}
+			verifiedTitles, verifyTitlesErr := tmux.ShowGlobalOption(ctx, socket, "set-titles")
+			if verifyTitlesErr != nil {
+				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not verify set-titles after apply: %v\n", socket, verifyTitlesErr)
+				unverified++
+				continue
+			}
+			verifiedString, verifyStringErr := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
+			if verifyStringErr != nil {
+				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not verify set-titles-string after apply: %v\n", socket, verifyStringErr)
+				unverified++
+				continue
+			}
+			if verifiedTitles != "on" {
+				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: set-titles read back %q after apply, wanted %q\n", socket, verifiedTitles, "on")
+				unverified++
+			}
+			if verifiedString != pfmconfig.TmuxTitlesString {
+				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: set-titles-string read back %q after apply, wanted %q\n", socket, verifiedString, pfmconfig.TmuxTitlesString)
+				unverified++
+			}
+			if verifiedTitles != "on" || verifiedString != pfmconfig.TmuxTitlesString {
 				continue
 			}
 			switch {
@@ -258,8 +289,9 @@ func convergeTmuxTitles(
 		// correct, so a terminal caching a stale title still repaints.
 		if err := tmux.NudgeTitlesString(ctx, socket, pfmconfig.TmuxTitlesString); err != nil {
 			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: %v\n", socket, err)
+			unverified++
 		}
 	}
 	fmt.Fprintf(stdout, "tmux titles converged: %d\n", converged)
-	return converged
+	return converged, unverified
 }

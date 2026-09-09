@@ -691,6 +691,14 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps
 				warnings++
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s timeout error=%s — the binary resolved and was executed but answered nothing within the bound; unverified, no fault established\n", entry.Name, result.Path, result.Error)
+		case deps.StateCancelled:
+			// The caller stopped the probe before it answered. Keep the required
+			// dependency warning arithmetic unchanged, but name the parent context
+			// as the cause rather than diagnosing the resolved binary.
+			if entry.Required {
+				warnings++
+			}
+			fmt.Fprintf(stdout, "doctor: dep %s path=%s cancelled error=%s — probe stopped by its caller; unverified, no fault established\n", entry.Name, result.Path, result.Error)
 		case deps.StateOK:
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s", entry.Name, result.Path)
 			if result.Version != "" {

@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
@@ -71,6 +73,169 @@ func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	if results[1].State != StateBroken {
 		t.Fatalf("broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout", results[1].State, results[1].Error)
 	}
+}
+
+func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
+	directory := t.TempDir()
+	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	t.Setenv("PATH", directory)
+	entry := Entry{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}
+
+	t.Run("cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		resultCh := make(chan Result, 1)
+		go func() {
+			resultCh <- Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+		}()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		result := <-resultCh
+		if result.State != StateCancelled {
+			t.Fatalf("state=%s error=%q, want StateCancelled", result.State, result.Error)
+		}
+		if result.Error != "cancelled by parent context" {
+			t.Fatalf("error=%q, want parent cancellation provenance", result.Error)
+		}
+	})
+
+	t.Run("parent deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		result := Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+		if result.State != StateCancelled {
+			t.Fatalf("state=%s error=%q, want StateCancelled", result.State, result.Error)
+		}
+		if result.Error != "parent context deadline exceeded before probe timeout" {
+			t.Fatalf("error=%q, want parent deadline provenance", result.Error)
+		}
+	})
+}
+
+func TestSelfDoctorParentStopsRemainCancelledInHelpAndSummary(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      string
+		selfDoctor []string
+	}{
+		{name: "help cancellation", phase: "help", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "help deadline", phase: "help", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "summary cancellation", phase: "summary", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "summary deadline", phase: "summary", selfDoctor: []string{"doctor", "--summary"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			marker := filepath.Join(directory, "phase-ready")
+			t.Setenv("PROBE_PHASE", test.phase)
+			t.Setenv("PROBE_PHASE_MARKER", marker)
+			writeProbeStub(t, directory, "engine", `
+if [ "$1" = "--version" ]; then printf 'engine-cli 1.2.3\n'; exit 0; fi
+if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then
+  if [ "$PROBE_PHASE" = "help" ]; then : > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30; fi
+  printf 'usage: engine doctor\n'; exit 0
+fi
+if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then
+  if [ "$PROBE_PHASE" = "summary" ]; then : > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30; fi
+  printf 'healthy\n'; exit 0
+fi
+exit 2`)
+			t.Setenv("PATH", directory)
+			entry := Entry{
+				Name: "engine", Command: "engine",
+				VersionArgs: []string{"--version"}, Parse: firstVersion,
+				SelfDoctorArgs: test.selfDoctor,
+			}
+
+			var (
+				parent   context.Context
+				cancel   func()
+				deadline *deferredDeadlineContext
+			)
+			if strings.HasSuffix(test.name, "deadline") {
+				deadline = newDeferredDeadlineContext()
+				parent = deadline
+				cancel = deadline.expire
+			} else {
+				var cancelContext context.CancelFunc
+				parent, cancelContext = context.WithCancel(context.Background())
+				cancel = cancelContext
+			}
+			defer cancel()
+
+			resultCh := make(chan Result, 1)
+			go func() {
+				resultCh <- Probe(parent, []Entry{entry}, ProbeOptions{
+					GOOS: "linux", Timeout: 2 * time.Second, SelfDoctorTimeout: 2 * time.Second,
+				})[0]
+			}()
+			waitForProbePhaseMarker(t, marker)
+			cancel()
+			result := <-resultCh
+			if result.Version != "1.2.3" {
+				t.Fatalf("version=%q state=%s error=%q, want version probe to pass before %s stop", result.Version, result.State, result.Error, test.phase)
+			}
+			if result.State != StateCancelled || result.SelfDoctor != "cancelled" {
+				t.Fatalf("result=%#v, want StateCancelled/SelfDoctor=cancelled", result)
+			}
+			wantError := "cancelled by parent context"
+			if strings.HasSuffix(test.name, "deadline") {
+				wantError = "parent context deadline exceeded before probe timeout"
+			}
+			if result.Error != wantError {
+				t.Fatalf("error=%q, want %q", result.Error, wantError)
+			}
+		})
+	}
+}
+
+// deferredDeadlineContext lets this test release a parent deadline only after
+// the version probe and the selected self-doctor phase have reached the marker.
+// A short real timeout would race fixture startup and could fail before the
+// test reaches the phase whose provenance it is meant to pin.
+type deferredDeadlineContext struct {
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newDeferredDeadlineContext() *deferredDeadlineContext {
+	return &deferredDeadlineContext{done: make(chan struct{})}
+}
+
+func (ctx *deferredDeadlineContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (ctx *deferredDeadlineContext) Done() <-chan struct{} { return ctx.done }
+
+func (ctx *deferredDeadlineContext) Err() error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.err
+}
+
+func (ctx *deferredDeadlineContext) Value(any) any { return nil }
+
+func (ctx *deferredDeadlineContext) expire() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if ctx.err != nil {
+		return
+	}
+	ctx.err = context.DeadlineExceeded
+	close(ctx.done)
+}
+
+func waitForProbePhaseMarker(t *testing.T, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat probe phase marker %q: %v", marker, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("probe phase marker %q was not created within 5s", marker)
 }
 
 func TestProbePlatformAndHarvestFiltering(t *testing.T) {

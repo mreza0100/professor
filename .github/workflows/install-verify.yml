@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git tmux zsh
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git tmux zsh jq python3
 
       - name: Check out the repository
         uses: actions/checkout@v7.0.1
@@ -33,6 +33,9 @@ jobs:
         with:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
+
+      - name: Verify refresh scope with system Bash
+        run: python3 scripts/test-refresh-scope.py
 
       - name: Run serial installer e2e
         shell: bash
@@ -64,7 +67,10 @@ jobs:
           cache-dependency-path: pfm/go.sum
 
       - name: Install e2e tools
-        run: brew install tmux
+        run: brew install tmux jq
+
+      - name: Verify refresh scope with system Bash
+        run: python3 scripts/test-refresh-scope.py
 
       - name: Verify native scheduler isolation and account migration
         env:

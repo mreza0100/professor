@@ -248,6 +248,29 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 	}
 }
 
+func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
+	saved := dependencyProbeOverride
+	t.Cleanup(func() { dependencyProbeOverride = saved })
+	entry := deps.Entry{Name: "tmux", Required: true}
+	dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+		return []deps.Result{{
+			Entry: entry, State: deps.StateCancelled, Path: "/fixture/tmux",
+			Error: "cancelled by parent context",
+		}}
+	}
+	var output bytes.Buffer
+	warnings := printDependencyDoctor(context.Background(), &output, []deps.Entry{entry}, deps.ProbeOptions{})
+	if warnings != 1 {
+		t.Fatalf("warnings=%d, want 1 for a required unanswered probe\n%s", warnings, output.String())
+	}
+	if want := "doctor: dep tmux path=/fixture/tmux cancelled error=cancelled by parent context — probe stopped by its caller; unverified, no fault established"; !strings.Contains(output.String(), want) {
+		t.Fatalf("output=%q, want caller cancellation row %q", output.String(), want)
+	}
+	if strings.Contains(output.String(), "broken") {
+		t.Fatalf("caller cancellation must not be diagnosed as broken:\n%s", output.String())
+	}
+}
+
 func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing.T) {
 	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
 	t.Cleanup(func() {

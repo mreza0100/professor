@@ -12,6 +12,8 @@ set -euo pipefail
 # release cannot proceed and cannot re-baseline until each one is ruled — delete the
 # template file AND its refresh-map.json entry, or remap it to the source's new path.
 # Re-baselining around a missing source is what keeps a zombie template alive forever.
+# ENUMERATION-FAILED exits 1 when a source glob cannot be read or expanded;
+# an incomplete scan never emits a clean scope summary.
 
 # `ledgers` is the other half of a release's scope, and it is mechanical for the
 # same reason `scan` is. A pending `.professor/release.md` bullet in a LINKED
@@ -150,8 +152,8 @@ MANIFEST_FILE="$PROJECT_ROOT/.professor/manifest.json"
 # and a leading ~/ (to $HOME) in a map path/glob string.
 # Returns 1 (empty output, one stderr note) when a {project:ROLE} cannot resolve —
 # manifest absent or key null. Callers classify that: scan/regen count it
-# MISSING-SOURCE (still BLOCKING via MISSING_SOURCE_EXIT); ignore/glob entries
-# match nothing. A hard exit here would kill the whole scan at the first
+# MISSING-SOURCE (still BLOCKING via MISSING_SOURCE_EXIT); glob entries fail
+# enumeration and unresolved ignore entries match nothing. A hard exit here would kill the whole scan at the first
 # unresolvable source and report nothing about the rest.
 resolve_path() {
   local resolved="$1"
@@ -167,7 +169,8 @@ resolve_path() {
       echo "refresh-scope: manifest .interview.projects.$role is missing/null" >&2
       return 1
     }
-    resolved="${resolved//\{project:$role\}/$val}"
+    local token="{project:$role}"
+    resolved="${resolved%%"$token"*}${val}${resolved#*"$token"}"
   done
   case "$resolved" in
     "~/"*) resolved="${HOME}/${resolved#\~/}" ;;
@@ -197,9 +200,9 @@ is_ignored() {
 }
 
 list_glob_files() {
-  local pattern resolved prefix
+  local pattern resolved prefix root found relative
   pattern="$1"
-  resolved="$(resolve_path "$pattern")" || return 0
+  resolved="$(resolve_path "$pattern")" || return 1
   # bash 3.2 — the macOS system bash — has no globstar, and without it `**`
   # silently degrades to a single-level `*`: a recursive glob would then report
   # only its top directory and every deeper file would read as "nothing there".
@@ -210,11 +213,21 @@ list_glob_files() {
   case "$resolved" in
     */'**')
       prefix="${resolved%/'**'}"
-      [[ -d "$PROJECT_ROOT/$prefix" ]] || return 0
-      (
-        cd "$PROJECT_ROOT/$prefix" &&
-          find . -mindepth 1 -name '.*' -prune -o -type f -print
-      ) | sed "s|^\./|${prefix}/|"
+      if [[ "$prefix" == *'**'* ]]; then
+        printf 'UNSUPPORTED-GLOB %s — only one trailing "/**" expands under bash %s\n' \
+          "$pattern" "$BASH_VERSION" >&2
+        return 1
+      fi
+      root="$(abspath_under_project "$prefix")"
+      [[ -d "$root" ]] || return 0
+      if ! found="$(cd "$root" && find . -mindepth 1 -name '.*' -prune -o -type f -print)"; then
+        printf 'ENUMERATION-FAILED %s — recursive source scan failed\n' "$pattern" >&2
+        return 1
+      fi
+      while IFS= read -r relative; do
+        [[ -z "$relative" ]] && continue
+        printf '%s/%s\n' "$prefix" "${relative#./}"
+      done <<< "$found"
       return 0
       ;;
     *'**'*)
@@ -226,8 +239,9 @@ list_glob_files() {
   (
     cd "$PROJECT_ROOT"
     shopt -s nullglob
+    IFS=$'\n'
     for f in $resolved; do
-      [[ -f "$f" ]] && printf '%s\n' "$f"
+      if [[ -f "$f" ]]; then printf '%s\n' "$f"; fi
     done
   )
 }
@@ -295,15 +309,29 @@ scan() {
   done < <(sort -u "$mapped_sources_file")
   rm -f "$mapped_sources_file"
 
+  # Capture every enumerator status in this shell. A process substitution
+  # loses its producer's exit code and can turn a failed scan into empty scope.
+  local source_globs glob glob_files all_glob_files=""
+  if ! source_globs="$(jq -r '.source_globs[]? // empty' "$MAP_PATH")"; then
+    echo "refresh-scope: ENUMERATION-FAILED — cannot read source_globs" >&2
+    return 1
+  fi
+  while IFS= read -r glob; do
+    [[ -z "$glob" ]] && continue
+    if ! glob_files="$(list_glob_files "$glob")"; then
+      printf 'refresh-scope: ENUMERATION-FAILED %s — scope is incomplete\n' "$glob" >&2
+      return 1
+    fi
+    [[ -z "$glob_files" ]] || all_glob_files+="$glob_files"$'\n'
+  done <<< "$source_globs"
+  if ! all_glob_files="$(printf '%s' "$all_glob_files" | sort -u)"; then
+    echo "refresh-scope: ENUMERATION-FAILED — cannot sort source paths" >&2
+    return 1
+  fi
   ALL_GLOB_FILES=()
   while IFS= read -r gf_line; do
-    ALL_GLOB_FILES+=("$gf_line")
-  done < <(
-    while IFS= read -r glob; do
-      [[ -z "$glob" ]] && continue
-      list_glob_files "$glob"
-    done < <(jq -r '.source_globs[]? // empty' "$MAP_PATH") | sort -u
-  )
+    [[ -z "$gf_line" ]] || ALL_GLOB_FILES+=("$gf_line")
+  done <<< "$all_glob_files"
 
   for f in ${ALL_GLOB_FILES[@]+"${ALL_GLOB_FILES[@]}"}; do
     local is_mapped=0 ms

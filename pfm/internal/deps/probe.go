@@ -32,6 +32,10 @@ const (
 	StateMissing State = "missing"
 	StateBroken  State = "broken"
 	StateSkipped State = "skipped"
+	// StateCancelled is a probe stopped by its caller's context. It is an
+	// unanswered dependency check, distinct from both a broken command and a
+	// child timeout that this package imposed itself.
+	StateCancelled State = "cancelled"
 	// StateTimeout is a version probe that outran its bound: the binary
 	// resolved, it was executed, and it answered nothing in time. That is an
 	// unanswered question, not a diagnosis — a loaded box, a cold binary, or a
@@ -42,7 +46,7 @@ const (
 	StateTimeout State = "timeout"
 )
 
-// Result is one dependency's three-state probe result.
+// Result is one dependency's probe result.
 type Result struct {
 	Entry      Entry
 	State      State
@@ -138,9 +142,19 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			result.VerboseErr = verboseErr.Error()
 		}
 		if runErr != nil {
-			if errors.Is(runErr, context.DeadlineExceeded) {
-				result.State = StateTimeout
-				result.Error = fmt.Sprintf("timeout (%s)", effectiveTimeout(options.Timeout))
+			if termination, ok := runErr.(probeContextError); ok {
+				if termination.ownTimeout {
+					result.State = StateTimeout
+					result.Error = fmt.Sprintf("timeout (%s)", effectiveTimeout(options.Timeout))
+				} else {
+					result.State = StateCancelled
+					result.Error = parentContextError(termination.err)
+				}
+				return result
+			}
+			if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+				result.State = StateCancelled
+				result.Error = parentContextError(runErr)
 				return result
 			}
 			result.State = StateBroken
@@ -168,6 +182,9 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			result.VerboseErr = err.Error()
 		}
 		switch {
+		case result.SelfDoctor == "cancelled":
+			result.State = StateCancelled
+			result.Error = selfDoctorRaw
 		case result.SelfDoctor == "broken":
 			result.State = StateBroken
 			if selfDoctorRaw != "" {
@@ -186,7 +203,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 }
 
 // probeSelfDoctor returns the self-doctor status label, the raw first output
-// line for a genuine ("broken") failure so the caller can quote it, and any
+// line for a genuine ("broken") failure or parent-stop reason, and any
 // verbose-write error. The --help probe's own timeout still reads as
 // "broken" — a self-doctor that cannot even answer --help within the bound
 // is unsupported or hung, not a legitimate slow summary. Only the summary
@@ -200,6 +217,9 @@ func probeSelfDoctor(ctx context.Context, path string, entry Entry, verboseDir s
 		return "", "", err
 	}
 	if helpErr != nil {
+		if termination, ok := helpErr.(probeContextError); ok && !termination.ownTimeout {
+			return "cancelled", parentContextError(termination.err), nil
+		}
 		if errors.Is(helpErr, context.DeadlineExceeded) {
 			return "broken", "", nil
 		}
@@ -214,6 +234,9 @@ func probeSelfDoctor(ctx context.Context, path string, entry Entry, verboseDir s
 		return "", "", writeErr
 	}
 	if err != nil {
+		if termination, ok := err.(probeContextError); ok && !termination.ownTimeout {
+			return "cancelled", parentContextError(termination.err), nil
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf("timeout (%s)", timeout), "", nil
 		}
@@ -272,9 +295,32 @@ func boundedOutputWithEnvironment(parent context.Context, timeout time.Duration,
 	}
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
-		return output, ctx.Err()
+		if parentErr := parent.Err(); parentErr != nil {
+			return output, probeContextError{err: parentErr}
+		}
+		return output, probeContextError{err: context.DeadlineExceeded, ownTimeout: true}
 	}
 	return output, err
+}
+
+type probeContextError struct {
+	err        error
+	ownTimeout bool
+}
+
+func (err probeContextError) Error() string { return err.err.Error() }
+
+func (err probeContextError) Unwrap() error { return err.err }
+
+func parentContextError(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled by parent context"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "parent context deadline exceeded before probe timeout"
+	default:
+		return fmt.Sprintf("probe stopped by parent context: %v", err)
+	}
 }
 
 // terminalEnvironment gives interactive engine doctors a real terminal

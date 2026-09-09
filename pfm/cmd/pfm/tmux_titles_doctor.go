@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
 )
@@ -23,6 +19,7 @@ import (
 const (
 	titlesPfmOwned  = "pfm-owned"
 	titlesHostOwned = "host-owned"
+	titlesDivergent = "divergent"
 )
 
 // printTmuxTitlesDoctor REPORTS which side owns the outer terminal's title on
@@ -82,11 +79,11 @@ func printTmuxTitlesDoctor(
 	}
 	divergent := 0
 	for _, socket := range sockets {
-		state, detail := readTmuxTitlesState(ctx, resolved, socket)
+		state, detail := readTmuxTitlesState(ctx, client, socket, machine.Tmux.Titles.Enabled)
 		// A server whose state could not be read is neither a match nor a
 		// divergence — it is an unanswered question, and claiming either
 		// answer for it would be a guess reported as a fact.
-		if state != titlesPfmOwned && state != titlesHostOwned {
+		if state != titlesPfmOwned && state != titlesHostOwned && state != titlesDivergent {
 			fmt.Fprintf(stdout, "doctor: tmux titles %s=%s (%s)\n", socket, state, detail)
 			continue
 		}
@@ -108,35 +105,40 @@ func printTmuxTitlesDoctor(
 	fmt.Fprintf(stdout, "doctor: tmux titles divergent=%d\n", divergent)
 }
 
-// readTmuxTitlesState asks one live server for its set-titles value. It is
-// read-only by construction: show-options is the only tmux verb it runs, and
-// a socket that will not answer is reported unknown rather than assumed.
+// readTmuxTitlesState asks one live server for the options that make up the
+// title policy. A PFM-owned policy includes both set-titles and the canonical
+// set-titles-string. A host-owned policy intentionally checks only set-titles:
+// disabled mode leaves the host's string untouched, so a stale PFM string is
+// not evidence that pfm has taken ownership.
 func readTmuxTitlesState(
 	ctx context.Context,
-	resolved paths.Values,
+	tmux gather.CommandTmux,
 	socket string,
+	pfmEnabled bool,
 ) (state, detail string) {
 	commandContext, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	command := exec.CommandContext(
-		commandContext,
-		deps.Executable("tmux"),
-		"-S", filepath.Join(resolved.TmuxDir, socket),
-		"show-options", "-g", "set-titles",
-	)
-	command.Env = append(os.Environ(), "TMUX=")
-	output, err := command.Output()
+	actualTitles, err := tmux.ShowGlobalOption(commandContext, socket, "set-titles")
 	if err != nil {
 		return "unknown", fmt.Sprintf("show-options failed: %v", err)
 	}
-	value := strings.TrimSpace(string(output))
-	// tmux prints the option name with its value, and omits the whole line when
-	// the option sits at its default — an absent line is tmux's default, off.
-	if value == "" {
-		value = "set-titles off"
+	if !pfmEnabled {
+		if actualTitles == "off" {
+			return titlesHostOwned, "set-titles off"
+		}
+		return titlesDivergent, fmt.Sprintf("set-titles %s; expected set-titles off", actualTitles)
 	}
-	if strings.HasSuffix(value, " on") {
-		return titlesPfmOwned, value
+	actualString, err := tmux.ShowGlobalOption(commandContext, socket, "set-titles-string")
+	if err != nil {
+		return "unknown", fmt.Sprintf("show-options failed: %v", err)
 	}
-	return titlesHostOwned, value
+	if actualTitles == "on" && actualString == config.TmuxTitlesString {
+		// Keep the ownership row compact; the string is still read and compared
+		// above, and any drift is exposed in the divergent detail below.
+		return titlesPfmOwned, "set-titles on"
+	}
+	return titlesDivergent, fmt.Sprintf(
+		"set-titles %s; set-titles-string %q; expected set-titles on and set-titles-string %q",
+		actualTitles, actualString, config.TmuxTitlesString,
+	)
 }
