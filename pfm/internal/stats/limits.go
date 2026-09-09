@@ -39,9 +39,14 @@ type LimitAccount struct {
 }
 
 type LimitsSampler struct {
-	Accounts      []LimitAccount
-	Now           func() time.Time
-	TTL           time.Duration
+	Accounts []LimitAccount
+	Now      func() time.Time
+	TTL      time.Duration
+	// CodexTTL overrides TTL for Codex accounts only. Zero means "no
+	// override" — Codex falls back to TTL exactly like before, which is
+	// what the legacy Sample() callers (pfm doctor, the prompt hook) want.
+	// The interactive picker sets it to CodexLiveLimitsTTL.
+	CodexTTL      time.Duration
 	Client        *http.Client
 	Endpoint      string
 	CodexClient   *http.Client
@@ -53,8 +58,19 @@ type LimitsSampler struct {
 	mu           sync.Mutex
 	cache        map[string]cachedLimits
 	ackAttempted map[string]bool
-	flights      map[string]struct{}
+	// ackFailure remembers WHY an account's one credential probe failed, so a
+	// later refresh — which the once-per-account guard stops from probing
+	// again — can still say it rather than decaying to the bare "credentials
+	// file missing" that sends the reader hunting for a file a keychain host
+	// is never supposed to have.
+	ackFailure map[string]string
+	flights    map[string]struct{}
 }
+
+// errAckAlreadyAttempted marks the guard's refusal, which is bookkeeping
+// rather than a diagnosis: it must never be reported as the reason an account
+// is blank.
+var errAckAlreadyAttempted = errors.New("credential refresh already attempted")
 
 type cachedLimits struct {
 	limits   AccountLimits
@@ -69,7 +85,14 @@ type statuslineClaudeLimits struct {
 	SevenDayUsed     int64  `json:"seven_day_used"`
 	FiveHourResetsAt int64  `json:"five_hour_resets_at"`
 	SevenDayResetsAt int64  `json:"seven_day_resets_at"`
-	ConfirmedAt      int64  `json:"ts"`
+	// The Fable window is model-SCOPED: the harness reports it inside its
+	// `limits` array, never as a flat top-level window, so it has to be
+	// carried across this snapshot explicitly or it cannot reach a host whose
+	// only limits source IS this snapshot. Absent in a snapshot written by an
+	// older build, which reads back as a zero reset and is skipped.
+	FableUsed     int64 `json:"fable_used"`
+	FableResetsAt int64 `json:"fable_resets_at"`
+	ConfirmedAt   int64 `json:"ts"`
 }
 
 // defaultLimitsTTL is the legacy freshness interval for the in-memory and
@@ -78,8 +101,20 @@ const defaultLimitsTTL = 3 * time.Minute
 
 // LiveLimitsTTL is the picker cadence for provider-backed limits. The legacy
 // default remains deliberately longer because the prompt hook shares the
-// on-disk cache but does not use this sampler's live cadence.
+// on-disk cache but does not use this sampler's live cadence. Claude keeps
+// this tight cadence because its fetch is the disk-cache-backed HTTP path
+// (fetchClaudeCached) — cheap at 5s.
 const LiveLimitsTTL = 5 * time.Second
+
+// CodexLiveLimitsTTL is Codex's picker cadence for provider-backed limits.
+// Unlike Claude, a Codex fetch execs `codex app-server` and drives a JSON-RPC
+// handshake over it (internal/statusline/process.go), then kills the child —
+// roughly 5 CPU-seconds at ~50% of a core per call. Sharing Claude's 5s
+// LiveLimitsTTL respawned it about every 10s forever on an idle Limits tab
+// (2026-09-08 measurement, devbox: one thread at 70%, `codex app-server`
+// spawned every ~10s). 90s keeps the tab honest without paying that cost on
+// every tick.
+const CodexLiveLimitsTTL = 90 * time.Second
 
 // A last-good payload remains useful through a short provider outage. This is
 // the same stale horizon the prompt hook already applies; after it expires the
@@ -132,11 +167,11 @@ func (sampler *LimitsSampler) now() time.Time {
 // the SAME acct-<id>.json the UserPromptSubmit hook owns
 // (usagehook.DefaultCacheDir/CachePath), so a second `pfm ls` opened moments
 // after the first — or opened right after the hook already ran — renders
-// from that file instead of paying for its own request. A record whose
-// stored ConfigDir doesn't match this account's is never trusted: an empty
-// ConfigDir means the hook wrote it (hook cache files carry no identity, and
-// are always trusted), a mismatched one means a DIFFERENT account is
-// occupying this account-number slot and the cached payload is not ours.
+// from that file instead of paying for its own request. A record is trusted
+// only when its stored ConfigDir matches this account's physical config
+// directory; a blank identity is a legacy unbound record and is rejected,
+// while a mismatch means a different seat has occupied this account-number
+// slot and the cached payload is not ours.
 func (sampler *LimitsSampler) fetchClaude(
 	ctx context.Context,
 	account LimitAccount,
@@ -231,6 +266,26 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 	if err := setWindow(&usage.SevenDay, latest.SevenDayUsed, latest.SevenDayResetsAt); err != nil {
 		return usagehook.Usage{}, time.Time{}, false, err
 	}
+	// Fable re-enters through the scoped `limits` array rather than a flat
+	// field, because that array is the one shape usagehook.fableWindow reads —
+	// rebuilding the selector here would be a second opinion on which scoped
+	// limit is the Fable one, and the two would drift.
+	if latest.FableResetsAt > sampler.now().Unix() {
+		if latest.FableUsed < 0 || latest.FableUsed > 100 {
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota Fable utilization %d is outside 0..100", latest.FableUsed,
+			)
+		}
+		percent := float64(latest.FableUsed)
+		scoped := usagehook.ScopedLimit{
+			Kind:     "weekly_scoped",
+			Percent:  &percent,
+			ResetsAt: time.Unix(latest.FableResetsAt, 0).UTC().Format(time.RFC3339),
+			IsActive: true,
+		}
+		scoped.Scope.Model.DisplayName = "Fable"
+		usage.Limits = append(usage.Limits, scoped)
+	}
 	if len(usageWindows(usage, sampler.now())) == 0 {
 		return usagehook.Usage{}, time.Time{}, false, nil
 	}
@@ -272,18 +327,39 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	now := sampler.now()
 	path := usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID)
 	record, readErr := usagehook.ReadCacheRecord(path)
-	matches := readErr == nil && (record.ConfigDir == "" || record.ConfigDir == account.ConfigDir)
+	matches := readErr == nil && record.MatchesConfigDir(account.ConfigDir)
 	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && reusableClaudeUsage(record.Usage, now) &&
 		now.Sub(confirmedAt) <= maxStaleLimitsAge
+	// This cache is SHARED by every pfm process on the host, so a backoff
+	// written by a peer — another picker, an MCP server, a build that predates
+	// this one — is a normal condition rather than an anomaly. The condition is
+	// re-checked from the FILESYSTEM (free, no request) rather than read out of
+	// the record's message, which is prose and varies by platform.
+	// "Absent" here means no credential we could spend in EITHER source — the
+	// file or the OS keychain — and also covers a signed-out one, because a
+	// peer's backoff must not blank a card whose only real repair is a fallback
+	// or an interactive login.
+	credentialsAbsent := usagehook.IsCredentialUnavailable(usagehook.CredentialAvailable(ctx, account.ConfigDir))
 	if matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
 		err := errors.New(record.Backoff.Message)
 		if !bypassCredentialBackoff || !needsCredentialRefresh(err) {
+			// A backoff carrying usable windows still serves them, whatever
+			// wrote it — a 429's cached quota is exactly as good here as
+			// anywhere else.
 			if staleUsable && staleEligible(err) {
 				return record.Usage, confirmedAt, err
 			}
-			return usagehook.Usage{}, time.Time{}, err
+			// An EMPTY replay is the one that blanks the card, and a revived
+			// record cannot carry the os.ErrNotExist sentinel FetchClaude gates
+			// its statusline fallback on (it comes back as a flat errors.New).
+			// With no credentials file the live path below costs a local stat
+			// and returns that sentinel properly wrapped, so fall through to it
+			// rather than returning nothing.
+			if !credentialsAbsent {
+				return usagehook.Usage{}, time.Time{}, err
+			}
 		}
 	}
 	if !bypassCredentialBackoff && matches && reusableClaudeUsage(record.Usage, now) &&
@@ -311,6 +387,19 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 		// retry. Recording backoff here would block that retry with the failure
 		// it is specifically intended to repair.
 		if needsCredentialRefresh(err) {
+			return usagehook.Usage{}, time.Time{}, err
+		}
+		// An ABSENT credentials file is a local, network-free condition — the
+		// normal shape wherever Claude keeps its credentials in the OS keychain
+		// — and it is exactly the case fetchClaudeStatusline covers. A backoff
+		// buys nothing here (no request was made, so there is no endpoint to
+		// spare) and costs the fallback: the replay path above revives a record
+		// as errors.New(record.Backoff.Message), and a flat string error cannot
+		// satisfy the errors.Is(err, os.ErrNotExist) that FetchClaude gates the
+		// statusline fallback on. Recording one therefore blanks the Limits card
+		// for the whole backoff window while a fresh, identity-matched quota
+		// snapshot sits on disk.
+		if usagehook.IsCredentialUnavailable(err) {
 			return usagehook.Usage{}, time.Time{}, err
 		}
 		message, retryAfter := backoffFor(err, now)
@@ -343,10 +432,8 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	return usage, fetchedAt, nil
 }
 
-// cacheFresh reports whether a cached payload is still inside ttl. FetchedAt
-// is nil for a bare, hook-written file (usage-hook's own refresh() has never
-// stamped one); freshness then falls back to the file's own mtime, which is
-// exactly the signal the hook's own cacheAge() uses.
+// cacheFresh reports whether a cached payload is still inside ttl. Older
+// identity-bound records without FetchedAt use the file's mtime.
 func cacheFresh(fetchedAt *time.Time, path string, now time.Time, ttl time.Duration) bool {
 	confirmedAt, ok := cacheConfirmedAt(fetchedAt, path)
 	return ok && !confirmedAt.After(now) && now.Sub(confirmedAt) < ttl
@@ -394,7 +481,7 @@ func (sampler *LimitsSampler) Sample(ctx context.Context) ([]AccountLimits, []st
 	warnings := make([]string, 0)
 	for _, account := range sampler.Accounts {
 		key := account.cacheKey()
-		cached, found := sampler.cached(key, now)
+		cached, found := sampler.cached(key, now, account.Engine)
 		if !found {
 			cached = sampler.refresh(ctx, account, key, now)
 		}
@@ -424,7 +511,7 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 			warnings = append(warnings, entry.warnings...)
 			continue
 		}
-		if entry, found := sampler.cached(key, now); found {
+		if entry, found := sampler.cached(key, now, account.Engine); found {
 			limits = append(limits, entry.limits)
 			warnings = append(warnings, entry.warnings...)
 			continue
@@ -442,11 +529,11 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 	return limits, warnings
 }
 
-func (sampler *LimitsSampler) cached(key string, now time.Time) (cachedLimits, bool) {
+func (sampler *LimitsSampler) cached(key string, now time.Time, engine pfmengine.ID) (cachedLimits, bool) {
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	entry, ok := sampler.cache[key]
-	if !ok || entry.when.After(now) || now.Sub(entry.when) >= sampler.ttl() {
+	if !ok || entry.when.After(now) || now.Sub(entry.when) >= sampler.ttlFor(engine) {
 		return cachedLimits{}, false
 	}
 	return cloneCachedLimits(entry), true
@@ -467,6 +554,16 @@ func (sampler *LimitsSampler) ttl() time.Duration {
 		return defaultLimitsTTL
 	}
 	return sampler.TTL
+}
+
+// ttlFor is ttl() narrowed to one engine. Only Codex, and only when the
+// caller opted in via CodexTTL, gets a different horizon than the rest of
+// this sampler — see CodexLiveLimitsTTL.
+func (sampler *LimitsSampler) ttlFor(engine pfmengine.ID) time.Duration {
+	if engine == pfmengine.Codex && sampler.CodexTTL > 0 {
+		return sampler.CodexTTL
+	}
+	return sampler.ttl()
 }
 
 func (sampler *LimitsSampler) refresh(ctx context.Context, account LimitAccount, key string, now time.Time) cachedLimits {
@@ -546,7 +643,7 @@ func (sampler *LimitsSampler) structuralAccount(account LimitAccount) bool {
 }
 
 func (sampler *LimitsSampler) startRefresh(ctx context.Context, account LimitAccount, key string) {
-	if ctx.Err() != nil || !sampler.beginFlight(key) {
+	if ctx.Err() != nil || !sampler.beginFlight(key, account.Engine) {
 		return
 	}
 	go func() {
@@ -555,11 +652,11 @@ func (sampler *LimitsSampler) startRefresh(ctx context.Context, account LimitAcc
 	}()
 }
 
-func (sampler *LimitsSampler) beginFlight(key string) bool {
+func (sampler *LimitsSampler) beginFlight(key string, engine pfmengine.ID) bool {
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	now := sampler.now()
-	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttl() {
+	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttlFor(engine) {
 		return false
 	}
 	if sampler.flights == nil {
@@ -686,7 +783,7 @@ func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) 
 	}
 	if sampler.ackAttempted[key] {
 		sampler.mu.Unlock()
-		return fmt.Errorf("credential refresh already attempted for account %d", account.ID)
+		return fmt.Errorf("%w for account %d", errAckAlreadyAttempted, account.ID)
 	}
 	sampler.ackAttempted[key] = true
 	sampler.mu.Unlock()
@@ -694,12 +791,32 @@ func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) 
 		return fmt.Errorf("credential refresh unavailable for account %d", account.ID)
 	}
 	err := sampler.Ack(ctx, account)
-	if ctx.Err() != nil {
+	switch {
+	case ctx.Err() != nil:
 		sampler.mu.Lock()
 		delete(sampler.ackAttempted, key)
 		sampler.mu.Unlock()
+	case err != nil:
+		sampler.mu.Lock()
+		if sampler.ackFailure == nil {
+			sampler.ackFailure = make(map[string]string)
+		}
+		// The probe's combined output can carry the account's own hook chatter,
+		// newlines included, and this string lands in a single TUI row. Collapse
+		// every whitespace run so the card stays one line without discarding
+		// any of the reason.
+		sampler.ackFailure[key] = strings.Join(strings.Fields(err.Error()), " ")
+		sampler.mu.Unlock()
 	}
 	return err
+}
+
+// probeFailure is the remembered reason this account's credential probe
+// failed, or "" if one never ran or ran successfully.
+func (sampler *LimitsSampler) probeFailure(account LimitAccount) string {
+	sampler.mu.Lock()
+	defer sampler.mu.Unlock()
+	return sampler.ackFailure[account.cacheKey()]
 }
 
 func (account LimitAccount) cacheKey() string {
@@ -1034,7 +1151,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		return codexUsage{}, time.Time{}, err
 	}
 	if matches && len(codexWindows(record.codexUsage)) > 0 &&
-		cacheFresh(record.FetchedAt, path, now, sampler.ttl()) {
+		cacheFresh(record.FetchedAt, path, now, sampler.ttlFor(pfmengine.Codex)) {
 		return record.codexUsage, confirmedAt, nil
 	}
 	previousUsage, previousFetchedAt := codexUsage{}, (*time.Time)(nil)

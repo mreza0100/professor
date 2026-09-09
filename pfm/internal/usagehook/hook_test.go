@@ -149,7 +149,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		body := []byte(`{"five_hour":{"utilization":` + itoa(five) +
+		body := []byte(`{"config_dir":` + `"` + configDir + `",` + `"five_hour":{"utilization":` + itoa(five) +
 			`,"resets_at":"2030-01-01T10:00:00Z"},` +
 			`"seven_day":{"utilization":` + itoa(seven) +
 			`,"resets_at":"2030-01-03T08:00:00Z"},` +
@@ -191,6 +191,122 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	coldHealthy, err := Evaluate(context.Background(), options)
 	if err != nil || coldHealthy != "" {
 		t.Fatalf("cold healthy=%q err=%v", coldHealthy, err)
+	}
+}
+
+func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		cacheDirID string
+		age        time.Duration
+		backoff    bool
+		serverFail bool
+	}{
+		{name: "fresh foreign identity", cacheDirID: "foreign"},
+		{name: "legacy blank identity", cacheDirID: "legacy"},
+		{name: "foreign backoff", cacheDirID: "foreign", backoff: true},
+		{name: "foreign stale cache", cacheDirID: "foreign", age: 30 * time.Minute, serverFail: true},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			root := t.TempDir()
+			configA := filepath.Join(root, ".cc", "2-a")
+			configB := filepath.Join(root, ".cc", "2-b")
+			for _, configDir := range []string{configA, configB} {
+				if err := os.MkdirAll(configDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			now := time.Now().Truncate(time.Second)
+			cacheDir := filepath.Join(root, "cache")
+			cacheConfig := configA
+			if testcase.cacheDirID == "legacy" {
+				cacheConfig = ""
+			}
+			fetchedAt := now.Add(-testcase.age)
+			record := CacheRecord{
+				Usage: Usage{
+					FiveHour: Window{Utilization: usageFloatPtr(96), ResetsAt: now.Add(4 * time.Hour).Format(time.RFC3339)},
+					SevenDay: Window{Utilization: usageFloatPtr(96), ResetsAt: now.Add(6 * 24 * time.Hour).Format(time.RFC3339)},
+				},
+				ConfigDir: cacheConfig, FetchedAt: &fetchedAt,
+			}
+			if testcase.backoff {
+				record.Backoff = &CacheBackoff{Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: now}
+			}
+			cachePath := CachePath(cacheDir, 2)
+			if err := WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			if testcase.age > 0 {
+				old := now.Add(-testcase.age)
+				if err := os.Chtimes(cachePath, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			hits := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				hits++
+				if testcase.serverFail {
+					writer.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = io.WriteString(writer, `{"five_hour":{"utilization":12,"resets_at":"2030-01-01T10:00:00Z"},"seven_day":{"utilization":3,"resets_at":"2030-01-03T08:00:00Z"}}`)
+			}))
+			defer server.Close()
+			message, err := Evaluate(context.Background(), Options{
+				Now: func() time.Time { return now }, Home: root, ConfigDir: configB,
+				AccountDirs: map[string]int{configA: 2, configB: 2}, CacheDir: cacheDir,
+				Warn: 80, Critical: 95, TTL: 10 * time.Minute, Client: server.Client(), Endpoint: server.URL,
+			})
+			if testcase.serverFail {
+				if err != nil || message != "" || hits != 1 {
+					t.Fatalf("foreign stale cache was used after refresh failure: message=%q err=%v hits=%d", message, err, hits)
+				}
+				return
+			}
+			if err != nil || message != "" || hits != 1 {
+				t.Fatalf("reassigned account cache was reused: message=%q err=%v hits=%d", message, err, hits)
+			}
+		})
+	}
+}
+
+func TestEvaluateWarningRecoveryRequiresTheSameConfigDirectory(t *testing.T) {
+	root := t.TempDir()
+	configA := filepath.Join(root, ".cc", "2-a")
+	configB := filepath.Join(root, ".cc", "2-b")
+	for _, configDir := range []string{configA, configB} {
+		if err := os.MkdirAll(configDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().Truncate(time.Second)
+	cacheDir := filepath.Join(root, "cache")
+	if err := WriteCacheRecord(CachePath(cacheDir, 2), CacheRecord{
+		Usage: Usage{
+			FiveHour: Window{Utilization: usageFloatPtr(10), ResetsAt: now.Add(4 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{Utilization: usageFloatPtr(10), ResetsAt: now.Add(6 * 24 * time.Hour).Format(time.RFC3339)},
+		},
+		ConfigDir: configB, FetchedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWrite(filepath.Join(cacheDir, "warned-2"), []byte(configA), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	message, err := Evaluate(context.Background(), Options{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configB,
+		AccountDirs: map[string]int{configA: 2, configB: 2}, CacheDir: cacheDir,
+		Warn: 80, Critical: 95, TTL: 24 * time.Hour,
+	})
+	if err != nil || message != "" {
+		t.Fatalf("warning from seat %q recovered using seat %q flag: message=%q err=%v", configB, configA, message, err)
 	}
 }
 
@@ -237,6 +353,13 @@ func TestRefreshUsesHeaderAndAcceptsOnlyAUsagePayload(t *testing.T) {
 		!strings.Contains(message, "5h 81%") {
 		t.Fatalf("message=%q err=%v", message, err)
 	}
+	record, err := ReadCacheRecord(CachePath(filepath.Join(root, "cache"), 1))
+	if err != nil {
+		t.Fatalf("read refreshed cache: %v", err)
+	}
+	if !record.MatchesConfigDir(configDir) || record.FetchedAt == nil {
+		t.Fatalf("refresh wrote unbound cache record: %#v", record)
+	}
 }
 
 func TestMissingCredentialsAndPoisonPayloadFailOpen(t *testing.T) {
@@ -270,6 +393,8 @@ func TestMissingCredentialsAndPoisonPayloadFailOpen(t *testing.T) {
 		t.Fatalf("invalid payload replaced cache: %v", statErr)
 	}
 }
+
+func usageFloatPtr(value float64) *float64 { return &value }
 
 func itoa(value int) string {
 	if value == 0 {

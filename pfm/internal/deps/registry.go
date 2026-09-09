@@ -3,10 +3,12 @@ package deps
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"unicode"
 
 	pfmengine "hostops/pfm/internal/engine"
@@ -57,6 +59,10 @@ var fixedCommands = []Entry{
 	{Name: "systemctl", Purpose: "Linux user-service wiring", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to enable user units"},
 	{Name: "systemd-run", Purpose: "durable chat scopes spawned from Linux user services", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to spawn chats from the MCP service"},
 	{Name: "launchctl", Purpose: "Darwin launch-agent wiring", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system launchctl command"},
+	// Absolute path: this is the door to the login keychain, where Claude Code
+	// keeps every account's OAuth credential on macOS, so it must never
+	// resolve to something a $PATH entry shadowed.
+	{Name: "security", Command: "/usr/bin/security", Purpose: "Darwin login-keychain OAuth credential reads", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system security command"},
 }
 
 // Registry is the one complete dependency table. Configured engine names and
@@ -119,6 +125,49 @@ func Registered(name string) bool {
 	return false
 }
 
+// resolveCache memoizes Resolve's successful lookups, keyed by binary name
+// and the $PATH they were resolved under. Every tmux capture-pane, every
+// spawned codex app-server, and every other exec that runs through
+// deps.Executable paid for a fresh Registry() build (a slice allocation plus
+// a walk of every fixed and engine-configured entry) and a fresh
+// exec.LookPath PATH walk on EVERY call — cheap once, ruinous at the cadence
+// a parked picker's Codex idle-identity poll and Codex limits sampler drive
+// it (2026-09-08 measurement, devbox). Keying on $PATH rather than name alone
+// keeps this invisible to tests that vary PATH per case: a changed PATH is a
+// cache miss, not a stale hit.
+var (
+	resolveCacheMu sync.Mutex
+	resolveCache   = map[string]string{}
+)
+
+func resolveCacheKey(name string) string {
+	return name + "\x00" + os.Getenv("PATH")
+}
+
+// resolveCached returns a memoized resolution for name, invalidating it if
+// the file it names no longer exists — a binary can move or be uninstalled
+// mid-process, and a cache must never outlive the thing it names.
+func resolveCached(name string) (string, bool) {
+	resolveCacheMu.Lock()
+	defer resolveCacheMu.Unlock()
+	key := resolveCacheKey(name)
+	path, ok := resolveCache[key]
+	if !ok {
+		return "", false
+	}
+	if _, err := os.Stat(path); err != nil {
+		delete(resolveCache, key)
+		return "", false
+	}
+	return path, true
+}
+
+func rememberResolved(name, path string) {
+	resolveCacheMu.Lock()
+	defer resolveCacheMu.Unlock()
+	resolveCache[resolveCacheKey(name)] = path
+}
+
 // Resolve is the only production seam that obtains an executable path.
 // Config-owned names are permitted even though source-literal names are held
 // to the registry by the source guard.
@@ -126,6 +175,10 @@ func Resolve(name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("dependency command is empty")
 	}
+	if cached, ok := resolveCached(name); ok {
+		return cached, nil
+	}
+	command := name
 	for _, entry := range Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		if entry.Name != name && entry.Command != name {
 			continue
@@ -133,9 +186,15 @@ func Resolve(name string) (string, error) {
 		if !entry.AppliesTo(runtime.GOOS) {
 			return "", fmt.Errorf("dependency %s is not supported on %s", entry.Name, runtime.GOOS)
 		}
+		command = entry.Command
 		break
 	}
-	return exec.LookPath(name)
+	path, err := exec.LookPath(command)
+	if err != nil {
+		return path, err
+	}
+	rememberResolved(name, path)
+	return path, nil
 }
 
 // Executable preserves exec.Cmd's normal not-found error while ensuring that

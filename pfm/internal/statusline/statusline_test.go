@@ -519,3 +519,50 @@ func TestGPTAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
 		t.Fatalf("count=%d reject=%v; non-request rows must not manufacture a three-request streak", count, reject)
 	}
 }
+
+// The scoped Fable window is resolved into data.RateLimits.Windows before
+// harvestRateLimits runs, but the snapshot writer only ever copied the two
+// flat windows out of that map. A host whose Limits tab reads nothing BUT
+// this snapshot (credentials in the OS keychain, so no usage-API path) could
+// therefore never show Fable, however faithfully it was rendered inline.
+func TestStatuslineQuotaSnapshotCarriesTheScopedFableWindow(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".cc", "2")
+	rateDir := filepath.Join(root, "rates")
+	now := time.Now().Truncate(time.Second)
+	fableResets := now.Add(5 * 24 * time.Hour).UTC()
+	runtime := Runtime{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		CacheDir: filepath.Join(root, "cache"), RateLimitDir: rateDir,
+		SIDDir: filepath.Join(root, "sid"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000,
+		AccountDirs: map[string]int{configDir: 2}, Env: map[string]string{}, Command: quietRunner{},
+	}
+	input := []byte(fmt.Sprintf(`{
+  "model":{"display_name":"Fable 5.1"},
+  "session_id":"fable-session",
+  "rate_limits":{
+    "five_hour":{"used_percentage":31,"resets_at":%d},
+    "seven_day":{"used_percentage":47,"resets_at":%d},
+    "limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":62,"resets_at":%q,"is_active":true}]
+  }
+}`, now.Add(4*time.Hour).Unix(), now.Add(6*24*time.Hour).Unix(), fableResets.Format(time.RFC3339)))
+	if _, err := Render(context.Background(), input, runtime); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(rateDir, "acct-2.fable-session.json"))
+	if err != nil {
+		t.Fatalf("read account 2 quota snapshot: %v", err)
+	}
+	var snapshot struct {
+		FiveHourUsed  int64 `json:"five_hour_used"`
+		FableUsed     int64 `json:"fable_used"`
+		FableResetsAt int64 `json:"fable_resets_at"`
+	}
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.FiveHourUsed != 31 || snapshot.FableUsed != 62 || snapshot.FableResetsAt != fableResets.Unix() {
+		t.Fatalf("snapshot=%#v, want five_hour 31 and Fable 62 resetting at %d", snapshot, fableResets.Unix())
+	}
+}

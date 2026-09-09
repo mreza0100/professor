@@ -137,15 +137,22 @@ func (model Model) render() string {
 	query := model.renderQuery(width)
 	footer := model.renderFooter(width)
 	bodyHeight := maxInt(4, height-6)
-	body := model.renderListPanel(width, bodyHeight)
-	if model.tab == TabStats {
+	// Only one of these ever reaches the frame; building renderListPanel
+	// unconditionally then discarding it on every Stats/Limits/Cosmos frame
+	// paid for a full fleet-row layout nobody saw (2026-09-08: the Limits
+	// tab's own idle backoff still redraws at whatever the sky/clock tick
+	// cadence is, so this was a wasted list build on every one of those
+	// frames too).
+	var body string
+	switch model.tab {
+	case TabStats:
 		body = model.renderStatsPanel(width, bodyHeight)
-	}
-	if model.tab == TabLimits {
+	case TabLimits:
 		body = model.renderLimitsPanel(width, bodyHeight)
-	}
-	if model.tab == TabCosmos {
+	case TabCosmos:
 		body = model.renderCosmosPanel(width, bodyHeight)
+	default:
+		body = model.renderListPanel(width, bodyHeight)
 	}
 	return strings.Join([]string{header, query, body, footer}, "\n")
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/usagehook"
 )
 
 type limitsSamplerContextKey struct{}
@@ -42,7 +42,7 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 	}
 	result := AccountLimits{}
 	usage, confirmedAt, fetchErr := sampler.fetchClaude(ctx, account)
-	if fetchErr != nil && errors.Is(fetchErr, os.ErrNotExist) {
+	if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) {
 		statuslineUsage, statuslineConfirmedAt, found, statuslineErr := sampler.fetchClaudeStatusline(account)
 		switch {
 		case statuslineErr != nil:
@@ -51,7 +51,43 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 			usage, confirmedAt, fetchErr = statuslineUsage, statuslineConfirmedAt, nil
 		}
 	}
-	if fetchErr != nil && !errors.Is(fetchErr, os.ErrNotExist) && needsCredentialRefresh(fetchErr) {
+	// Neither a credentials file nor a statusline snapshot: the account is
+	// completely dark, and nothing about rendering the tab changes that on its
+	// own — the seat historically stayed blank until someone sent it a prompt
+	// by hand, which is what made its CLI mint a token and publish a snapshot.
+	// Spend the same hidden one-turn Haiku probe the credential-rejection path
+	// below already uses (tryAck is headless and fires at most once per account
+	// per sampler), then re-read BOTH sources: the probe may write the
+	// credential file, and its session may publish the snapshot.
+	// A SIGNED-OUT account is the one shape the probe cannot repair: its
+	// refresh token is empty or expired, so the headless turn can only fail
+	// with the same diagnosis we already hold. Spending ~10s spawning a CLI to
+	// re-derive a known answer would also bury it under a probe-failure
+	// suffix, when the account needs the plain instruction instead.
+	if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) && !errors.Is(fetchErr, usagehook.ErrSignedOut) {
+		if ackErr := sampler.tryAck(ctx, account); ackErr == nil {
+			usage, confirmedAt, fetchErr = sampler.fetchClaudeAfterCredentialRefresh(ctx, account)
+			if fetchErr != nil && usagehook.IsCredentialUnavailable(fetchErr) {
+				probedUsage, probedConfirmedAt, found, probedErr := sampler.fetchClaudeStatusline(account)
+				switch {
+				case probedErr != nil:
+					fetchErr = probedErr
+				case found:
+					usage, confirmedAt, fetchErr = probedUsage, probedConfirmedAt, nil
+				}
+			}
+		}
+		// The probe is the only automatic repair for this state, so when it
+		// fails the card must say why — an OAuth session too old to refresh
+		// needs an interactive re-login, which "credentials file missing"
+		// does not convey.
+		if fetchErr != nil {
+			if reason := sampler.probeFailure(account); reason != "" {
+				fetchErr = fmt.Errorf("%w; credential probe failed: %s", fetchErr, reason)
+			}
+		}
+	}
+	if fetchErr != nil && !usagehook.IsCredentialUnavailable(fetchErr) && needsCredentialRefresh(fetchErr) {
 		if sampler.tryAck(ctx, account) == nil {
 			usage, confirmedAt, fetchErr = sampler.fetchClaudeAfterCredentialRefresh(ctx, account)
 		}

@@ -23,11 +23,28 @@ import (
 )
 
 const (
-	defaultWidth          = 120
-	defaultHeight         = 28
-	statsRefreshInterval  = 2 * time.Second
-	cosmosRefreshInterval = 2 * time.Second
-	clockRefreshInterval  = 5 * time.Second
+	defaultWidth  = 120
+	defaultHeight = 28
+	// statsRefreshInterval is the Limits/Stats tab sample cadence while
+	// somebody is watching. The Stats tab (resourcesOnly — live CPU/memory
+	// bars) keeps this flat; the Limits tab decays via statsCadence instead
+	// (statsRefreshGrowth/statsRefreshMaxInterval), because this was the
+	// picker's last periodic loop without an idle backoff: an untouched
+	// Limits tab ticked every 2s forever, which is what kept re-arming a
+	// Codex provider sampler that execs `codex app-server` per fetch (2026-
+	// 09-08 measurement, devbox: one thread at 70%, `codex app-server`
+	// spawned every ~10s — see stats.CodexLiveLimitsTTL).
+	statsRefreshInterval = 2 * time.Second
+	// statsRefreshGrowth/statsRefreshMaxInterval are the Limits tab's
+	// tickCadence arithmetic — the same law as the sky tick (see
+	// skyTickGrowth above), just gentler: 2s stretching to 30s over a
+	// leisurely climb rather than parking outright, because a Limits sample
+	// remains cheap to at least glance at (SampleLive always returns the
+	// last-good cached card immediately; it never blocks on the network).
+	statsRefreshGrowth      = 1.35
+	statsRefreshMaxInterval = 30 * time.Second
+	cosmosRefreshInterval   = 2 * time.Second
+	clockRefreshInterval    = 5 * time.Second
 	// skyTickBaseInterval is the ambient sky/cosmos header widget's cadence
 	// while somebody is watching — ~8fps, fast enough that comets, wind, and
 	// twinkle read as motion. Unlike the fleet scan and the Stats/Cosmos tab
@@ -175,8 +192,13 @@ type Model struct {
 	// the background refresh backs off — see tickCadence in activity.go.
 	// skyParked is true once the tick has stopped rescheduling itself
 	// entirely (skyCadence reached skyTickParkThreshold); wakeSky clears it.
-	skyCadence    tickCadence
-	skyParked     bool
+	skyCadence tickCadence
+	skyParked  bool
+	// statsCadence backs off the Limits tab's sample cadence the same way
+	// skyCadence backs off the ambient tick — see the comment on
+	// statsRefreshGrowth. The Stats tab does not use it; it schedules at the
+	// flat statsRefreshInterval instead (see statsWaitCmd's caller).
+	statsCadence  tickCadence
 	query         textinput.Model
 	outcome       OutcomeKind
 	outcomeRow    compose.Row
@@ -240,6 +262,7 @@ func NewModel(snapshot Snapshot) Model {
 		cosmosSafe:          snapshot.CosmosSafe,
 		activity:            snapshot.Activity,
 		skyCadence:          newTickCadence(snapshot.Activity, skyTickBaseInterval, skyTickGrowth, skyTickParkThreshold),
+		statsCadence:        newTickCadence(snapshot.Activity, statsRefreshInterval, statsRefreshGrowth, statsRefreshMaxInterval),
 		mergeNewChat:        snapshot.MergeNewChat,
 		newChatEngine:       defaultNewChatEngine(snapshot.AccountIDs, snapshot.CodexAccountIDs, snapshot.OpencodeAccountIDs),
 	}
@@ -353,7 +376,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.statsError = ""
 			model.applyStats(message.snapshot)
 		}
-		return model, statsWaitCmd(message.generation)
+		// The Stats tab's live CPU/memory bars stay on the flat cadence;
+		// only Limits — a provider sampler, not a proc-table scan — backs
+		// off while idle. See statsRefreshGrowth.
+		interval := statsRefreshInterval
+		if model.tab == TabLimits {
+			interval = model.statsCadence.next()
+		}
+		return model, statsWaitCmd(message.generation, interval)
 	case statsTickMsg:
 		if !isStatsSamplingTab(model.tab) || message.generation != model.statsGeneration {
 			return model, nil
@@ -981,8 +1011,8 @@ func (model *Model) startStatsSample() tea.Cmd {
 	}
 }
 
-func statsWaitCmd(generation uint64) tea.Cmd {
-	return tea.Tick(statsRefreshInterval, func(time.Time) tea.Msg {
+func statsWaitCmd(generation uint64, interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return statsTickMsg{generation: generation}
 	})
 }
