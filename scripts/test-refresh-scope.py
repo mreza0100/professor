@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -25,19 +26,23 @@ def write_json(path: Path, value: object) -> None:
 class RefreshScopeTests(unittest.TestCase):
     script: Path
 
-    def run_scan(
+    def run_scope(
         self,
         project: Path,
         mapping: dict,
         *,
+        action: str = "scan",
         path_prefix: Path | None = None,
+        path_override: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         map_path = project.parent / "refresh-map.json"
         write_json(map_path, mapping)
         environment = os.environ.copy()
-        if path_prefix is not None:
+        if path_override is not None:
+            environment["PATH"] = str(path_override)
+        elif path_prefix is not None:
             environment["PATH"] = str(path_prefix) + os.pathsep + environment["PATH"]
-        command = ["/bin/bash", str(self.script), "scan", str(project), str(map_path)]
+        command = ["/bin/bash", str(self.script), action, str(project), str(map_path)]
         try:
             return subprocess.run(
                 command,
@@ -60,6 +65,63 @@ class RefreshScopeTests(unittest.TestCase):
                 stdout=stdout,
                 stderr=stderr + "refresh-scope fixture timed out\n",
             )
+
+    def run_scan(
+        self,
+        project: Path,
+        mapping: dict,
+        *,
+        path_prefix: Path | None = None,
+        path_override: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_scope(
+            project,
+            mapping,
+            path_prefix=path_prefix,
+            path_override=path_override,
+        )
+
+    def run_regen(
+        self,
+        project: Path,
+        mapping: dict,
+        *,
+        path_override: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_scope(project, mapping, action="regen", path_override=path_override)
+
+    def make_path_whitelist(self, base: Path, *, include_shasum: bool) -> Path:
+        """Build a PATH that proves hash-tool selection instead of inheriting it."""
+        tool_bin = base / "tool-bin"
+        tool_bin.mkdir()
+        required = (
+            "awk",
+            "cat",
+            "dirname",
+            "find",
+            "head",
+            "jq",
+            "mktemp",
+            "mv",
+            "readlink",
+            "rm",
+            "sed",
+            "sort",
+            "tr",
+            "wc",
+        )
+        if include_shasum:
+            required += ("shasum",)
+        for name in required:
+            resolved = shutil.which(name)
+            self.assertIsNotNone(resolved, f"fixture requires {name}")
+            (tool_bin / name).symlink_to(resolved)
+        self.assertFalse((tool_bin / "sha256sum").exists())
+        if include_shasum:
+            self.assertTrue((tool_bin / "shasum").exists())
+        else:
+            self.assertFalse((tool_bin / "shasum").exists())
+        return tool_bin
 
     def make_project(self, base: Path) -> Path:
         project = base / "project"
@@ -168,6 +230,75 @@ class RefreshScopeTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("0 unmapped-live", result.stdout)
+
+    def test_shasum_fallback_preserves_scan_and_regen_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            project = self.make_project(base)
+            backend = project / "backend"
+            backend.mkdir()
+            source = backend / "source.txt"
+            source.write_text("before\n", encoding="utf-8")
+            mapping = {
+                "templates": {
+                    "fixture.md": {
+                        "sources": {
+                            "backend/source.txt": hashlib.sha256(source.read_bytes()).hexdigest()
+                        }
+                    }
+                },
+                "source_globs": ["backend/**"],
+                "ignore_sources": [],
+            }
+            shasum_path = self.make_path_whitelist(base, include_shasum=True)
+
+            unchanged = self.run_scan(project, mapping, path_override=shasum_path)
+            self.assertEqual(unchanged.returncode, 0, unchanged.stderr)
+            self.assertIn("0 changed, 1 unchanged", unchanged.stdout)
+
+            source.write_text("after\n", encoding="utf-8")
+            changed_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            changed = self.run_scan(project, mapping, path_override=shasum_path)
+            self.assertEqual(changed.returncode, 0, changed.stderr)
+            self.assertIn("1 changed, 0 unchanged", changed.stdout)
+
+            regenerated = self.run_regen(project, mapping, path_override=shasum_path)
+            self.assertEqual(regenerated.returncode, 0, regenerated.stderr)
+            self.assertIn("regenerated 1 hashes", regenerated.stdout)
+            refreshed = json.loads((base / "refresh-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                refreshed["templates"]["fixture.md"]["sources"]["backend/source.txt"],
+                changed_digest,
+            )
+
+            clean = self.run_scan(project, refreshed, path_override=shasum_path)
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            self.assertIn("0 changed, 1 unchanged", clean.stdout)
+
+    def test_missing_hash_tools_is_named_toolchain_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            project = self.make_project(base)
+            backend = project / "backend"
+            backend.mkdir()
+            source = backend / "source.txt"
+            source.write_text("hash me\n", encoding="utf-8")
+            mapping = {
+                "templates": {
+                    "fixture.md": {
+                        "sources": {
+                            "backend/source.txt": hashlib.sha256(source.read_bytes()).hexdigest()
+                        }
+                    }
+                },
+                "source_globs": ["backend/**"],
+                "ignore_sources": [],
+            }
+            no_hash_tools = self.make_path_whitelist(base, include_shasum=False)
+            result = self.run_scan(project, mapping, path_override=no_hash_tools)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("TOOLCHAIN-MISSING", result.stderr)
+            self.assertNotIn("refresh-scope: 0 changed", result.stdout)
 
 
 def main() -> int:

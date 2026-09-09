@@ -185,6 +185,17 @@ abspath_under_project() {
   esac
 }
 
+source_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "refresh-scope: TOOLCHAIN-MISSING — sha256sum or shasum is required" >&2
+    return 1
+  fi
+}
+
 is_ignored() {
   local path="$1" entry resolved_entry
   while IFS= read -r entry; do
@@ -287,7 +298,7 @@ scan() {
     fi
 
     local actual
-    actual="$(sha256sum "$abs" | awk '{print $1}')"
+    actual="$(source_hash "$abs")"
     if [[ "$actual" != "$expected" ]]; then
       echo "CHANGED ${tmpl} <= ${src}"
       c=$((c + 1))
@@ -392,7 +403,7 @@ regen() {
     }
     abs="$(abspath_under_project "$resolved_rel")"
     local actual
-    actual="$(sha256sum "$abs" | awk '{print $1}')"
+    actual="$(source_hash "$abs")"
     jq -nc --arg t "$tmpl" --arg s "$src" --arg h "$actual" '{t:$t,s:$s,h:$h}' >> "$frag_file"
     n=$((n + 1))
   done < <(jq -r '.templates | to_entries[] | select(.value.sources) | .key as $t | .value.sources | to_entries[] | [$t, .key, .value] | @tsv' "$MAP_PATH")
