@@ -18,6 +18,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
+	pfmstatusline "hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
 )
 
@@ -86,6 +87,23 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 	if acks != 1 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
 		!strings.Contains(limits[0].Status, ".credentials.json") {
 		t.Fatalf("acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced", acks, warnings, limits)
+	}
+}
+
+func TestLimitsSamplerRejectsLegacyUnboundStatuslineQuota(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	currentConfig := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(currentConfig, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), "", now)
+	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, ConfigDir: currentConfig}})
+	sampler.Now = func() time.Time { return now }
+	usage, confirmedAt, found, err := sampler.fetchClaudeStatusline(sampler.Accounts[0])
+	if err != nil || found || !confirmedAt.IsZero() || len(usage.NamedWindowsAt(now)) != 0 {
+		t.Fatalf("legacy unbound snapshot accepted: usage=%#v confirmedAt=%s found=%v err=%v", usage, confirmedAt, found, err)
 	}
 }
 
@@ -775,6 +793,79 @@ func TestLimitsSamplerReadsCachePayloadTheHookWroteWithoutFetching(t *testing.T)
 	}
 }
 
+func TestLimitsSamplerDoesNotReuseClaudeCacheAcrossConfigDirectories(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		configDir  string
+		age        time.Duration
+		backoff    bool
+		serverFail bool
+	}{
+		{name: "fresh foreign identity", configDir: "foreign"},
+		{name: "legacy blank identity", configDir: ""},
+		{name: "foreign backoff", configDir: "foreign", backoff: true},
+		{name: "foreign stale fallback", configDir: "foreign", age: 30 * time.Minute, serverFail: true},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			now := time.Unix(1_800_000_000, 0)
+			currentDir := filepath.Join(home, ".cc", "2")
+			writeFixtureCredentials(t, currentDir)
+			foreignDir := filepath.Join(home, ".cc", "old-2")
+			cacheConfig := testcase.configDir
+			if cacheConfig == "foreign" {
+				cacheConfig = foreignDir
+			}
+			fetchedAt := now.Add(-testcase.age)
+			record := usagehook.CacheRecord{
+				Usage:     liveClaudeUsage(now, 71),
+				ConfigDir: cacheConfig,
+				FetchedAt: &fetchedAt,
+			}
+			if testcase.backoff {
+				record.Backoff = &usagehook.CacheBackoff{
+					Message: "429 Too Many Requests", RetryAfter: now.Add(10 * time.Minute), RecordedAt: now,
+				}
+			}
+			cachePath := usagehook.CachePath(usagehook.DefaultCacheDir(), 2)
+			if err := usagehook.WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			var hits int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits++
+				if testcase.serverFail {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, usageJSONBody(13, 29, now))
+			}))
+			defer server.Close()
+
+			sampler := NewLimitsSampler([]LimitAccount{{
+				ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: currentDir,
+			}})
+			sampler.Now = func() time.Time { return now }
+			sampler.Endpoint, sampler.Client = server.URL, server.Client()
+			limits, warnings := sampler.Sample(context.Background())
+			if hits != 1 {
+				t.Fatalf("foreign cache suppressed the current account fetch: hits=%d, want 1", hits)
+			}
+			if testcase.serverFail {
+				if len(limits) != 1 || len(limits[0].Windows) != 0 || !strings.Contains(limits[0].Status, "503") {
+					t.Fatalf("foreign stale cache leaked after provider failure: limits=%#v warnings=%v", limits, warnings)
+				}
+				return
+			}
+			if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Windows[0].UsedPct != 13 {
+				t.Fatalf("limits=%#v warnings=%v, want current identity's fetched 13/29 windows", limits, warnings)
+			}
+		})
+	}
+}
+
 func TestLimitsSamplerLiveRefreshDoesNotBlockOtherAccounts(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1397,6 +1488,53 @@ func TestLimitsSamplerRendersTheFableWindowFromAStatuslineSnapshot(t *testing.T)
 	}
 	if got["5h"] != 31 || got["7d"] != 47 || got["7d-fable"] != 62 {
 		t.Fatalf("windows = %#v, want 5h=31 7d=47 7d-fable=62", got)
+	}
+}
+
+type quietStatuslineCommand struct{}
+
+func (quietStatuslineCommand) Output(context.Context, string, ...string) ([]byte, error) {
+	return nil, nil
+}
+
+func TestLimitsSamplerReadsFableWrittenByStatuslineRender(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Truncate(time.Second)
+	runtime := pfmstatusline.Runtime{
+		Now: func() time.Time { return now }, Home: home, ConfigDir: configDir,
+		CacheDir: filepath.Join(home, "cache"), RateLimitDir: filepath.Join(home, "tmp", "cc-rate-limits"),
+		SIDDir: filepath.Join(home, "sid"), TmuxDir: filepath.Join(home, "tmux"), ProcRoot: filepath.Join(home, "proc"),
+		Columns: 120, UID: os.Getuid(), AccountDirs: map[string]int{configDir: 2}, AccountEmojis: map[int]string{2: "🥈"}, Env: map[string]string{},
+		Command: quietStatuslineCommand{},
+	}
+	fableReset := now.Add(5 * 24 * time.Hour)
+	input := []byte(fmt.Sprintf(`{"model":{"display_name":"Fable"},"session_id":"roundtrip","rate_limits":{"five_hour":{"used_percentage":11,"resets_at":%d},"seven_day":{"used_percentage":31,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]}}`, now.Add(4*time.Hour).Unix(), now.Add(6*24*time.Hour).Unix(), fableReset.UTC().Format(time.RFC3339)))
+	rendered, err := pfmstatusline.Render(context.Background(), input, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(runtime.RateLimitDir)
+	if len(entries) != 1 {
+		t.Fatalf("statusline did not write its Fable snapshot: entries=%v dir=%s render=%q", entries, runtime.RateLimitDir, rendered)
+	}
+	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("credential refresh must not run")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 3 {
+		t.Fatalf("limits=%#v warnings=%v, want 5h + 7d + Fable from the statusline snapshot", limits, warnings)
+	}
+	for _, window := range limits[0].Windows {
+		if window.Name == "7d-fable" && window.UsedPct != 0 {
+			t.Fatalf("Fable snapshot window=%#v, want zero utilization", window)
+		}
 	}
 }
 

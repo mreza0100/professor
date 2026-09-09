@@ -167,11 +167,11 @@ func (sampler *LimitsSampler) now() time.Time {
 // the SAME acct-<id>.json the UserPromptSubmit hook owns
 // (usagehook.DefaultCacheDir/CachePath), so a second `pfm ls` opened moments
 // after the first — or opened right after the hook already ran — renders
-// from that file instead of paying for its own request. A record whose
-// stored ConfigDir doesn't match this account's is never trusted: an empty
-// ConfigDir means the hook wrote it (hook cache files carry no identity, and
-// are always trusted), a mismatched one means a DIFFERENT account is
-// occupying this account-number slot and the cached payload is not ours.
+// from that file instead of paying for its own request. A record is trusted
+// only when its stored ConfigDir matches this account's physical config
+// directory; a blank identity is a legacy unbound record and is rejected,
+// while a mismatch means a different seat has occupied this account-number
+// slot and the cached payload is not ours.
 func (sampler *LimitsSampler) fetchClaude(
 	ctx context.Context,
 	account LimitAccount,
@@ -327,7 +327,7 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	now := sampler.now()
 	path := usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID)
 	record, readErr := usagehook.ReadCacheRecord(path)
-	matches := readErr == nil && (record.ConfigDir == "" || record.ConfigDir == account.ConfigDir)
+	matches := readErr == nil && record.MatchesConfigDir(account.ConfigDir)
 	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && reusableClaudeUsage(record.Usage, now) &&
@@ -432,10 +432,8 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	return usage, fetchedAt, nil
 }
 
-// cacheFresh reports whether a cached payload is still inside ttl. FetchedAt
-// is nil for a bare, hook-written file (usage-hook's own refresh() has never
-// stamped one); freshness then falls back to the file's own mtime, which is
-// exactly the signal the hook's own cacheAge() uses.
+// cacheFresh reports whether a cached payload is still inside ttl. Older
+// identity-bound records without FetchedAt use the file's mtime.
 func cacheFresh(fetchedAt *time.Time, path string, now time.Time, ttl time.Duration) bool {
 	confirmedAt, ok := cacheConfirmedAt(fetchedAt, path)
 	return ok && !confirmedAt.After(now) && now.Sub(confirmedAt) < ttl

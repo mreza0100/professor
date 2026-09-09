@@ -143,7 +143,7 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 	// present-but-empty array), not a second opinion on a payload that DID
 	// report and simply carries no Fable entry for this account.
 	if limits.Scoped == nil && account > 0 {
-		if fable, ok := usagehook.CachedFableWindow(runtime.CacheDir, runtime.UID, account, now); ok {
+		if fable, ok := usagehook.CachedFableWindow(runtime.CacheDir, runtime.UID, account, runtime.ConfigDir, now); ok {
 			if resetAt, err := time.Parse(time.RFC3339, fable.ResetsAt); err == nil {
 				windows["seven_day_fable"] = rateWindow{
 					UsedPercentage: *fable.Utilization,
@@ -703,7 +703,9 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	sevenWindow := data.RateLimits.Windows["seven_day"]
 	five := int(fiveWindow.UsedPercentage)
 	seven := int(sevenWindow.UsedPercentage)
-	if (five <= 0 && seven <= 0) || fiveWindow.ResetsAt <= now.Unix() {
+	fableWindow, hasFable := data.RateLimits.Windows["seven_day_fable"]
+	hasFable = hasFable && fableWindow.ResetsAt > now.Unix()
+	if ((five <= 0 && seven <= 0) || fiveWindow.ResetsAt <= now.Unix()) && !hasFable {
 		return
 	}
 	if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
@@ -730,7 +732,7 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	// fallback is no longer the only door (usagehook reads the OS keychain
 	// directly now), but it is still the one a signed-out or unreachable
 	// account depends on.
-	if fableWindow, ok := data.RateLimits.Windows["seven_day_fable"]; ok && fableWindow.ResetsAt > now.Unix() {
+	if hasFable {
 		payload["fable_used"] = int64(fableWindow.UsedPercentage)
 		payload["fable_resets_at"] = fableWindow.ResetsAt
 	}
