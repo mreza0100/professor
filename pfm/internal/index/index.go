@@ -17,7 +17,7 @@ const (
 	codexParserVersion    = "4"
 
 	claudeParserVersionKey = "claude_parser_version"
-	claudeParserVersion    = "2"
+	claudeParserVersion    = "3"
 )
 
 // Options controls one indexing pass.

@@ -8,4 +8,4 @@ and `(cost)` on any env / hook / permission / model-config delta.
 
 ## Pending
 
-_(empty — v0.72.0 shipped every pending bullet. DELETE this line when you append the next bullet: `/pfm:release` copies this list verbatim, so a marker left above a real bullet ships into the release notes.)_
+- pfm: the transcript index no longer mistakes a detached turn for a background session — `sessionKind:"bg"` is stamped per record on every turn Claude Code produces while nobody is attached to the pane, which is how the fleet drives its own named chats through `pfm chat inject`, so reading that marker retroactively reclassified deep interactive chats as machine work and dropped them from the picker with no visible signal. Provenance (`sdkSpawned`) is now the only background signal, and `claude_parser_version` bumps to 3 so the next index pass re-derives every stored row.
