@@ -679,6 +679,18 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps
 			} else {
 				fmt.Fprintf(stdout, "doctor: dep %s path=%s broken error=%s\n", entry.Name, result.Path, result.Error)
 			}
+		case deps.StateTimeout:
+			// A probe that outran its bound answered nothing; it did not answer
+			// broken. The requirement is still unverified, so a required dep
+			// keeps its warning and preflight still refuses — the arithmetic is
+			// unchanged — but the line must never send the reader to reinstall a
+			// tool whose only symptom was being slow. It must also not carry the
+			// word this state is not: doctor output gets grepped, and a line
+			// reading "not broken" is counted by `grep -c broken` as a break.
+			if entry.Required {
+				warnings++
+			}
+			fmt.Fprintf(stdout, "doctor: dep %s path=%s timeout error=%s — the binary resolved and was executed but answered nothing within the bound; unverified, no fault established\n", entry.Name, result.Path, result.Error)
 		case deps.StateOK:
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s", entry.Name, result.Path)
 			if result.Version != "" {

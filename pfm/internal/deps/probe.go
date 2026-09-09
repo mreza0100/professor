@@ -32,6 +32,14 @@ const (
 	StateMissing State = "missing"
 	StateBroken  State = "broken"
 	StateSkipped State = "skipped"
+	// StateTimeout is a version probe that outran its bound: the binary
+	// resolved, it was executed, and it answered nothing in time. That is an
+	// unanswered question, not a diagnosis — a loaded box, a cold binary, or a
+	// network mount produces it from a perfectly healthy install, and calling
+	// it "broken" sends the reader after a corrupt install that does not
+	// exist. The sibling self-doctor path has drawn this line since it was
+	// written; the version path had not.
+	StateTimeout State = "timeout"
 )
 
 // Result is one dependency's three-state probe result.
@@ -130,6 +138,11 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			result.VerboseErr = verboseErr.Error()
 		}
 		if runErr != nil {
+			if errors.Is(runErr, context.DeadlineExceeded) {
+				result.State = StateTimeout
+				result.Error = fmt.Sprintf("timeout (%s)", effectiveTimeout(options.Timeout))
+				return result
+			}
 			result.State = StateBroken
 			result.Error = commandError(runErr, output)
 			return result
@@ -235,15 +248,22 @@ func selfDoctorFailureLine(output string) string {
 	return ""
 }
 
+// effectiveTimeout is the single truth for the bound a probe actually ran
+// under, so the duration named in a timeout report is the one enforced rather
+// than the one requested.
+func effectiveTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return ProbeTimeout
+	}
+	return timeout
+}
+
 func boundedOutput(parent context.Context, timeout time.Duration, path string, args ...string) ([]byte, error) {
 	return boundedOutputWithEnvironment(parent, timeout, nil, path, args...)
 }
 
 func boundedOutputWithEnvironment(parent context.Context, timeout time.Duration, environment []string, path string, args ...string) ([]byte, error) {
-	if timeout <= 0 {
-		timeout = ProbeTimeout
-	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, effectiveTimeout(timeout))
 	defer cancel()
 	command := exec.CommandContext(ctx, path, args...)
 	command.Stdin = nil

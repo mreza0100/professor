@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
@@ -31,7 +30,7 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	results := Probe(context.Background(), entries, ProbeOptions{
 		GOOS: "linux", Timeout: ProbeTimeout,
 	})
-	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateBroken, StateBroken}
+	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateTimeout, StateBroken}
 	for index := range want {
 		if results[index].State != want[index] {
 			t.Errorf("%s state=%s error=%q raw=%q, want %s", entries[index].Name, results[index].State, results[index].Error, results[index].Raw, want[index])
@@ -40,8 +39,37 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	if results[0].Version != "3.4" || results[1].Version != "1.7" {
 		t.Fatalf("parsed versions ok=%q old=%q", results[0].Version, results[1].Version)
 	}
-	if results[4].Error != context.DeadlineExceeded.Error() {
-		t.Fatalf("timeout error=%q, want %q", results[4].Error, context.DeadlineExceeded)
+	if !strings.HasPrefix(results[4].Error, "timeout (") || !strings.Contains(results[4].Error, ProbeTimeout.String()) {
+		t.Fatalf("timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel", results[4].Error, ProbeTimeout)
+	}
+}
+
+// Regression: probeOne's version branch mapped every failure — including
+// context.DeadlineExceeded — straight to StateBroken, the same bucket as an
+// actually-broken binary. A version probe that legitimately outran its bound
+// must be named as a timeout distinct from a real failure, and a genuinely
+// broken tool in the same run must still read as broken — proving the fix
+// distinguishes the two rather than relabelling every failure as a timeout.
+func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
+	directory := t.TempDir()
+	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	writeProbeStub(t, directory, "broken", "printf 'permission denied by fixture\\n'; exit 7")
+	t.Setenv("PATH", directory)
+
+	entries := []Entry{
+		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
+		{Name: "broken", Command: "broken", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
+	}
+	results := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
+
+	if results[0].State != StateTimeout {
+		t.Fatalf("hung state=%s error=%q, want StateTimeout — an outran bound must not read as broken", results[0].State, results[0].Error)
+	}
+	if !strings.HasPrefix(results[0].Error, "timeout (") || !strings.Contains(results[0].Error, ProbeTimeout.String()) {
+		t.Fatalf("hung error=%q, want the enforced bound named", results[0].Error)
+	}
+	if results[1].State != StateBroken {
+		t.Fatalf("broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout", results[1].State, results[1].Error)
 	}
 }
 
@@ -195,14 +223,20 @@ exec /bin/sleep 30`)
 		{Name: "unsupported", Command: "unsupported", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
 		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
 	}
-	// Package-level stress runs can delay a 50ms timer past a one-second
-	// fixture process, making a deliberate timeout finish successfully before
-	// the scheduler delivers cancellation. Preserve a wide separation between
-	// the bound and the hung command.
+	// The separation that matters is between the bound and the hung command's
+	// 30s sleep, never between the bound and a healthy stub's startup. A 250ms
+	// self-doctor bound sat BELOW this platform's own cost to launch the very
+	// fixtures written above — on macOS the first exec of a freshly written
+	// script costs ~120ms median and ~553ms peak against ~6ms warm — so under
+	// suite load the unsupported stub's --help was cancelled before it could
+	// answer, and a healthy fixture reported itself as a broken engine. Match
+	// production's ProbeTimeout, exactly as the sibling regression below does:
+	// still six times clear of the 30s sleep the hung fixture must outrun,
+	// while no longer racing the operating system to start a shell.
 	results := Probe(context.Background(), entries, ProbeOptions{
 		GOOS:              "linux",
-		Timeout:           2 * time.Second,
-		SelfDoctorTimeout: 250 * time.Millisecond,
+		Timeout:           ProbeTimeout,
+		SelfDoctorTimeout: ProbeTimeout,
 	})
 	if results[0].State != StateOK || results[0].SelfDoctor != "unavailable" {
 		t.Fatalf("unsupported self-doctor=%#v", results[0])

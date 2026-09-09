@@ -224,6 +224,30 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 	}
 }
 
+func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
+	saved := dependencyProbeOverride
+	t.Cleanup(func() { dependencyProbeOverride = saved })
+	entries := []deps.Entry{
+		{Name: "tmux", Required: true},
+	}
+	dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+		return []deps.Result{
+			{Entry: entries[0], State: deps.StateTimeout, Path: "/fixture/tmux", Error: "timeout (5s)"},
+		}
+	}
+	var output bytes.Buffer
+	warnings := printDependencyDoctor(context.Background(), &output, entries, deps.ProbeOptions{})
+	if warnings != 1 {
+		t.Fatalf("warnings=%d, want 1 — a required timed-out dep still contributes its warning\n%s", warnings, output.String())
+	}
+	if !strings.Contains(output.String(), "timeout") {
+		t.Fatalf("dependency row missing %q:\n%s", "timeout", output.String())
+	}
+	if strings.Contains(output.String(), "broken") {
+		t.Fatalf("dependency row must not call an unanswered probe broken:\n%s", output.String())
+	}
+}
+
 func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing.T) {
 	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
 	t.Cleanup(func() {
