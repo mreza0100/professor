@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -78,7 +79,11 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 		return nil
 	}
 	limits, warnings := sampler.Sample(context.Background())
-	if acks != 0 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
+	// A seat holding only a FOREIGN identity's snapshot is as dark as one
+	// holding none, so it does get the credential probe. What must survive the
+	// probe is the refusal itself: a snapshot belonging to a previous account
+	// identity is never adopted, however the account is repaired afterwards.
+	if acks != 1 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
 		!strings.Contains(limits[0].Status, ".credentials.json") {
 		t.Fatalf("acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced", acks, warnings, limits)
 	}
@@ -1291,4 +1296,318 @@ func limitTestAccountKey(t *testing.T, sampler *LimitsSampler, accountID int) st
 	}
 	t.Fatalf("fixture has no account %d", accountID)
 	return ""
+}
+
+// A missing .credentials.json is the NORMAL shape on a host that keeps Claude
+// credentials in the OS keychain, so the statusline fallback must survive
+// repetition, not just the first call. The first sampler's live attempt fails
+// with a wrapped os.ErrNotExist and records a one-minute backoff; a second
+// sampler over the same HOME then replays that record. Reviving a backoff as
+// errors.New(message) drops the os.ErrNotExist sentinel FetchClaude gates the
+// statusline fallback on, so the replay used to render an empty Limits card
+// for the rest of the backoff window while a fresh, identity-matched quota
+// snapshot sat on disk.
+func TestLimitsSamplerKeepsStatuslineQuotaAfterACredentialBackoffIsRecorded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	newSampler := func() *LimitsSampler {
+		sampler := NewLimitsSampler([]LimitAccount{{
+			ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+		}})
+		sampler.Now = func() time.Time { return now }
+		sampler.Ack = func(context.Context, LimitAccount) error {
+			return fmt.Errorf("credential refresh must not run")
+		}
+		return sampler
+	}
+
+	if limits, _ := newSampler().Sample(context.Background()); len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("first sample = %#v, want the statusline fallback to supply two windows", limits)
+	}
+
+	// The second sampler is a fresh picker frame: no in-memory cache, so it
+	// reads whatever the first call left on disk.
+	limits, warnings := newSampler().Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("replayed sample = %#v warnings=%v, want the SAME two statusline windows, not an empty card", limits, warnings)
+	}
+	if limits[0].Windows[0].UsedPct != 31 || limits[0].Windows[1].UsedPct != 47 ||
+		!limits[0].ConfirmedAt.Equal(now) {
+		t.Fatalf("replayed provenance = %#v, want 31/47 confirmed at %s", limits[0], now)
+	}
+}
+
+// The statusline snapshot is the ONLY limits source on a host that keeps
+// Claude credentials in the OS keychain, so every window the Limits tab can
+// render has to survive that file — including the scoped Fable window, which
+// the harness reports in its `limits` array rather than as a flat top-level
+// window. Carrying only five_hour/seven_day across the snapshot made Fable
+// structurally unrenderable for such a host, not merely absent.
+func TestLimitsSamplerRendersTheFableWindowFromAStatuslineSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	rateDir := filepath.Join(home, "tmp", "cc-rate-limits")
+	if err := os.MkdirAll(rateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := json.Marshal(map[string]any{
+		"acct":                2,
+		"config_dir":          configDir,
+		"five_hour_used":      31,
+		"seven_day_used":      47,
+		"fable_used":          62,
+		"five_hour_resets_at": now.Add(4 * time.Hour).Unix(),
+		"seven_day_resets_at": now.Add(6 * 24 * time.Hour).Unix(),
+		"fable_resets_at":     now.Add(5 * 24 * time.Hour).Unix(),
+		"ts":                  now.Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rateDir, "acct-2.session.json"), append(snapshot, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("credential refresh must not run")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 3 {
+		t.Fatalf("limits=%#v warnings=%v, want 5h + 7d + 7d-fable from the snapshot", limits, warnings)
+	}
+	got := map[string]float64{}
+	for _, w := range limits[0].Windows {
+		got[w.Name] = w.UsedPct
+	}
+	if got["5h"] != 31 || got["7d"] != 47 || got["7d-fable"] != 62 {
+		t.Fatalf("windows = %#v, want 5h=31 7d=47 7d-fable=62", got)
+	}
+}
+
+// An account with NEITHER a credentials file NOR a statusline snapshot has
+// nothing to render at all, and nothing on the Limits tab ever changes that on
+// its own — historically the seat stayed blank until the user sent it a prompt
+// by hand, which is what made its CLI mint a token and publish a snapshot. The
+// sampler now spends the same hidden one-turn Haiku probe the credential-
+// rejection path already uses, then re-reads both sources.
+func TestLimitsSamplerProbesAnAccountThatHasNoCredentialsAndNoSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	rateDir := filepath.Join(home, "tmp", "cc-rate-limits")
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	var probes int
+	// The real probe makes the account's CLI publish a statusline snapshot;
+	// this stands in for that side effect exactly.
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		writeStatuslineQuotaFixture(t, rateDir, configDir, now)
+		return nil
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if probes != 1 {
+		t.Fatalf("probes=%d, want exactly one credential probe for the blank account", probes)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the post-probe snapshot to render", limits, warnings)
+	}
+}
+
+// When the probe itself fails there is no automatic repair left, and the
+// reason — an OAuth session too old to refresh needs an interactive re-login —
+// is the single most useful thing the card can say. A bare "no such file or
+// directory" sends the reader looking for a file that is never supposed to
+// exist on a keychain host. The reason must also SURVIVE, not appear once and
+// then decay to the bare error on the next refresh.
+func TestLimitsSamplerReportsAFailedCredentialProbeAndKeepsReportingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	var probes int
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		return errors.New("OAuth session expired and could not be refreshed\nSessionEnd hook failed: Hook cancelled")
+	}
+	limits, _ := sampler.Sample(context.Background())
+	if probes != 1 || len(limits) != 1 || !strings.Contains(limits[0].Status, "OAuth session expired") {
+		t.Fatalf("probes=%d limits=%#v, want the probe failure named on the card", probes, limits)
+	}
+	// The reason lands in a single TUI row, and a real probe's combined output
+	// carries the account's own hook chatter with it.
+	if strings.ContainsAny(limits[0].Status, "\n\r") {
+		t.Fatalf("status=%q, want the probe reason collapsed onto one line", limits[0].Status)
+	}
+
+	// A later refresh must not silently forget WHY the account is blank just
+	// because the once-per-account probe guard has already fired.
+	sampler.mu.Lock()
+	delete(sampler.cache, sampler.Accounts[0].cacheKey())
+	sampler.mu.Unlock()
+	limits, _ = sampler.Sample(context.Background())
+	if probes != 1 {
+		t.Fatalf("probes=%d, want the probe attempted at most once per account", probes)
+	}
+	if len(limits) != 1 || !strings.Contains(limits[0].Status, "OAuth session expired") {
+		t.Fatalf("second sample=%#v, want the probe failure still named", limits)
+	}
+}
+
+// The usage cache is SHARED across every pfm process on the host by design, so
+// a backoff record written by a peer — another picker, an MCP server, a build
+// that predates this fix — is a normal condition, not an anomaly. Declining to
+// write one ourselves is therefore not enough: the replay must also refuse to
+// suppress the absent-credentials path, which costs no request, is re-checked
+// for free, and is the one case the statusline fallback exists to cover. The
+// check has to come from the FILESYSTEM, because a revived record carries only
+// a flat message and can never satisfy errors.Is(err, os.ErrNotExist).
+func TestLimitsSamplerIgnoresAPeerCredentialBackoffWhenCredentialsAreAbsent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	// Exactly what an older peer process leaves behind: a live backoff whose
+	// message names the missing credentials file.
+	cachePath := usagehook.CachePath(filepath.Join(home, "tmp", "cc-usage-"+strconv.Itoa(os.Getuid())), 2)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := usagehook.WriteCacheRecord(cachePath, usagehook.CacheRecord{
+		ConfigDir: configDir,
+		Backoff: &usagehook.CacheBackoff{
+			Message: fmt.Sprintf(
+				"read usage credentials: open %s: no such file or directory",
+				filepath.Join(configDir, ".credentials.json"),
+			),
+			RetryAfter: now.Add(time.Minute),
+			RecordedAt: now,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("probe must not be needed when a snapshot is already on disk")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the statusline snapshot to render through a peer's backoff", limits, warnings)
+	}
+}
+
+// A SIGNED-OUT account is not an absent one. Before the credential source
+// learned to tell them apart, a keychain entry with an empty token surfaced as
+// a plain "contains no access token" — a message that satisfied no fallback
+// gate, so the account rendered blank even with a perfectly fresh quota
+// snapshot sitting on disk, and the card never said the one thing that would
+// have fixed it. It must now serve the snapshot AND, because the probe cannot
+// mint a token from an empty refresh token, must not spend one.
+func TestLimitsSamplerServesASnapshotForASignedOutAccountWithoutProbingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return usagehook.Usage{}, fmt.Errorf(
+			"keychain item %s holds no access token: %w",
+			usagehook.KeychainService(configDir), usagehook.ErrSignedOut,
+		)
+	}
+	var probes int
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		return nil
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if probes != 0 {
+		t.Fatalf("probes=%d, want none: no headless turn can refresh an empty refresh token", probes)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the signed-out account served from its snapshot", limits, warnings)
+	}
+}
+
+// With no snapshot to fall back to there is nothing left but the diagnosis,
+// and it has to carry the repair. "no such file or directory" sends a keychain
+// host hunting for a file it is never supposed to have.
+func TestLimitsSamplerTellsASignedOutAccountToLogIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return usagehook.Usage{}, fmt.Errorf("keychain item holds no access token: %w", usagehook.ErrSignedOut)
+	}
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		t.Fatal("a signed-out account was probed")
+		return nil
+	}
+	limits, _ := sampler.Sample(context.Background())
+	if len(limits) != 1 {
+		t.Fatalf("limits=%#v, want one row", limits)
+	}
+	if !strings.Contains(limits[0].Status, "claude /login") {
+		t.Fatalf("status=%q, want the card to name the interactive repair", limits[0].Status)
+	}
+	if strings.Contains(limits[0].Status, "no such file or directory") {
+		t.Fatalf("status=%q, must not blame a missing file on a keychain host", limits[0].Status)
+	}
 }

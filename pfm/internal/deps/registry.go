@@ -59,6 +59,10 @@ var fixedCommands = []Entry{
 	{Name: "systemctl", Purpose: "Linux user-service wiring", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to enable user units"},
 	{Name: "systemd-run", Purpose: "durable chat scopes spawned from Linux user services", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to spawn chats from the MCP service"},
 	{Name: "launchctl", Purpose: "Darwin launch-agent wiring", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system launchctl command"},
+	// Absolute path: this is the door to the login keychain, where Claude Code
+	// keeps every account's OAuth credential on macOS, so it must never
+	// resolve to something a $PATH entry shadowed.
+	{Name: "security", Command: "/usr/bin/security", Purpose: "Darwin login-keychain OAuth credential reads", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system security command"},
 }
 
 // Registry is the one complete dependency table. Configured engine names and

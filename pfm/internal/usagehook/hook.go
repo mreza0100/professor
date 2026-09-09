@@ -180,12 +180,15 @@ type credentials struct {
 // its error and exit zero: hook infrastructure must never block a prompt.
 func Evaluate(ctx context.Context, options Options) (string, error) {
 	options = normalize(options)
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	if _, err := os.Stat(credentialPath); err != nil {
-		if os.IsNotExist(err) {
+	// A config dir with no usable credential in EITHER source is simply not a
+	// Claude account seat, so the hook stays silent — but only for that
+	// reason. A keychain we failed to read is a different thing entirely and
+	// must surface rather than masquerade as "no account here".
+	if err := CredentialAvailable(options.ConfigDir); err != nil {
+		if IsCredentialUnavailable(err) {
 			return "", nil
 		}
-		return "", fmt.Errorf("stat usage credentials: %w", err)
+		return "", err
 	}
 	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
 	if err := EnsurePrivateDirectory(options.CacheDir); err != nil {
@@ -370,6 +373,15 @@ func DefaultCacheDir() string {
 	return UsageCacheDir(os.TempDir(), os.Getuid())
 }
 
+// CredentialPath is the one filesystem rule for an account's OAuth credential
+// file. Callers that must tell "this account has no credentials on disk" apart
+// from a provider failure resolve it here rather than rebuilding the join, so
+// the rule cannot drift between the prompt hook, the fetch, and the Limits
+// tab's own absent-credentials handling.
+func CredentialPath(configDir string) string {
+	return filepath.Join(configDir, ".credentials.json")
+}
+
 // CachePath returns the shared cache file for one Claude account number
 // under cacheDir — the exact file this hook's own refresh() reads and
 // writes, and the one `stats.LimitsSampler` reads and writes too.
@@ -533,17 +545,9 @@ func EnsurePrivateDirectory(path string) error {
 }
 
 func refresh(ctx context.Context, options Options, cachePath string) error {
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	body, err := os.ReadFile(credentialPath)
+	credential, err := loadCredential(options.ConfigDir)
 	if err != nil {
 		return err
-	}
-	var credential credentials
-	if err := json.Unmarshal(body, &credential); err != nil {
-		return err
-	}
-	if credential.OAuth.AccessToken == "" {
-		return fmt.Errorf("usage credential contains no access token")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
 	if err != nil {
@@ -578,17 +582,9 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 // cache. It is the shared fetch seam for the Limits tab and the prompt hook.
 func Fetch(ctx context.Context, options Options) (Usage, error) {
 	options = normalize(options)
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	body, err := os.ReadFile(credentialPath)
+	credential, err := loadCredential(options.ConfigDir)
 	if err != nil {
-		return Usage{}, fmt.Errorf("read usage credentials: %w", err)
-	}
-	var credential credentials
-	if err := json.Unmarshal(body, &credential); err != nil {
-		return Usage{}, fmt.Errorf("decode usage credentials: %w", err)
-	}
-	if credential.OAuth.AccessToken == "" {
-		return Usage{}, fmt.Errorf("usage credential contains no access token")
+		return Usage{}, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
 	if err != nil {

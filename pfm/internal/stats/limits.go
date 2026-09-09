@@ -58,8 +58,19 @@ type LimitsSampler struct {
 	mu           sync.Mutex
 	cache        map[string]cachedLimits
 	ackAttempted map[string]bool
-	flights      map[string]struct{}
+	// ackFailure remembers WHY an account's one credential probe failed, so a
+	// later refresh — which the once-per-account guard stops from probing
+	// again — can still say it rather than decaying to the bare "credentials
+	// file missing" that sends the reader hunting for a file a keychain host
+	// is never supposed to have.
+	ackFailure map[string]string
+	flights    map[string]struct{}
 }
+
+// errAckAlreadyAttempted marks the guard's refusal, which is bookkeeping
+// rather than a diagnosis: it must never be reported as the reason an account
+// is blank.
+var errAckAlreadyAttempted = errors.New("credential refresh already attempted")
 
 type cachedLimits struct {
 	limits   AccountLimits
@@ -74,7 +85,14 @@ type statuslineClaudeLimits struct {
 	SevenDayUsed     int64  `json:"seven_day_used"`
 	FiveHourResetsAt int64  `json:"five_hour_resets_at"`
 	SevenDayResetsAt int64  `json:"seven_day_resets_at"`
-	ConfirmedAt      int64  `json:"ts"`
+	// The Fable window is model-SCOPED: the harness reports it inside its
+	// `limits` array, never as a flat top-level window, so it has to be
+	// carried across this snapshot explicitly or it cannot reach a host whose
+	// only limits source IS this snapshot. Absent in a snapshot written by an
+	// older build, which reads back as a zero reset and is skipped.
+	FableUsed     int64 `json:"fable_used"`
+	FableResetsAt int64 `json:"fable_resets_at"`
+	ConfirmedAt   int64 `json:"ts"`
 }
 
 // defaultLimitsTTL is the legacy freshness interval for the in-memory and
@@ -248,6 +266,26 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 	if err := setWindow(&usage.SevenDay, latest.SevenDayUsed, latest.SevenDayResetsAt); err != nil {
 		return usagehook.Usage{}, time.Time{}, false, err
 	}
+	// Fable re-enters through the scoped `limits` array rather than a flat
+	// field, because that array is the one shape usagehook.fableWindow reads —
+	// rebuilding the selector here would be a second opinion on which scoped
+	// limit is the Fable one, and the two would drift.
+	if latest.FableResetsAt > sampler.now().Unix() {
+		if latest.FableUsed < 0 || latest.FableUsed > 100 {
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota Fable utilization %d is outside 0..100", latest.FableUsed,
+			)
+		}
+		percent := float64(latest.FableUsed)
+		scoped := usagehook.ScopedLimit{
+			Kind:     "weekly_scoped",
+			Percent:  &percent,
+			ResetsAt: time.Unix(latest.FableResetsAt, 0).UTC().Format(time.RFC3339),
+			IsActive: true,
+		}
+		scoped.Scope.Model.DisplayName = "Fable"
+		usage.Limits = append(usage.Limits, scoped)
+	}
 	if len(usageWindows(usage, sampler.now())) == 0 {
 		return usagehook.Usage{}, time.Time{}, false, nil
 	}
@@ -294,13 +332,34 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && reusableClaudeUsage(record.Usage, now) &&
 		now.Sub(confirmedAt) <= maxStaleLimitsAge
+	// This cache is SHARED by every pfm process on the host, so a backoff
+	// written by a peer — another picker, an MCP server, a build that predates
+	// this one — is a normal condition rather than an anomaly. The condition is
+	// re-checked from the FILESYSTEM (free, no request) rather than read out of
+	// the record's message, which is prose and varies by platform.
+	// "Absent" here means no credential we could spend in EITHER source — the
+	// file or the OS keychain — and also covers a signed-out one, because a
+	// peer's backoff must not blank a card whose only real repair is a fallback
+	// or an interactive login.
+	credentialsAbsent := usagehook.IsCredentialUnavailable(usagehook.CredentialAvailable(account.ConfigDir))
 	if matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
 		err := errors.New(record.Backoff.Message)
 		if !bypassCredentialBackoff || !needsCredentialRefresh(err) {
+			// A backoff carrying usable windows still serves them, whatever
+			// wrote it — a 429's cached quota is exactly as good here as
+			// anywhere else.
 			if staleUsable && staleEligible(err) {
 				return record.Usage, confirmedAt, err
 			}
-			return usagehook.Usage{}, time.Time{}, err
+			// An EMPTY replay is the one that blanks the card, and a revived
+			// record cannot carry the os.ErrNotExist sentinel FetchClaude gates
+			// its statusline fallback on (it comes back as a flat errors.New).
+			// With no credentials file the live path below costs a local stat
+			// and returns that sentinel properly wrapped, so fall through to it
+			// rather than returning nothing.
+			if !credentialsAbsent {
+				return usagehook.Usage{}, time.Time{}, err
+			}
 		}
 	}
 	if !bypassCredentialBackoff && matches && reusableClaudeUsage(record.Usage, now) &&
@@ -328,6 +387,19 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 		// retry. Recording backoff here would block that retry with the failure
 		// it is specifically intended to repair.
 		if needsCredentialRefresh(err) {
+			return usagehook.Usage{}, time.Time{}, err
+		}
+		// An ABSENT credentials file is a local, network-free condition — the
+		// normal shape wherever Claude keeps its credentials in the OS keychain
+		// — and it is exactly the case fetchClaudeStatusline covers. A backoff
+		// buys nothing here (no request was made, so there is no endpoint to
+		// spare) and costs the fallback: the replay path above revives a record
+		// as errors.New(record.Backoff.Message), and a flat string error cannot
+		// satisfy the errors.Is(err, os.ErrNotExist) that FetchClaude gates the
+		// statusline fallback on. Recording one therefore blanks the Limits card
+		// for the whole backoff window while a fresh, identity-matched quota
+		// snapshot sits on disk.
+		if usagehook.IsCredentialUnavailable(err) {
 			return usagehook.Usage{}, time.Time{}, err
 		}
 		message, retryAfter := backoffFor(err, now)
@@ -713,7 +785,7 @@ func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) 
 	}
 	if sampler.ackAttempted[key] {
 		sampler.mu.Unlock()
-		return fmt.Errorf("credential refresh already attempted for account %d", account.ID)
+		return fmt.Errorf("%w for account %d", errAckAlreadyAttempted, account.ID)
 	}
 	sampler.ackAttempted[key] = true
 	sampler.mu.Unlock()
@@ -721,12 +793,32 @@ func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) 
 		return fmt.Errorf("credential refresh unavailable for account %d", account.ID)
 	}
 	err := sampler.Ack(ctx, account)
-	if ctx.Err() != nil {
+	switch {
+	case ctx.Err() != nil:
 		sampler.mu.Lock()
 		delete(sampler.ackAttempted, key)
 		sampler.mu.Unlock()
+	case err != nil:
+		sampler.mu.Lock()
+		if sampler.ackFailure == nil {
+			sampler.ackFailure = make(map[string]string)
+		}
+		// The probe's combined output can carry the account's own hook chatter,
+		// newlines included, and this string lands in a single TUI row. Collapse
+		// every whitespace run so the card stays one line without discarding
+		// any of the reason.
+		sampler.ackFailure[key] = strings.Join(strings.Fields(err.Error()), " ")
+		sampler.mu.Unlock()
 	}
 	return err
+}
+
+// probeFailure is the remembered reason this account's credential probe
+// failed, or "" if one never ran or ran successfully.
+func (sampler *LimitsSampler) probeFailure(account LimitAccount) string {
+	sampler.mu.Lock()
+	defer sampler.mu.Unlock()
+	return sampler.ackFailure[account.cacheKey()]
 }
 
 func (account LimitAccount) cacheKey() string {

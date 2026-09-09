@@ -713,7 +713,7 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	if sessionID == "" {
 		sessionID = "anon"
 	}
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"acct":                int64(account),
 		"config_dir":          filepath.Clean(runtime.ConfigDir),
 		"five_hour_used":      int64(five),
@@ -721,7 +721,20 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 		"five_hour_resets_at": fiveWindow.ResetsAt,
 		"seven_day_resets_at": sevenWindow.ResetsAt,
 		"ts":                  now.Unix(),
-	})
+	}
+	// windowsAt has already folded the scoped `limits` array into this map, so
+	// the Fable window is available here exactly like the two flat ones. It is
+	// recorded whenever it is present and still in the future — 0% used is a
+	// real reading, not a missing one — because a reader that has fallen back
+	// to this file can render no Fable window this writer did not carry. That
+	// fallback is no longer the only door (usagehook reads the OS keychain
+	// directly now), but it is still the one a signed-out or unreachable
+	// account depends on.
+	if fableWindow, ok := data.RateLimits.Windows["seven_day_fable"]; ok && fableWindow.ResetsAt > now.Unix() {
+		payload["fable_used"] = int64(fableWindow.UsedPercentage)
+		payload["fable_resets_at"] = fableWindow.ResetsAt
+	}
+	body, err := json.Marshal(payload)
 	if err == nil {
 		body = append(body, '\n')
 		_ = atomicWrite(
