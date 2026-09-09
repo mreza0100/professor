@@ -41,6 +41,8 @@ Bullets MUST follow this shape:
 
 ## Releases
 
+- [v0.73.0](releases/v0.73.0.md) — Shared headless execution, macOS credential recovery, and fleet diagnostics.
+
 - [v0.72.0](releases/v0.72.0.md) — the chat MCP surface stops reporting work it did not do
 - [v0.71.0](releases/v0.71.0.md) — legacy cc* shell surface and /p:360 retired end to end; fresh Claude chats spawn natively; every gate names its own broken state
 - [v0.70.0](releases/v0.70.0.md) — /p:tokens and the p/ namespace removed end to end; pfm install prunes orphaned global-command links; three self-reporting gates corrected (typed dangling condition, stage-named mirror hook, guard-marker paths); new /pfm:refresh blueprint re-derivation command
