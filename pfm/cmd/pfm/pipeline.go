@@ -51,17 +51,10 @@ const (
 	// scheduling unconditional full-fleet passes. Known Codex panes retain
 	// lightweight identity checks so /clear in another pane stays observable.
 	fleetRefreshParkThreshold = 60 * time.Second
-	// fleetRefreshParkPollInterval is how often a PARKED stream checks
-	// whether the activity clock or a known Codex pane's identity moved.
-	// It never scans the whole process tree while nothing changes. Raised
-	// from 2s (2026-09-08 measurement, devbox: an idle Limits tab ran
-	// RefreshCodexHeldRollouts's /proc/<pid>/fd walk, plus — before the
-	// parkedCodexRollouts fingerprint cache below — a tmux capture-pane per
-	// live Codex pane, on EVERY poll, ~4 capture-pane execs per 5s) — the
-	// fingerprint cache is what makes capture-pane conditional now, but the
-	// procfs walk itself still runs on every poll, so the interval is
-	// widened too rather than relying on the cache alone.
-	fleetRefreshParkPollInterval = 10 * time.Second
+	// Presence polling stays responsive while expensive idle identity probes
+	// use their own slower cadence.
+	fleetRefreshParkPollInterval  = 2 * time.Second
+	fleetRefreshCodexPollInterval = 10 * time.Second
 )
 
 // refreshCadence is one refresh stream's backoff state. It starts at
@@ -857,11 +850,10 @@ func streamFleetRefreshesWith(
 	// fire — so a parked poll whose procfs probe reports the identical set
 	// of rollouts, where every one of them is a shape procfs alone already
 	// resolves (see codexRolloutFingerprintsSkippable), skips that call
-	// outright (2026-09-08 measurement, devbox: ~4 capture-pane execs per
-	// 5s on an idle Limits tab). It is reset from the fresh live.Codex after
-	// every full pass, parked or not, so the next poll always compares
-	// against the most recent authoritative state.
+	// outright. Only a reconciliation without warnings populates this cache;
+	// a full pass invalidates it so the next idle probe verifies the binding.
 	var parkedRollouts map[int]codexRolloutFingerprint
+	var nextCodexProbe time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -876,9 +868,10 @@ func streamFleetRefreshesWith(
 		next := cadence.next()
 		if parked && next >= fleetRefreshParkThreshold && !pendingRefresh {
 			timer.Reset(fleetRefreshParkPollInterval)
-			if request.ReadOnly || len(live.Codex) == 0 {
+			if request.ReadOnly || len(live.Codex) == 0 || time.Now().Before(nextCodexProbe) {
 				continue
 			}
+			nextCodexProbe = time.Now().Add(fleetRefreshCodexPollInterval)
 			probe := gather.Snapshot{Panes: live.Panes}
 			probe.Codex, err = gather.RefreshCodexHeldRollouts(
 				gather.NewProcFS(environment.paths.ProcRoot), live.Codex, environment.paths.Roots[pfmengine.Codex],
@@ -888,7 +881,6 @@ func streamFleetRefreshesWith(
 			}
 			fingerprints := codexRolloutFingerprints(probe.Codex)
 			unchanged := codexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
-			parkedRollouts = fingerprints
 			if unchanged && codexRolloutFingerprintsSkippable(probe.Codex) {
 				// No live Codex PID's FDLinks-observed rollout moved since
 				// the previous poll, AND every one of them already has an
@@ -902,7 +894,20 @@ func streamFleetRefreshesWith(
 				// pane's own screen is the only signal there is.
 				continue
 			}
-			if !reconcileCodexPanes(ctx, database, probe, commandRuntime{Config: environment.config, Paths: environment.paths}, warn) {
+			// A warning can mean the binding was retained for retry. Cache only
+			// a fully verified pass; an unchanged rollout is not proof that
+			// the previous database write succeeded.
+			verified := true
+			changed := reconcileCodexPanes(ctx, database, probe, commandRuntime{Config: environment.config, Paths: environment.paths}, func(message string) {
+				verified = false
+				warn(message)
+			})
+			if verified {
+				parkedRollouts = fingerprints
+			} else {
+				parkedRollouts = nil
+			}
+			if !changed {
 				continue
 			}
 		}
@@ -1006,11 +1011,9 @@ func streamFleetRefreshesWith(
 			return
 		}
 		pendingRefresh = false
-		// Every full pass just re-established the authoritative rollout
-		// identity for every live Codex PID; the next parked poll (if any)
-		// must diff against THIS state, not whatever a stale earlier poll
-		// last saw.
-		parkedRollouts = codexRolloutFingerprints(live.Codex)
+		// A full pass can publish while reconciliation reports a retryable
+		// failure. Let the first parked poll verify the binding before caching.
+		parkedRollouts = nil
 	}
 }
 

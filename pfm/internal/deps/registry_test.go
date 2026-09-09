@@ -3,6 +3,7 @@ package deps
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -118,5 +119,36 @@ func TestResolveCacheIsScopedByPATH(t *testing.T) {
 	t.Setenv("PATH", second)
 	if got, err := Resolve("probe-scoped"); err != nil || got != wantSecond {
 		t.Fatalf("Resolve() under second PATH = %q, %v; want %q, nil", got, err, wantSecond)
+	}
+}
+
+// TestResolveUsesTheRegistryCommandForAStableName pins the distinction
+// between a registry row's stable Name and the command it must execute. A
+// configured absolute command must win over a same-named PATH entry; this is
+// the security boundary for fixed commands such as macOS's keychain helper.
+func TestResolveUsesTheRegistryCommandForAStableName(t *testing.T) {
+	resetResolveCache(t)
+
+	configuredDir := t.TempDir()
+	configured := writeExecutable(t, configuredDir, "configured-security")
+	shadowDir := t.TempDir()
+	shadow := writeExecutable(t, shadowDir, "security-alias")
+	t.Setenv("PATH", shadowDir)
+
+	const stableName = "security-alias"
+	previous := fixedCommands
+	fixedCommands = append(append([]Entry(nil), fixedCommands...), Entry{
+		Name:      stableName,
+		Command:   configured,
+		Platforms: []string{runtime.GOOS},
+	})
+	t.Cleanup(func() { fixedCommands = previous })
+
+	got, err := Resolve(stableName)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", stableName, err)
+	}
+	if got != configured {
+		t.Fatalf("Resolve(%q) = %q, want configured command %q (PATH shadow %q)", stableName, got, configured, shadow)
 	}
 }

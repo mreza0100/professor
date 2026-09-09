@@ -178,6 +178,7 @@ func Resolve(name string) (string, error) {
 	if cached, ok := resolveCached(name); ok {
 		return cached, nil
 	}
+	command := name
 	for _, entry := range Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		if entry.Name != name && entry.Command != name {
 			continue
@@ -185,9 +186,10 @@ func Resolve(name string) (string, error) {
 		if !entry.AppliesTo(runtime.GOOS) {
 			return "", fmt.Errorf("dependency %s is not supported on %s", entry.Name, runtime.GOOS)
 		}
+		command = entry.Command
 		break
 	}
-	path, err := exec.LookPath(name)
+	path, err := exec.LookPath(command)
 	if err != nil {
 		return path, err
 	}

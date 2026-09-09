@@ -1,6 +1,7 @@
 package usagehook
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,7 +48,7 @@ var keychainReader = readKeychain
 // source holds a signed-out credential (ErrSignedOut), or a source holds
 // something unreadable (a decode error, which is a real failure to look and
 // must never be reported as absence).
-func loadCredential(configDir string) (credentials, error) {
+func loadCredential(ctx context.Context, configDir string) (credentials, error) {
 	var credential credentials
 	body, fileErr := os.ReadFile(CredentialPath(configDir))
 	if fileErr != nil && !errors.Is(fileErr, os.ErrNotExist) {
@@ -56,7 +57,7 @@ func loadCredential(configDir string) (credentials, error) {
 	source := CredentialPath(configDir)
 	if fileErr != nil {
 		service := KeychainService(configDir)
-		keychainBody, keychainErr := keychainReader(service)
+		keychainBody, keychainErr := keychainReader(ctx, service)
 		if keychainErr != nil {
 			if errors.Is(keychainErr, os.ErrNotExist) {
 				// Name BOTH doors. A message naming only the file sends a
@@ -92,7 +93,7 @@ func IsCredentialUnavailable(err error) bool {
 
 // CredentialAvailable reports whether an account has a usable credential in
 // either source, returning the same distinguishable error loadCredential does.
-func CredentialAvailable(configDir string) error {
-	_, err := loadCredential(configDir)
+func CredentialAvailable(ctx context.Context, configDir string) error {
+	_, err := loadCredential(ctx, configDir)
 	return err
 }

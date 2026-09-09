@@ -341,7 +341,7 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	// file or the OS keychain — and also covers a signed-out one, because a
 	// peer's backoff must not blank a card whose only real repair is a fallback
 	// or an interactive login.
-	credentialsAbsent := usagehook.IsCredentialUnavailable(usagehook.CredentialAvailable(account.ConfigDir))
+	credentialsAbsent := usagehook.IsCredentialUnavailable(usagehook.CredentialAvailable(ctx, account.ConfigDir))
 	if matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
 		err := errors.New(record.Backoff.Message)
 		if !bypassCredentialBackoff || !needsCredentialRefresh(err) {

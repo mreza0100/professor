@@ -1,6 +1,7 @@
 package usagehook
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 func stubKeychain(t *testing.T, reader func(string) ([]byte, error)) {
 	t.Helper()
 	previous := keychainReader
-	keychainReader = reader
+	keychainReader = func(_ context.Context, service string) ([]byte, error) { return reader(service) }
 	t.Cleanup(func() { keychainReader = previous })
 }
 
@@ -50,7 +51,7 @@ func TestLoadCredentialReadsTheKeychainWhenNoCredentialsFileExists(t *testing.T)
 		}
 		return []byte(`{"claudeAiOauth":{"accessToken":"keychain-token"}}`), nil
 	})
-	credential, err := loadCredential(configDir)
+	credential, err := loadCredential(context.Background(), configDir)
 	if err != nil {
 		t.Fatalf("loadCredential: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestLoadCredentialPrefersTheCredentialsFileOverTheKeychain(t *testing.T) {
 		t.Fatal("keychain consulted even though a credentials file exists")
 		return nil, nil
 	})
-	credential, err := loadCredential(configDir)
+	credential, err := loadCredential(context.Background(), configDir)
 	if err != nil {
 		t.Fatalf("loadCredential: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestLoadCredentialTellsSignedOutApartFromAbsent(t *testing.T) {
 	stubKeychain(t, func(string) ([]byte, error) {
 		return []byte(`{"claudeAiOauth":{"accessToken":"","refreshToken":""}}`), nil
 	})
-	_, err := loadCredential(configDir)
+	_, err := loadCredential(context.Background(), configDir)
 	if !errors.Is(err, ErrSignedOut) {
 		t.Fatalf("err=%v, want ErrSignedOut", err)
 	}
@@ -108,7 +109,7 @@ func TestLoadCredentialTellsSignedOutApartFromAbsent(t *testing.T) {
 func TestLoadCredentialNamesBothSourcesWhenNeitherHoldsACredential(t *testing.T) {
 	configDir := t.TempDir()
 	stubKeychain(t, func(string) ([]byte, error) { return nil, os.ErrNotExist })
-	_, err := loadCredential(configDir)
+	_, err := loadCredential(context.Background(), configDir)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err=%v, want it to wrap os.ErrNotExist so the snapshot fallback engages", err)
 	}
@@ -129,7 +130,7 @@ func TestLoadCredentialSurfacesAKeychainFailureRatherThanReportingAbsence(t *tes
 	stubKeychain(t, func(string) ([]byte, error) {
 		return nil, errors.New("User interaction is not allowed")
 	})
-	_, err := loadCredential(configDir)
+	_, err := loadCredential(context.Background(), configDir)
 	if err == nil {
 		t.Fatal("loadCredential succeeded despite an unreadable keychain")
 	}
@@ -154,13 +155,13 @@ func TestLoadCredentialRereadsTheKeychainSoARotatedTokenIsPickedUp(t *testing.T)
 		reads++
 		return []byte(`{"claudeAiOauth":{"accessToken":"` + token + `"}}`), nil
 	})
-	first, err := loadCredential(configDir)
+	first, err := loadCredential(context.Background(), configDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Stand in for the CLI refreshing the credential in place.
 	token = "rotated-token"
-	second, err := loadCredential(configDir)
+	second, err := loadCredential(context.Background(), configDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,5 +171,32 @@ func TestLoadCredentialRereadsTheKeychainSoARotatedTokenIsPickedUp(t *testing.T)
 	}
 	if reads != 2 {
 		t.Fatalf("reads=%d, want one keychain read per resolution (no cached credential)", reads)
+	}
+}
+
+// TestCredentialAvailableForwardsTheCallerContext pins cancellation ownership
+// at the public credential probe seam. The prompt hook and sampler pass their
+// request context here so a blocked keychain lookup cannot outlive the work
+// that asked for it.
+func TestCredentialAvailableForwardsTheCallerContext(t *testing.T) {
+	configDir := t.TempDir()
+	type contextKey struct{}
+	wantValue := "caller-context"
+	ctx := context.WithValue(context.Background(), contextKey{}, wantValue)
+	previous := keychainReader
+	keychainReader = func(got context.Context, service string) ([]byte, error) {
+		if got.Value(contextKey{}) != wantValue {
+			t.Fatalf("keychain context value = %v, want %q", got.Value(contextKey{}), wantValue)
+		}
+		if service != KeychainService(configDir) {
+			t.Fatalf("service=%q, want %q", service, KeychainService(configDir))
+		}
+		return nil, os.ErrNotExist
+	}
+	t.Cleanup(func() { keychainReader = previous })
+
+	err := CredentialAvailable(ctx, configDir)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("CredentialAvailable() error = %v, want wrapped os.ErrNotExist", err)
 	}
 }

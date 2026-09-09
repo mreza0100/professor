@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,6 +127,99 @@ func TestParkedPickerRetriesRefreshAfterCodexClear(t *testing.T) {
 	runParkedCodexClear(t, true)
 }
 
+// TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout pins
+// the retry boundary for the parked identity probe. A live process can keep
+// the same rollout open while the first attempt to retire the old binding
+// fails; that warning must invalidate the fingerprint cache so the next
+// probe retries the database write instead of treating the unchanged rollout
+// as proof that reconciliation succeeded.
+func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *testing.T) {
+	database, manager, socket, oldID, currentID := codexRegatherJailFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan ui.Snapshot, 8)
+	var stderr bytes.Buffer
+	const warning = "record clear kill"
+	warningEvents := make(chan string, 8)
+	warn := func(message string) {
+		printWarn(&stderr)(message)
+		if strings.Contains(message, warning) {
+			warningEvents <- message
+		}
+	}
+	go streamFleetRefreshesWith(
+		ctx,
+		database,
+		scanRequest{},
+		warn,
+		&stderr,
+		updates,
+		refreshDependencies{activity: ui.NewActivityClock(time.Now())},
+	)
+	defer func() {
+		cancel()
+		for range updates {
+		}
+	}()
+
+	for completed := 0; completed < 2; {
+		select {
+		case snapshot, ok := <-updates:
+			if !ok {
+				t.Fatalf("stream closed before park: %s", stderr.String())
+			}
+			if !snapshot.Refreshing {
+				completed++
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatalf("stream did not reach park: %s", stderr.String())
+		}
+	}
+
+	// The stream's first pass normally advances oldID to the status-line
+	// identity. Put the binding back so the next parked probe has one clear to
+	// retire, then give the fake live process a stable held current rollout.
+	if err := manager.Unkill(ctx, oldID); err != nil {
+		t.Fatalf("remove first-pass clear retirement: %v", err)
+	}
+	if _, _, err := manager.AdvanceCodexPane(ctx, socket, "%0", oldID); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := database.Rollout(ctx, currentID)
+	if err != nil || !found {
+		t.Fatalf("current rollout missing: %v", err)
+	}
+	procRoot := jailPaths(t).ProcRoot
+	fdPath := filepath.Join(procRoot, "90301", "fd", "3")
+	if err := os.Symlink(current.Path, fdPath); err != nil {
+		t.Fatalf("hold current rollout in fake Codex process: %v", err)
+	}
+
+	faultDB, err := sql.Open("sqlite", database.SharedPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer faultDB.Close()
+	if _, err := faultDB.Exec(`CREATE TRIGGER reject_clear_retry BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear retry fault'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	bound := 2*fleetRefreshCodexPollInterval + fleetRefreshParkPollInterval + 5*time.Second
+	deadline := time.After(bound)
+	for attempts := 0; attempts < 2; attempts++ {
+		select {
+		case <-warningEvents:
+			continue
+		case _, ok := <-updates:
+			if !ok {
+				t.Fatalf("stream closed before the second binding warning: %s", stderr.String())
+			}
+		case <-deadline:
+			t.Fatalf("parked probe retried binding failure fewer than twice within %s: warnings=%q", bound, stderr.String())
+		}
+	}
+}
+
 type clearRetryIndexRunner struct{ calls int }
 
 func (runner *clearRetryIndexRunner) Run(context.Context, fleetindex.Options) (fleetindex.Counters, error) {
@@ -182,11 +276,11 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("change fixture identity: %v: %s", err, output)
 	}
-	// fleetRefreshParkPollInterval widened from 2s to 10s (2026-09-08 —
-	// see its doc comment), so the parked poll that observes this clear may
-	// not fire for a full 10s; give it enough headroom past that to stay
-	// stable rather than pinned to the interval itself.
-	deadline := time.After(fleetRefreshParkPollInterval + 15*time.Second)
+	// The expensive Codex identity probe has its own 10s cadence, separate
+	// from the cheap 2s parked presence poll. Give the probe one full interval
+	// plus headroom, rather than timing this test against the presence timer.
+	bound := fleetRefreshCodexPollInterval + 15*time.Second
+	deadline := time.After(bound)
 	for {
 		select {
 		case snapshot, ok := <-updates:
@@ -204,7 +298,7 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 			assertNoStaleCodexRow(t, snapshot.Rows, currentID, oldID, "parked clear")
 			return
 		case <-deadline:
-			t.Fatal("parked picker missed Codex /clear for 10 seconds")
+			t.Fatalf("parked picker missed Codex /clear within %s", bound)
 		}
 	}
 }

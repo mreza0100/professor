@@ -184,7 +184,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	// Claude account seat, so the hook stays silent — but only for that
 	// reason. A keychain we failed to read is a different thing entirely and
 	// must surface rather than masquerade as "no account here".
-	if err := CredentialAvailable(options.ConfigDir); err != nil {
+	if err := CredentialAvailable(ctx, options.ConfigDir); err != nil {
 		if IsCredentialUnavailable(err) {
 			return "", nil
 		}
@@ -545,7 +545,7 @@ func EnsurePrivateDirectory(path string) error {
 }
 
 func refresh(ctx context.Context, options Options, cachePath string) error {
-	credential, err := loadCredential(options.ConfigDir)
+	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return err
 	}
@@ -582,7 +582,7 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 // cache. It is the shared fetch seam for the Limits tab and the prompt hook.
 func Fetch(ctx context.Context, options Options) (Usage, error) {
 	options = normalize(options)
-	credential, err := loadCredential(options.ConfigDir)
+	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return Usage{}, err
 	}
