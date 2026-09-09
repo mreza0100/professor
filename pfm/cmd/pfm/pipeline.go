@@ -51,10 +51,10 @@ const (
 	// scheduling unconditional full-fleet passes. Known Codex panes retain
 	// lightweight identity checks so /clear in another pane stays observable.
 	fleetRefreshParkThreshold = 60 * time.Second
-	// fleetRefreshParkPollInterval is how often a PARKED stream checks
-	// whether the activity clock or a known Codex pane's identity moved.
-	// It never scans the whole process tree while nothing changes.
-	fleetRefreshParkPollInterval = 2 * time.Second
+	// Presence polling stays responsive while expensive idle identity probes
+	// use their own slower cadence.
+	fleetRefreshParkPollInterval  = 2 * time.Second
+	fleetRefreshCodexPollInterval = 10 * time.Second
 )
 
 // refreshCadence is one refresh stream's backoff state. It starts at
@@ -843,6 +843,17 @@ func streamFleetRefreshesWith(
 	// A failed publication must be retried even if reconciliation already
 	// committed the binding and therefore reports no further identity change.
 	pendingRefresh := false
+	// parkedRollouts is the FDLinks-observed identity of every live Codex
+	// PID as of the previous parked poll. reconcileCodexPanes' observation
+	// step runs a tmux capture-pane over every live Codex pane — the same
+	// exec fleetRefreshParkPollInterval exists to avoid paying on every
+	// fire — so a parked poll whose procfs probe reports the identical set
+	// of rollouts, where every one of them is a shape procfs alone already
+	// resolves (see codexRolloutFingerprintsSkippable), skips that call
+	// outright. Only a reconciliation without warnings populates this cache;
+	// a full pass invalidates it so the next idle probe verifies the binding.
+	var parkedRollouts map[int]codexRolloutFingerprint
+	var nextCodexProbe time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -857,9 +868,10 @@ func streamFleetRefreshesWith(
 		next := cadence.next()
 		if parked && next >= fleetRefreshParkThreshold && !pendingRefresh {
 			timer.Reset(fleetRefreshParkPollInterval)
-			if request.ReadOnly || len(live.Codex) == 0 {
+			if request.ReadOnly || len(live.Codex) == 0 || time.Now().Before(nextCodexProbe) {
 				continue
 			}
+			nextCodexProbe = time.Now().Add(fleetRefreshCodexPollInterval)
 			probe := gather.Snapshot{Panes: live.Panes}
 			probe.Codex, err = gather.RefreshCodexHeldRollouts(
 				gather.NewProcFS(environment.paths.ProcRoot), live.Codex, environment.paths.Roots[pfmengine.Codex],
@@ -867,7 +879,35 @@ func streamFleetRefreshesWith(
 			if err != nil {
 				warn(fmt.Sprintf("Codex idle identity probe: %v", err))
 			}
-			if !reconcileCodexPanes(ctx, database, probe, commandRuntime{Config: environment.config, Paths: environment.paths}, warn) {
+			fingerprints := codexRolloutFingerprints(probe.Codex)
+			unchanged := codexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
+			if unchanged && codexRolloutFingerprintsSkippable(probe.Codex) {
+				// No live Codex PID's FDLinks-observed rollout moved since
+				// the previous poll, AND every one of them already has an
+				// answer procfs alone can stand behind (a held rollout, or a
+				// conflict/error state observeCodexPanes overrides
+				// regardless of pane text) — nothing a capture-pane could
+				// tell reconciliation that procfs has not already settled.
+				// A rollout-LESS Codex process (DetectCodexThreads' normal
+				// shape since Codex 0.146.1 — no open rollout fd at all) is
+				// never skippable: procfs has no opinion for it, so the
+				// pane's own screen is the only signal there is.
+				continue
+			}
+			// A warning can mean the binding was retained for retry. Cache only
+			// a fully verified pass; an unchanged rollout is not proof that
+			// the previous database write succeeded.
+			verified := true
+			changed := reconcileCodexPanes(ctx, database, probe, commandRuntime{Config: environment.config, Paths: environment.paths}, func(message string) {
+				verified = false
+				warn(message)
+			})
+			if verified {
+				parkedRollouts = fingerprints
+			} else {
+				parkedRollouts = nil
+			}
+			if !changed {
 				continue
 			}
 		}
@@ -971,7 +1011,75 @@ func streamFleetRefreshesWith(
 			return
 		}
 		pendingRefresh = false
+		// A full pass can publish while reconciliation reports a retryable
+		// failure. Let the first parked poll verify the binding before caching.
+		parkedRollouts = nil
 	}
+}
+
+// codexRolloutFingerprint is one Codex PID's FDLinks-observed rollout
+// identity as of the last time it was checked. streamFleetRefreshesWith
+// caches one of these per PID across parked polls so it can tell whether
+// gather.RefreshCodexHeldRollouts' procfs probe actually changed anything
+// before paying for reconcileCodexPanes' tmux capture-pane over every live
+// Codex pane (2026-09-08 measurement — see fleetRefreshParkPollInterval).
+type codexRolloutFingerprint struct {
+	rolloutPath   string
+	rolloutHeld   bool
+	identityError string
+}
+
+// codexRolloutFingerprints snapshots the comparable identity of every PID in
+// codex. Two snapshots with the same fingerprints for the same PID set mean
+// procfs saw no change worth a capture-pane.
+func codexRolloutFingerprints(codex []gather.LiveCodex) map[int]codexRolloutFingerprint {
+	fingerprints := make(map[int]codexRolloutFingerprint, len(codex))
+	for _, process := range codex {
+		fingerprints[process.PID] = codexRolloutFingerprint{
+			rolloutPath:   process.RolloutPath,
+			rolloutHeld:   process.RolloutHeld,
+			identityError: process.IdentityError,
+		}
+	}
+	return fingerprints
+}
+
+// codexRolloutFingerprintsEqual reports whether two fingerprint snapshots
+// name the exact same PIDs holding the exact same rollout identities. A
+// PID appearing, disappearing, or changing what it holds all count as a
+// change — only bit-for-bit agreement counts as "nothing moved".
+func codexRolloutFingerprintsEqual(a, b map[int]codexRolloutFingerprint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for pid, fingerprint := range a {
+		other, found := b[pid]
+		if !found || other != fingerprint {
+			return false
+		}
+	}
+	return true
+}
+
+// codexRolloutFingerprintsSkippable reports whether procfs alone already
+// pins the resolved identity for EVERY live Codex process, making a
+// capture-pane over their panes redundant when combined with an unchanged
+// fingerprint. observeCodexPanes overrides whatever a pane's screen shows in
+// exactly two cases: a process holding its own rollout open (RolloutHeld —
+// the live process wins outright) and a process carrying an IdentityError
+// (processConflicts forces identity.Failed regardless of pane text). Every
+// OTHER live Codex process — RolloutHeld false with no error, the shape
+// DetectCodexThreads' own doc calls "the normal shape of a paginated thread
+// since Codex 0.146.1" — has no procfs-derived opinion at all: the pane's
+// own screen is the only identity signal that exists for it, so it is never
+// skippable no matter how long its (nonexistent) rollout stays the same.
+func codexRolloutFingerprintsSkippable(codex []gather.LiveCodex) bool {
+	for _, process := range codex {
+		if !process.RolloutHeld && process.IdentityError == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // codexRenamerFor returns the tmux driver reconcileCodexPanes re-applies a

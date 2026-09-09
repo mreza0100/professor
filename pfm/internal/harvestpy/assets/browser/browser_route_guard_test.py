@@ -86,9 +86,8 @@ def test_serialized_ask_never_overlaps():
         state["inflight"] -= 1
         return True, ""
 
-    guarded = serialized_ask(slow_ask)
-
     async def fire_all():
+        guarded = serialized_ask(slow_ask)
         await asyncio.gather(*(guarded(f"u{i}") for i in range(5)))
 
     run(fire_all())

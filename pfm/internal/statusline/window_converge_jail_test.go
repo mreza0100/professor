@@ -12,6 +12,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/testjail"
 )
 
 // countingRunner is the real command runner with a call counter around it, so
@@ -35,19 +36,7 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	root, err := os.MkdirTemp(base, "probe-pfm-slname-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
-			t.Errorf("remove probe jail: %v", err)
-		}
-	})
+	root := testjail.ShortRoot(t)
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	if err := os.MkdirAll(tmuxDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -128,19 +117,7 @@ func TestRenderLeavesASharedWindowAlone(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	root, err := os.MkdirTemp(base, "probe-pfm-slshared-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
-			t.Errorf("remove probe jail: %v", err)
-		}
-	})
+	root := testjail.ShortRoot(t)
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	if err := os.MkdirAll(tmuxDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -233,19 +210,7 @@ func TestRenderConvergesToTheSameClipNameSyncUses(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	root, err := os.MkdirTemp(base, "probe-pfm-slclip-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
-			t.Errorf("remove probe jail: %v", err)
-		}
-	})
+	root := testjail.ShortRoot(t)
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	if err := os.MkdirAll(tmuxDir, 0o700); err != nil {
 		t.Fatal(err)

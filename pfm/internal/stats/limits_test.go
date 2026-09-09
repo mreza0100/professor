@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
+	pfmstatusline "hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
 )
 
@@ -78,9 +80,30 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 		return nil
 	}
 	limits, warnings := sampler.Sample(context.Background())
-	if acks != 0 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
+	// A seat holding only a FOREIGN identity's snapshot is as dark as one
+	// holding none, so it does get the credential probe. What must survive the
+	// probe is the refusal itself: a snapshot belonging to a previous account
+	// identity is never adopted, however the account is repaired afterwards.
+	if acks != 1 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
 		!strings.Contains(limits[0].Status, ".credentials.json") {
 		t.Fatalf("acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced", acks, warnings, limits)
+	}
+}
+
+func TestLimitsSamplerRejectsLegacyUnboundStatuslineQuota(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	currentConfig := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(currentConfig, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), "", now)
+	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, ConfigDir: currentConfig}})
+	sampler.Now = func() time.Time { return now }
+	usage, confirmedAt, found, err := sampler.fetchClaudeStatusline(sampler.Accounts[0])
+	if err != nil || found || !confirmedAt.IsZero() || len(usage.NamedWindowsAt(now)) != 0 {
+		t.Fatalf("legacy unbound snapshot accepted: usage=%#v confirmedAt=%s found=%v err=%v", usage, confirmedAt, found, err)
 	}
 }
 
@@ -770,6 +793,79 @@ func TestLimitsSamplerReadsCachePayloadTheHookWroteWithoutFetching(t *testing.T)
 	}
 }
 
+func TestLimitsSamplerDoesNotReuseClaudeCacheAcrossConfigDirectories(t *testing.T) {
+	for _, testcase := range []struct {
+		name       string
+		configDir  string
+		age        time.Duration
+		backoff    bool
+		serverFail bool
+	}{
+		{name: "fresh foreign identity", configDir: "foreign"},
+		{name: "legacy blank identity", configDir: ""},
+		{name: "foreign backoff", configDir: "foreign", backoff: true},
+		{name: "foreign stale fallback", configDir: "foreign", age: 30 * time.Minute, serverFail: true},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			now := time.Unix(1_800_000_000, 0)
+			currentDir := filepath.Join(home, ".cc", "2")
+			writeFixtureCredentials(t, currentDir)
+			foreignDir := filepath.Join(home, ".cc", "old-2")
+			cacheConfig := testcase.configDir
+			if cacheConfig == "foreign" {
+				cacheConfig = foreignDir
+			}
+			fetchedAt := now.Add(-testcase.age)
+			record := usagehook.CacheRecord{
+				Usage:     liveClaudeUsage(now, 71),
+				ConfigDir: cacheConfig,
+				FetchedAt: &fetchedAt,
+			}
+			if testcase.backoff {
+				record.Backoff = &usagehook.CacheBackoff{
+					Message: "429 Too Many Requests", RetryAfter: now.Add(10 * time.Minute), RecordedAt: now,
+				}
+			}
+			cachePath := usagehook.CachePath(usagehook.DefaultCacheDir(), 2)
+			if err := usagehook.WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			var hits int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits++
+				if testcase.serverFail {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, usageJSONBody(13, 29, now))
+			}))
+			defer server.Close()
+
+			sampler := NewLimitsSampler([]LimitAccount{{
+				ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: currentDir,
+			}})
+			sampler.Now = func() time.Time { return now }
+			sampler.Endpoint, sampler.Client = server.URL, server.Client()
+			limits, warnings := sampler.Sample(context.Background())
+			if hits != 1 {
+				t.Fatalf("foreign cache suppressed the current account fetch: hits=%d, want 1", hits)
+			}
+			if testcase.serverFail {
+				if len(limits) != 1 || len(limits[0].Windows) != 0 || !strings.Contains(limits[0].Status, "503") {
+					t.Fatalf("foreign stale cache leaked after provider failure: limits=%#v warnings=%v", limits, warnings)
+				}
+				return
+			}
+			if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Windows[0].UsedPct != 13 {
+				t.Fatalf("limits=%#v warnings=%v, want current identity's fetched 13/29 windows", limits, warnings)
+			}
+		})
+	}
+}
+
 func TestLimitsSamplerLiveRefreshDoesNotBlockOtherAccounts(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1054,6 +1150,85 @@ func TestLimitsSamplerLiveReturnsIndependentCachedValues(t *testing.T) {
 	}
 }
 
+// TestLimitsSamplerLiveHonorsSeparateCodexTTL pins the split introduced
+// 2026-09-08: Codex's own fetch execs `codex app-server` and drives a
+// JSON-RPC handshake over it (internal/statusline/process.go) — roughly 5
+// CPU-seconds at ~50% of a core per call — while Claude's fetch is the
+// disk-cache-backed HTTP path. Sharing LiveLimitsTTL (5s) between them
+// respawned the Codex process about every 10s forever on an idle Limits tab
+// (devbox measurement). Claude must keep refreshing at its own 5s cadence
+// the whole time; Codex must not be re-invoked again until CodexLiveLimitsTTL
+// (90s) has actually elapsed.
+func TestLimitsSamplerLiveHonorsSeparateCodexTTL(t *testing.T) {
+	var clock atomic.Int64
+	start := time.Unix(1_800_000_000, 0)
+	clock.Store(start.UnixNano())
+	var claudeCalls, codexCalls atomic.Int32
+	ctx := context.Background()
+	sampler := NewLimitsSampler([]LimitAccount{
+		{ID: 51, Engine: pfmengine.Claude, Label: "claude"},
+		{ID: 52, Engine: pfmengine.Codex, Label: "codex"},
+	})
+	sampler.TTL = LiveLimitsTTL
+	sampler.CodexTTL = CodexLiveLimitsTTL
+	sampler.Now = func() time.Time { return time.Unix(0, clock.Load()) }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return liveClaudeUsage(sampler.Now(), float64(claudeCalls.Add(1)%100)), nil
+	}
+	sampler.FetchCodex = func(context.Context, LimitAccount) (codexUsage, error) {
+		used := float64(codexCalls.Add(1) % 100)
+		return codexUsage{
+			PlanType: "pro",
+			RateLimit: &codexRateLimitBucket{
+				LimitID: "codex",
+				PrimaryWindow: &codexRateLimitWindow{
+					UsedPercent: used, LimitWindowSeconds: 604_800,
+					ResetAt: sampler.Now().Add(7 * 24 * time.Hour).Unix(),
+				},
+			},
+		}, nil
+	}
+
+	// t=0: both accounts are cold, so both fetch once.
+	sampler.SampleLive(ctx)
+	waitForCachedWindow(t, sampler, 51, float64(1))
+	waitForCachedWindow(t, sampler, 52, float64(1))
+	if got := claudeCalls.Load(); got != 1 {
+		t.Fatalf("t=0: claude calls=%d, want 1", got)
+	}
+	if got := codexCalls.Load(); got != 1 {
+		t.Fatalf("t=0: codex calls=%d, want 1", got)
+	}
+
+	// The picker's own result poll runs every LiveLimitsTTL (5s) while the
+	// Limits tab is being watched; step past it (6s, matching
+	// TestLimitsSamplerLiveKeepsRefreshingAcrossHours' margin) fourteen
+	// times — 84s total, still short of CodexLiveLimitsTTL (90s). Claude
+	// must refetch on every single step; Codex must not refetch on any of
+	// them.
+	const step = LiveLimitsTTL + time.Second
+	for tick := 1; tick <= 14; tick++ {
+		clock.Store(start.Add(time.Duration(tick) * step).UnixNano())
+		sampler.SampleLive(ctx)
+		waitForCachedWindow(t, sampler, 51, float64((tick+1)%100))
+		if got := claudeCalls.Load(); got != int32(tick+1) {
+			t.Fatalf("tick %d (elapsed %s): claude calls=%d, want %d", tick, time.Duration(tick)*step, got, tick+1)
+		}
+		if got := codexCalls.Load(); got != 1 {
+			t.Fatalf("tick %d (elapsed %s, still under CodexLiveLimitsTTL=%s): codex calls=%d, want 1 (no re-invocation within its TTL)",
+				tick, time.Duration(tick)*step, CodexLiveLimitsTTL, got)
+		}
+	}
+
+	// Cross CodexLiveLimitsTTL: the very next poll must finally refetch Codex.
+	clock.Store(start.Add(CodexLiveLimitsTTL + 2*time.Second).UnixNano())
+	sampler.SampleLive(ctx)
+	waitForCachedWindow(t, sampler, 52, float64(2))
+	if got := codexCalls.Load(); got != 2 {
+		t.Fatalf("after CodexLiveLimitsTTL elapsed: codex calls=%d, want 2", got)
+	}
+}
+
 func TestLimitsSamplerLiveKeepsRefreshingAcrossHours(t *testing.T) {
 	var clock atomic.Int64
 	start := time.Unix(1_800_000_000, 0)
@@ -1212,4 +1387,365 @@ func limitTestAccountKey(t *testing.T, sampler *LimitsSampler, accountID int) st
 	}
 	t.Fatalf("fixture has no account %d", accountID)
 	return ""
+}
+
+// A missing .credentials.json is the NORMAL shape on a host that keeps Claude
+// credentials in the OS keychain, so the statusline fallback must survive
+// repetition, not just the first call. The first sampler's live attempt fails
+// with a wrapped os.ErrNotExist and records a one-minute backoff; a second
+// sampler over the same HOME then replays that record. Reviving a backoff as
+// errors.New(message) drops the os.ErrNotExist sentinel FetchClaude gates the
+// statusline fallback on, so the replay used to render an empty Limits card
+// for the rest of the backoff window while a fresh, identity-matched quota
+// snapshot sat on disk.
+func TestLimitsSamplerKeepsStatuslineQuotaAfterACredentialBackoffIsRecorded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	newSampler := func() *LimitsSampler {
+		sampler := NewLimitsSampler([]LimitAccount{{
+			ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+		}})
+		sampler.Now = func() time.Time { return now }
+		sampler.Ack = func(context.Context, LimitAccount) error {
+			return fmt.Errorf("credential refresh must not run")
+		}
+		return sampler
+	}
+
+	if limits, _ := newSampler().Sample(context.Background()); len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("first sample = %#v, want the statusline fallback to supply two windows", limits)
+	}
+
+	// The second sampler is a fresh picker frame: no in-memory cache, so it
+	// reads whatever the first call left on disk.
+	limits, warnings := newSampler().Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("replayed sample = %#v warnings=%v, want the SAME two statusline windows, not an empty card", limits, warnings)
+	}
+	if limits[0].Windows[0].UsedPct != 31 || limits[0].Windows[1].UsedPct != 47 ||
+		!limits[0].ConfirmedAt.Equal(now) {
+		t.Fatalf("replayed provenance = %#v, want 31/47 confirmed at %s", limits[0], now)
+	}
+}
+
+// The statusline snapshot is the ONLY limits source on a host that keeps
+// Claude credentials in the OS keychain, so every window the Limits tab can
+// render has to survive that file — including the scoped Fable window, which
+// the harness reports in its `limits` array rather than as a flat top-level
+// window. Carrying only five_hour/seven_day across the snapshot made Fable
+// structurally unrenderable for such a host, not merely absent.
+func TestLimitsSamplerRendersTheFableWindowFromAStatuslineSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	rateDir := filepath.Join(home, "tmp", "cc-rate-limits")
+	if err := os.MkdirAll(rateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := json.Marshal(map[string]any{
+		"acct":                2,
+		"config_dir":          configDir,
+		"five_hour_used":      31,
+		"seven_day_used":      47,
+		"fable_used":          62,
+		"five_hour_resets_at": now.Add(4 * time.Hour).Unix(),
+		"seven_day_resets_at": now.Add(6 * 24 * time.Hour).Unix(),
+		"fable_resets_at":     now.Add(5 * 24 * time.Hour).Unix(),
+		"ts":                  now.Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rateDir, "acct-2.session.json"), append(snapshot, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("credential refresh must not run")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 3 {
+		t.Fatalf("limits=%#v warnings=%v, want 5h + 7d + 7d-fable from the snapshot", limits, warnings)
+	}
+	got := map[string]float64{}
+	for _, w := range limits[0].Windows {
+		got[w.Name] = w.UsedPct
+	}
+	if got["5h"] != 31 || got["7d"] != 47 || got["7d-fable"] != 62 {
+		t.Fatalf("windows = %#v, want 5h=31 7d=47 7d-fable=62", got)
+	}
+}
+
+type quietStatuslineCommand struct{}
+
+func (quietStatuslineCommand) Output(context.Context, string, ...string) ([]byte, error) {
+	return nil, nil
+}
+
+func TestLimitsSamplerReadsFableWrittenByStatuslineRender(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Truncate(time.Second)
+	runtime := pfmstatusline.Runtime{
+		Now: func() time.Time { return now }, Home: home, ConfigDir: configDir,
+		CacheDir: filepath.Join(home, "cache"), RateLimitDir: filepath.Join(home, "tmp", "cc-rate-limits"),
+		SIDDir: filepath.Join(home, "sid"), TmuxDir: filepath.Join(home, "tmux"), ProcRoot: filepath.Join(home, "proc"),
+		Columns: 120, UID: os.Getuid(), AccountDirs: map[string]int{configDir: 2}, AccountEmojis: map[int]string{2: "🥈"}, Env: map[string]string{},
+		Command: quietStatuslineCommand{},
+	}
+	fableReset := now.Add(5 * 24 * time.Hour)
+	input := []byte(fmt.Sprintf(`{"model":{"display_name":"Fable"},"session_id":"roundtrip","rate_limits":{"five_hour":{"used_percentage":11,"resets_at":%d},"seven_day":{"used_percentage":31,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]}}`, now.Add(4*time.Hour).Unix(), now.Add(6*24*time.Hour).Unix(), fableReset.UTC().Format(time.RFC3339)))
+	rendered, err := pfmstatusline.Render(context.Background(), input, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(runtime.RateLimitDir)
+	if len(entries) != 1 {
+		t.Fatalf("statusline did not write its Fable snapshot: entries=%v dir=%s render=%q", entries, runtime.RateLimitDir, rendered)
+	}
+	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("credential refresh must not run")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 3 {
+		t.Fatalf("limits=%#v warnings=%v, want 5h + 7d + Fable from the statusline snapshot", limits, warnings)
+	}
+	for _, window := range limits[0].Windows {
+		if window.Name == "7d-fable" && window.UsedPct != 0 {
+			t.Fatalf("Fable snapshot window=%#v, want zero utilization", window)
+		}
+	}
+}
+
+// An account with NEITHER a credentials file NOR a statusline snapshot has
+// nothing to render at all, and nothing on the Limits tab ever changes that on
+// its own — historically the seat stayed blank until the user sent it a prompt
+// by hand, which is what made its CLI mint a token and publish a snapshot. The
+// sampler now spends the same hidden one-turn Haiku probe the credential-
+// rejection path already uses, then re-reads both sources.
+func TestLimitsSamplerProbesAnAccountThatHasNoCredentialsAndNoSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	rateDir := filepath.Join(home, "tmp", "cc-rate-limits")
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	var probes int
+	// The real probe makes the account's CLI publish a statusline snapshot;
+	// this stands in for that side effect exactly.
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		writeStatuslineQuotaFixture(t, rateDir, configDir, now)
+		return nil
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if probes != 1 {
+		t.Fatalf("probes=%d, want exactly one credential probe for the blank account", probes)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the post-probe snapshot to render", limits, warnings)
+	}
+}
+
+// When the probe itself fails there is no automatic repair left, and the
+// reason — an OAuth session too old to refresh needs an interactive re-login —
+// is the single most useful thing the card can say. A bare "no such file or
+// directory" sends the reader looking for a file that is never supposed to
+// exist on a keychain host. The reason must also SURVIVE, not appear once and
+// then decay to the bare error on the next refresh.
+func TestLimitsSamplerReportsAFailedCredentialProbeAndKeepsReportingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	var probes int
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		return errors.New("OAuth session expired and could not be refreshed\nSessionEnd hook failed: Hook cancelled")
+	}
+	limits, _ := sampler.Sample(context.Background())
+	if probes != 1 || len(limits) != 1 || !strings.Contains(limits[0].Status, "OAuth session expired") {
+		t.Fatalf("probes=%d limits=%#v, want the probe failure named on the card", probes, limits)
+	}
+	// The reason lands in a single TUI row, and a real probe's combined output
+	// carries the account's own hook chatter with it.
+	if strings.ContainsAny(limits[0].Status, "\n\r") {
+		t.Fatalf("status=%q, want the probe reason collapsed onto one line", limits[0].Status)
+	}
+
+	// A later refresh must not silently forget WHY the account is blank just
+	// because the once-per-account probe guard has already fired.
+	sampler.mu.Lock()
+	delete(sampler.cache, sampler.Accounts[0].cacheKey())
+	sampler.mu.Unlock()
+	limits, _ = sampler.Sample(context.Background())
+	if probes != 1 {
+		t.Fatalf("probes=%d, want the probe attempted at most once per account", probes)
+	}
+	if len(limits) != 1 || !strings.Contains(limits[0].Status, "OAuth session expired") {
+		t.Fatalf("second sample=%#v, want the probe failure still named", limits)
+	}
+}
+
+// The usage cache is SHARED across every pfm process on the host by design, so
+// a backoff record written by a peer — another picker, an MCP server, a build
+// that predates this fix — is a normal condition, not an anomaly. Declining to
+// write one ourselves is therefore not enough: the replay must also refuse to
+// suppress the absent-credentials path, which costs no request, is re-checked
+// for free, and is the one case the statusline fallback exists to cover. The
+// check has to come from the FILESYSTEM, because a revived record carries only
+// a flat message and can never satisfy errors.Is(err, os.ErrNotExist).
+func TestLimitsSamplerIgnoresAPeerCredentialBackoffWhenCredentialsAreAbsent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	// Exactly what an older peer process leaves behind: a live backoff whose
+	// message names the missing credentials file.
+	cachePath := usagehook.CachePath(filepath.Join(home, "tmp", "cc-usage-"+strconv.Itoa(os.Getuid())), 2)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := usagehook.WriteCacheRecord(cachePath, usagehook.CacheRecord{
+		ConfigDir: configDir,
+		Backoff: &usagehook.CacheBackoff{
+			Message: fmt.Sprintf(
+				"read usage credentials: open %s: no such file or directory",
+				filepath.Join(configDir, ".credentials.json"),
+			),
+			RetryAfter: now.Add(time.Minute),
+			RecordedAt: now,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		return fmt.Errorf("probe must not be needed when a snapshot is already on disk")
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the statusline snapshot to render through a peer's backoff", limits, warnings)
+	}
+}
+
+// A SIGNED-OUT account is not an absent one. Before the credential source
+// learned to tell them apart, a keychain entry with an empty token surfaced as
+// a plain "contains no access token" — a message that satisfied no fallback
+// gate, so the account rendered blank even with a perfectly fresh quota
+// snapshot sitting on disk, and the card never said the one thing that would
+// have fixed it. It must now serve the snapshot AND, because the probe cannot
+// mint a token from an empty refresh token, must not spend one.
+func TestLimitsSamplerServesASnapshotForASignedOutAccountWithoutProbingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), configDir, now)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return usagehook.Usage{}, fmt.Errorf(
+			"keychain item %s holds no access token: %w",
+			usagehook.KeychainService(configDir), usagehook.ErrSignedOut,
+		)
+	}
+	var probes int
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		probes++
+		return nil
+	}
+	limits, warnings := sampler.Sample(context.Background())
+	if probes != 0 {
+		t.Fatalf("probes=%d, want none: no headless turn can refresh an empty refresh token", probes)
+	}
+	if len(limits) != 1 || len(limits[0].Windows) != 2 {
+		t.Fatalf("limits=%#v warnings=%v, want the signed-out account served from its snapshot", limits, warnings)
+	}
+}
+
+// With no snapshot to fall back to there is nothing left but the diagnosis,
+// and it has to carry the repair. "no such file or directory" sends a keychain
+// host hunting for a file it is never supposed to have.
+func TestLimitsSamplerTellsASignedOutAccountToLogIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".cc", "2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+
+	sampler := NewLimitsSampler([]LimitAccount{{
+		ID: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir,
+	}})
+	sampler.Now = func() time.Time { return now }
+	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
+		return usagehook.Usage{}, fmt.Errorf("keychain item holds no access token: %w", usagehook.ErrSignedOut)
+	}
+	sampler.Ack = func(context.Context, LimitAccount) error {
+		t.Fatal("a signed-out account was probed")
+		return nil
+	}
+	limits, _ := sampler.Sample(context.Background())
+	if len(limits) != 1 {
+		t.Fatalf("limits=%#v, want one row", limits)
+	}
+	if !strings.Contains(limits[0].Status, "claude /login") {
+		t.Fatalf("status=%q, want the card to name the interactive repair", limits[0].Status)
+	}
+	if strings.Contains(limits[0].Status, "no such file or directory") {
+		t.Fatalf("status=%q, must not blame a missing file on a keychain host", limits[0].Status)
+	}
 }

@@ -145,7 +145,9 @@ func inspectJailedGroup(
 			continue
 		}
 		record, state, err := readProcessIdentity(root, pid, false)
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			// The process exited between directory enumeration and the stat
+			// read; procfs can report either ENOENT or ESRCH for that race.
 			continue
 		}
 		if err != nil {

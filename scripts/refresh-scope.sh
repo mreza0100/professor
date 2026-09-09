@@ -12,6 +12,8 @@ set -euo pipefail
 # release cannot proceed and cannot re-baseline until each one is ruled — delete the
 # template file AND its refresh-map.json entry, or remap it to the source's new path.
 # Re-baselining around a missing source is what keeps a zombie template alive forever.
+# ENUMERATION-FAILED exits 1 when a source glob cannot be read or expanded;
+# an incomplete scan never emits a clean scope summary.
 
 # `ledgers` is the other half of a release's scope, and it is mechanical for the
 # same reason `scan` is. A pending `.professor/release.md` bullet in a LINKED
@@ -150,8 +152,8 @@ MANIFEST_FILE="$PROJECT_ROOT/.professor/manifest.json"
 # and a leading ~/ (to $HOME) in a map path/glob string.
 # Returns 1 (empty output, one stderr note) when a {project:ROLE} cannot resolve —
 # manifest absent or key null. Callers classify that: scan/regen count it
-# MISSING-SOURCE (still BLOCKING via MISSING_SOURCE_EXIT); ignore/glob entries
-# match nothing. A hard exit here would kill the whole scan at the first
+# MISSING-SOURCE (still BLOCKING via MISSING_SOURCE_EXIT); glob entries fail
+# enumeration and unresolved ignore entries match nothing. A hard exit here would kill the whole scan at the first
 # unresolvable source and report nothing about the rest.
 resolve_path() {
   local resolved="$1"
@@ -167,7 +169,8 @@ resolve_path() {
       echo "refresh-scope: manifest .interview.projects.$role is missing/null" >&2
       return 1
     }
-    resolved="${resolved//\{project:$role\}/$val}"
+    local token="{project:$role}"
+    resolved="${resolved%%"$token"*}${val}${resolved#*"$token"}"
   done
   case "$resolved" in
     "~/"*) resolved="${HOME}/${resolved#\~/}" ;;
@@ -180,6 +183,17 @@ abspath_under_project() {
     /*) printf '%s\n' "$1" ;;
     *) printf '%s\n' "$PROJECT_ROOT/$1" ;;
   esac
+}
+
+source_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "refresh-scope: TOOLCHAIN-MISSING — sha256sum or shasum is required" >&2
+    return 1
+  fi
 }
 
 is_ignored() {
@@ -197,14 +211,48 @@ is_ignored() {
 }
 
 list_glob_files() {
-  local pattern resolved
+  local pattern resolved prefix root found relative
   pattern="$1"
-  resolved="$(resolve_path "$pattern")" || return 0
+  resolved="$(resolve_path "$pattern")" || return 1
+  # bash 3.2 — the macOS system bash — has no globstar, and without it `**`
+  # silently degrades to a single-level `*`: a recursive glob would then report
+  # only its top directory and every deeper file would read as "nothing there".
+  # A trailing `/**` is expanded with find instead, and any OTHER `**` shape is
+  # refused BY NAME rather than quietly mismatched. find starts inside the prefix
+  # and prunes dot-entries below it, matching glob semantics exactly — a glob
+  # never descends into a dot-directory unless dotglob is set.
+  case "$resolved" in
+    */'**')
+      prefix="${resolved%/'**'}"
+      if [[ "$prefix" == *'**'* ]]; then
+        printf 'UNSUPPORTED-GLOB %s — only one trailing "/**" expands under bash %s\n' \
+          "$pattern" "$BASH_VERSION" >&2
+        return 1
+      fi
+      root="$(abspath_under_project "$prefix")"
+      [[ -d "$root" ]] || return 0
+      if ! found="$(cd "$root" && find . -mindepth 1 -name '.*' -prune -o -type f -print)"; then
+        printf 'ENUMERATION-FAILED %s — recursive source scan failed\n' "$pattern" >&2
+        return 1
+      fi
+      while IFS= read -r relative; do
+        [[ -z "$relative" ]] && continue
+        printf '%s/%s\n' "$prefix" "${relative#./}"
+      done <<< "$found"
+      return 0
+      ;;
+    *'**'*)
+      printf 'UNSUPPORTED-GLOB %s — only a trailing "/**" expands under bash %s\n' \
+        "$pattern" "$BASH_VERSION" >&2
+      return 1
+      ;;
+  esac
   (
     cd "$PROJECT_ROOT"
-    shopt -s globstar nullglob
+    shopt -s nullglob
+    IFS=$'\n'
     for f in $resolved; do
-      [[ -f "$f" ]] && printf '%s\n' "$f"
+      if [[ -f "$f" ]]; then printf '%s\n' "$f"; fi
     done
   )
 }
@@ -217,19 +265,24 @@ scan() {
   local mapped_sources_file
   mapped_sources_file="$(mktemp)"
 
-  declare -A template_ok=()
-  declare -A template_seen=()
+  # bash 3.2 has no associative arrays: both sets are newline-delimited strings,
+  # and a template is "ok" until something names it bad.
+  local template_bad=$'\n'
+  local template_seen=$'\n'
 
   while IFS=$'\t' read -r tmpl src expected; do
     [[ -z "$tmpl" ]] && continue
-    template_seen["$tmpl"]=1
-    [[ -z "${template_ok[$tmpl]+x}" ]] && template_ok["$tmpl"]=1
+    if [[ "$template_seen" != *$'\n'"$tmpl"$'\n'* ]]; then
+      template_seen+="$tmpl"$'\n'
+    fi
 
     local resolved_rel abs
     if ! resolved_rel="$(resolve_path "$src")"; then
       echo "MISSING-SOURCE ${tmpl} <= ${src}"
       x=$((x + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
       continue
     fi
     abs="$(abspath_under_project "$resolved_rel")"
@@ -238,36 +291,62 @@ scan() {
     if [[ ! -f "$abs" ]]; then
       echo "MISSING-SOURCE ${tmpl} <= ${src}"
       x=$((x + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
       continue
     fi
 
     local actual
-    actual="$(sha256sum "$abs" | awk '{print $1}')"
+    actual="$(source_hash "$abs")"
     if [[ "$actual" != "$expected" ]]; then
       echo "CHANGED ${tmpl} <= ${src}"
       c=$((c + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
     fi
   done < <(jq -r '.templates | to_entries[] | select(.value.sources) | .key as $t | .value.sources | to_entries[] | [$t, .key, .value] | @tsv' "$MAP_PATH")
 
-  for tmpl in "${!template_seen[@]}"; do
-    [[ "${template_ok[$tmpl]}" == "1" ]] && u=$((u + 1))
-  done
+  while IFS= read -r tmpl; do
+    [[ -z "$tmpl" ]] && continue
+    [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]] && u=$((u + 1))
+  done <<< "$template_seen"
 
-  mapfile -t MAPPED_SOURCES < <(sort -u "$mapped_sources_file")
+  # bash 3.2 has no mapfile.
+  MAPPED_SOURCES=()
+  while IFS= read -r ms_line; do
+    MAPPED_SOURCES+=("$ms_line")
+  done < <(sort -u "$mapped_sources_file")
   rm -f "$mapped_sources_file"
 
-  mapfile -t ALL_GLOB_FILES < <(
-    while IFS= read -r glob; do
-      [[ -z "$glob" ]] && continue
-      list_glob_files "$glob"
-    done < <(jq -r '.source_globs[]? // empty' "$MAP_PATH") | sort -u
-  )
+  # Capture every enumerator status in this shell. A process substitution
+  # loses its producer's exit code and can turn a failed scan into empty scope.
+  local source_globs glob glob_files all_glob_files=""
+  if ! source_globs="$(jq -r '.source_globs[]? // empty' "$MAP_PATH")"; then
+    echo "refresh-scope: ENUMERATION-FAILED — cannot read source_globs" >&2
+    return 1
+  fi
+  while IFS= read -r glob; do
+    [[ -z "$glob" ]] && continue
+    if ! glob_files="$(list_glob_files "$glob")"; then
+      printf 'refresh-scope: ENUMERATION-FAILED %s — scope is incomplete\n' "$glob" >&2
+      return 1
+    fi
+    [[ -z "$glob_files" ]] || all_glob_files+="$glob_files"$'\n'
+  done <<< "$source_globs"
+  if ! all_glob_files="$(printf '%s' "$all_glob_files" | sort -u)"; then
+    echo "refresh-scope: ENUMERATION-FAILED — cannot sort source paths" >&2
+    return 1
+  fi
+  ALL_GLOB_FILES=()
+  while IFS= read -r gf_line; do
+    [[ -z "$gf_line" ]] || ALL_GLOB_FILES+=("$gf_line")
+  done <<< "$all_glob_files"
 
-  for f in "${ALL_GLOB_FILES[@]}"; do
+  for f in ${ALL_GLOB_FILES[@]+"${ALL_GLOB_FILES[@]}"}; do
     local is_mapped=0 ms
-    for ms in "${MAPPED_SOURCES[@]}"; do
+    for ms in ${MAPPED_SOURCES[@]+"${MAPPED_SOURCES[@]}"}; do
       if [[ "$f" == "$ms" ]]; then
         is_mapped=1
         break
@@ -324,7 +403,7 @@ regen() {
     }
     abs="$(abspath_under_project "$resolved_rel")"
     local actual
-    actual="$(sha256sum "$abs" | awk '{print $1}')"
+    actual="$(source_hash "$abs")"
     jq -nc --arg t "$tmpl" --arg s "$src" --arg h "$actual" '{t:$t,s:$s,h:$h}' >> "$frag_file"
     n=$((n + 1))
   done < <(jq -r '.templates | to_entries[] | select(.value.sources) | .key as $t | .value.sources | to_entries[] | [$t, .key, .value] | @tsv' "$MAP_PATH")

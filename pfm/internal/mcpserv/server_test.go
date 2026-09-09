@@ -74,14 +74,26 @@ func callTool[T any](
 	arguments any,
 ) T {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// One bound covers every call here, and the heaviest is not close to the
+	// others: the oversize-paste case drives a full megabyte through bracketed
+	// paste into a real jailed tmux pane and back. 15s fit that on an idle box
+	// and not under `go test ./...`, where this package competes with every
+	// other for exec and scheduler time, so a healthy megabyte round trip
+	// reported itself as a deadline. Size the bound for the heaviest legitimate
+	// operation; it is only ever paid in full when a call genuinely hangs.
+	const callBound = 60 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), callBound)
 	defer cancel()
+	started := time.Now()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      name,
 		Arguments: arguments,
 	})
 	if err != nil {
-		t.Fatalf("%s: %v", name, err)
+		// Name how long it actually waited: a call that died at the bound is a
+		// different problem from one that failed immediately, and "context
+		// deadline exceeded" alone does not say which happened.
+		t.Fatalf("%s: after %s of a %s bound: %v", name, time.Since(started).Round(time.Millisecond), callBound, err)
 	}
 	if result.IsError {
 		t.Fatalf("%s returned tool error: %#v", name, result.Content)

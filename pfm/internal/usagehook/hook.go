@@ -180,12 +180,15 @@ type credentials struct {
 // its error and exit zero: hook infrastructure must never block a prompt.
 func Evaluate(ctx context.Context, options Options) (string, error) {
 	options = normalize(options)
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	if _, err := os.Stat(credentialPath); err != nil {
-		if os.IsNotExist(err) {
+	// A config dir with no usable credential in EITHER source is simply not a
+	// Claude account seat, so the hook stays silent — but only for that
+	// reason. A keychain we failed to read is a different thing entirely and
+	// must surface rather than masquerade as "no account here".
+	if err := CredentialAvailable(ctx, options.ConfigDir); err != nil {
+		if IsCredentialUnavailable(err) {
 			return "", nil
 		}
-		return "", fmt.Errorf("stat usage credentials: %w", err)
+		return "", err
 	}
 	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
 	if err := EnsurePrivateDirectory(options.CacheDir); err != nil {
@@ -193,31 +196,27 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	}
 	now := options.Now()
 	cachePath := CachePath(options.CacheDir, account)
-	// A picker process may already have recorded a shared backoff here (a
-	// 429 or another failure) — honor it and skip our own request too,
-	// exactly like every other reader of this file, instead of rediscovering
-	// the same failure independently.
-	if cacheAge(cachePath, now) >= options.TTL && !backoffActive(cachePath, now) {
+	record, readErr := ReadCacheRecord(cachePath)
+	matches := readErr == nil && record.MatchesConfigDir(options.ConfigDir)
+	// Only this account's record can defer a refresh, including through a
+	// peer's backoff. Numeric account IDs can be reassigned to another seat.
+	backoff := matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter)
+	if !matches || (cacheAge(cachePath, now) >= options.TTL && !backoff) {
 		if err := refresh(ctx, options, cachePath); err != nil {
-			// A stale cache remains usable for one hour, exactly like the shell.
 			fmt.Fprintf(options.Log, "pfm usage-hook: refresh failed; trying stale cache: %v\n", err)
 		}
 	}
-	info, err := os.Stat(cachePath)
-	if err != nil {
+	record, err := ReadCacheRecord(cachePath)
+	if os.IsNotExist(err) {
 		return "", nil
 	}
-	if now.Sub(info.ModTime()) > time.Hour {
-		return "", nil
-	}
-	body, err := os.ReadFile(cachePath)
 	if err != nil {
 		return "", err
 	}
-	var cached usage
-	if err := json.Unmarshal(body, &cached); err != nil {
-		return "", err
+	if !record.MatchesConfigDir(options.ConfigDir) || cacheAge(cachePath, now) > time.Hour {
+		return "", nil
 	}
+	cached := record.Usage
 	five := utilization(cached.FiveHour, 0)
 	seven := utilization(cached.SevenDay, 0)
 	opus := utilization(cached.SevenOpus, -1)
@@ -231,7 +230,11 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	maximum := max(five, seven, opus, fable)
 	flagPath := filepath.Join(options.CacheDir, fmt.Sprintf("warned-%d", account))
 	if maximum < options.Warn {
-		if _, err := os.Stat(flagPath); err == nil {
+		flag, err := os.ReadFile(flagPath)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil && (CacheRecord{ConfigDir: string(flag)}).MatchesConfigDir(options.ConfigDir) {
 			if err := os.Remove(flagPath); err != nil {
 				return "", err
 			}
@@ -244,7 +247,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		}
 		return "", nil
 	}
-	if err := os.WriteFile(flagPath, nil, 0o600); err != nil {
+	if err := AtomicWrite(flagPath, []byte(options.ConfigDir), 0o600); err != nil {
 		return "", err
 	}
 	line := fmt.Sprintf(
@@ -370,6 +373,15 @@ func DefaultCacheDir() string {
 	return UsageCacheDir(os.TempDir(), os.Getuid())
 }
 
+// CredentialPath is the one filesystem rule for an account's OAuth credential
+// file. Callers that must tell "this account has no credentials on disk" apart
+// from a provider failure resolve it here rather than rebuilding the join, so
+// the rule cannot drift between the prompt hook, the fetch, and the Limits
+// tab's own absent-credentials handling.
+func CredentialPath(configDir string) string {
+	return filepath.Join(configDir, ".credentials.json")
+}
+
 // CachePath returns the shared cache file for one Claude account number
 // under cacheDir — the exact file this hook's own refresh() reads and
 // writes, and the one `stats.LimitsSampler` reads and writes too.
@@ -392,24 +404,20 @@ func CachePath(cacheDir string, account int) string {
 // about an hour" bound above, rather than inventing a second number for the
 // same file. A statusline read degrades to "window absent" on any of these —
 // it must never crash the render or fabricate a reading from a bad file.
-func CachedFableWindow(base string, uid, account int, now time.Time) (Window, bool) {
+func CachedFableWindow(base string, uid, account int, configDir string, now time.Time) (Window, bool) {
 	path := CachePath(UsageCacheDir(base, uid), account)
 	info, err := os.Stat(path)
 	if err != nil {
 		return Window{}, false
 	}
 	record, err := ReadCacheRecord(path)
-	if err != nil {
+	if err != nil || !record.MatchesConfigDir(configDir) {
 		return Window{}, false
 	}
 	if record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
 		return Window{}, false
 	}
-	// Prefer the payload's own fetched_at when the file carries one (it is
-	// the cache's own recorded timestamp, per the honesty requirement); a
-	// cache written by this hook's raw refresh() has no such field, so fall
-	// back to the file's mtime, exactly what Evaluate already compares
-	// against for the same one-hour bound.
+	// Identity-bound records predating fetched_at use the file's mtime.
 	fetchedAt := info.ModTime()
 	if record.FetchedAt != nil {
 		fetchedAt = *record.FetchedAt
@@ -430,15 +438,19 @@ type CacheBackoff struct {
 	RecordedAt time.Time `json:"recorded_at"`
 }
 
-// CacheRecord is the on-disk shape of the shared usage cache file. The bare
-// Usage JSON this hook's own refresh() has always written decodes into this
-// completely unchanged — ConfigDir, FetchedAt, and Backoff are additive
-// fields nothing that only wants Usage needs to know exist.
+// CacheRecord binds shared usage and backoff to a config directory. Legacy
+// bare Usage JSON still decodes, but cannot be reused without an identity.
 type CacheRecord struct {
 	Usage
 	ConfigDir string        `json:"config_dir,omitempty"`
 	FetchedAt *time.Time    `json:"fetched_at,omitempty"`
 	Backoff   *CacheBackoff `json:"backoff,omitempty"`
+}
+
+// MatchesConfigDir rejects legacy unbound records and reused account numbers.
+func (record CacheRecord) MatchesConfigDir(configDir string) bool {
+	return record.ConfigDir != "" && configDir != "" &&
+		filepath.Clean(record.ConfigDir) == filepath.Clean(configDir)
 }
 
 // ReadCacheRecord decodes the shared cache file at path. A missing or
@@ -468,19 +480,6 @@ func WriteCacheRecord(path string, record CacheRecord) error {
 		return fmt.Errorf("encode usage cache %s: %w", path, err)
 	}
 	return AtomicWrite(path, body, 0o600)
-}
-
-// backoffActive reports whether the shared cache at path carries an
-// unexpired CacheBackoff — a 429 or another picker-recorded failure this
-// hook honors by making no request of its own before RetryAfter. A missing
-// or corrupt file is never treated as an active backoff: it just means
-// nothing usable is cached yet, so the normal TTL-driven refresh proceeds.
-func backoffActive(path string, now time.Time) bool {
-	record, err := ReadCacheRecord(path)
-	if err != nil || record.Backoff == nil {
-		return false
-	}
-	return now.Before(record.Backoff.RetryAfter)
 }
 
 // RateLimitError reports an HTTP 429 from a usage endpoint. RetryAfter is
@@ -533,17 +532,9 @@ func EnsurePrivateDirectory(path string) error {
 }
 
 func refresh(ctx context.Context, options Options, cachePath string) error {
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	body, err := os.ReadFile(credentialPath)
+	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return err
-	}
-	var credential credentials
-	if err := json.Unmarshal(body, &credential); err != nil {
-		return err
-	}
-	if credential.OAuth.AccessToken == "" {
-		return fmt.Errorf("usage credential contains no access token")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
 	if err != nil {
@@ -571,24 +562,19 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 	if decoded.FiveHour.Utilization == nil {
 		return fmt.Errorf("usage response omitted five_hour utilization")
 	}
-	return AtomicWrite(cachePath, fresh, 0o600)
+	fetchedAt := options.Now()
+	return WriteCacheRecord(cachePath, CacheRecord{
+		Usage: decoded, ConfigDir: options.ConfigDir, FetchedAt: &fetchedAt,
+	})
 }
 
 // Fetch reads one account's current OAuth usage without touching the warning
 // cache. It is the shared fetch seam for the Limits tab and the prompt hook.
 func Fetch(ctx context.Context, options Options) (Usage, error) {
 	options = normalize(options)
-	credentialPath := filepath.Join(options.ConfigDir, ".credentials.json")
-	body, err := os.ReadFile(credentialPath)
+	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
-		return Usage{}, fmt.Errorf("read usage credentials: %w", err)
-	}
-	var credential credentials
-	if err := json.Unmarshal(body, &credential); err != nil {
-		return Usage{}, fmt.Errorf("decode usage credentials: %w", err)
-	}
-	if credential.OAuth.AccessToken == "" {
-		return Usage{}, fmt.Errorf("usage credential contains no access token")
+		return Usage{}, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
 	if err != nil {

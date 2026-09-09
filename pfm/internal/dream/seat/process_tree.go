@@ -232,6 +232,12 @@ func parseProcStat(wantPID int, content []byte) (ProcessRecord, string, error) {
 	if err != nil || parentPID < 0 {
 		return ProcessRecord{}, "", fmt.Errorf("parse proc parent pid %q", fields[1])
 	}
+	// Linux do_task_stat leaves ppid=0, pgid=sid=-1, and num_threads=0
+	// when lock_task_sighand loses an exiting task. This is the kernel's
+	// released-task record, not a malformed live process-group identity.
+	if parentPID == 0 && fields[2] == "-1" && fields[3] == "-1" && fields[17] == "0" {
+		return ProcessRecord{}, "", fmt.Errorf("process %d exited during stat read: %w", pid, fs.ErrNotExist)
+	}
 	processGroupID, err := strconv.Atoi(fields[2])
 	if err != nil || processGroupID < 0 {
 		return ProcessRecord{}, "", fmt.Errorf("parse proc process group id %q", fields[2])
