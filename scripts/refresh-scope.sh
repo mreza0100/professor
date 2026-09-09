@@ -197,12 +197,35 @@ is_ignored() {
 }
 
 list_glob_files() {
-  local pattern resolved
+  local pattern resolved prefix
   pattern="$1"
   resolved="$(resolve_path "$pattern")" || return 0
+  # bash 3.2 — the macOS system bash — has no globstar, and without it `**`
+  # silently degrades to a single-level `*`: a recursive glob would then report
+  # only its top directory and every deeper file would read as "nothing there".
+  # A trailing `/**` is expanded with find instead, and any OTHER `**` shape is
+  # refused BY NAME rather than quietly mismatched. find starts inside the prefix
+  # and prunes dot-entries below it, matching glob semantics exactly — a glob
+  # never descends into a dot-directory unless dotglob is set.
+  case "$resolved" in
+    */'**')
+      prefix="${resolved%/'**'}"
+      [[ -d "$PROJECT_ROOT/$prefix" ]] || return 0
+      (
+        cd "$PROJECT_ROOT/$prefix" &&
+          find . -mindepth 1 -name '.*' -prune -o -type f -print
+      ) | sed "s|^\./|${prefix}/|"
+      return 0
+      ;;
+    *'**'*)
+      printf 'UNSUPPORTED-GLOB %s — only a trailing "/**" expands under bash %s\n' \
+        "$pattern" "$BASH_VERSION" >&2
+      return 1
+      ;;
+  esac
   (
     cd "$PROJECT_ROOT"
-    shopt -s globstar nullglob
+    shopt -s nullglob
     for f in $resolved; do
       [[ -f "$f" ]] && printf '%s\n' "$f"
     done
@@ -217,19 +240,24 @@ scan() {
   local mapped_sources_file
   mapped_sources_file="$(mktemp)"
 
-  declare -A template_ok=()
-  declare -A template_seen=()
+  # bash 3.2 has no associative arrays: both sets are newline-delimited strings,
+  # and a template is "ok" until something names it bad.
+  local template_bad=$'\n'
+  local template_seen=$'\n'
 
   while IFS=$'\t' read -r tmpl src expected; do
     [[ -z "$tmpl" ]] && continue
-    template_seen["$tmpl"]=1
-    [[ -z "${template_ok[$tmpl]+x}" ]] && template_ok["$tmpl"]=1
+    if [[ "$template_seen" != *$'\n'"$tmpl"$'\n'* ]]; then
+      template_seen+="$tmpl"$'\n'
+    fi
 
     local resolved_rel abs
     if ! resolved_rel="$(resolve_path "$src")"; then
       echo "MISSING-SOURCE ${tmpl} <= ${src}"
       x=$((x + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
       continue
     fi
     abs="$(abspath_under_project "$resolved_rel")"
@@ -238,7 +266,9 @@ scan() {
     if [[ ! -f "$abs" ]]; then
       echo "MISSING-SOURCE ${tmpl} <= ${src}"
       x=$((x + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
       continue
     fi
 
@@ -247,27 +277,37 @@ scan() {
     if [[ "$actual" != "$expected" ]]; then
       echo "CHANGED ${tmpl} <= ${src}"
       c=$((c + 1))
-      template_ok["$tmpl"]=0
+      if [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]]; then
+        template_bad+="$tmpl"$'\n'
+      fi
     fi
   done < <(jq -r '.templates | to_entries[] | select(.value.sources) | .key as $t | .value.sources | to_entries[] | [$t, .key, .value] | @tsv' "$MAP_PATH")
 
-  for tmpl in "${!template_seen[@]}"; do
-    [[ "${template_ok[$tmpl]}" == "1" ]] && u=$((u + 1))
-  done
+  while IFS= read -r tmpl; do
+    [[ -z "$tmpl" ]] && continue
+    [[ "$template_bad" != *$'\n'"$tmpl"$'\n'* ]] && u=$((u + 1))
+  done <<< "$template_seen"
 
-  mapfile -t MAPPED_SOURCES < <(sort -u "$mapped_sources_file")
+  # bash 3.2 has no mapfile.
+  MAPPED_SOURCES=()
+  while IFS= read -r ms_line; do
+    MAPPED_SOURCES+=("$ms_line")
+  done < <(sort -u "$mapped_sources_file")
   rm -f "$mapped_sources_file"
 
-  mapfile -t ALL_GLOB_FILES < <(
+  ALL_GLOB_FILES=()
+  while IFS= read -r gf_line; do
+    ALL_GLOB_FILES+=("$gf_line")
+  done < <(
     while IFS= read -r glob; do
       [[ -z "$glob" ]] && continue
       list_glob_files "$glob"
     done < <(jq -r '.source_globs[]? // empty' "$MAP_PATH") | sort -u
   )
 
-  for f in "${ALL_GLOB_FILES[@]}"; do
+  for f in ${ALL_GLOB_FILES[@]+"${ALL_GLOB_FILES[@]}"}; do
     local is_mapped=0 ms
-    for ms in "${MAPPED_SOURCES[@]}"; do
+    for ms in ${MAPPED_SOURCES[@]+"${MAPPED_SOURCES[@]}"}; do
       if [[ "$f" == "$ms" ]]; then
         is_mapped=1
         break
