@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +65,31 @@ func testEnv(captureDir string, values ...string) []string {
 	environment := append([]string(nil), os.Environ()...)
 	environment = append(environment, "CAPTURE_DIR="+captureDir)
 	return append(environment, values...)
+}
+
+func waitForProcessExit(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	lastState := "unknown"
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		} else if err != nil {
+			t.Fatalf("probe descendant process %d: %v", pid, err)
+		}
+
+		state, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		if err == nil {
+			lastState = strings.TrimSpace(string(state))
+			if strings.HasPrefix(lastState, "Z") {
+				return
+			}
+		} else {
+			lastState = fmt.Sprintf("ps: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("descendant process %d remained live after cancellation (state %s)", pid, lastState)
 }
 
 func capturedLines(t *testing.T, path string) []string {
@@ -609,9 +636,7 @@ sleep 30`)
 	if _, scanErr := fmt.Sscanf(pidText, "%d", &pid); scanErr != nil {
 		t.Fatalf("child pid %q: %v", pidText, scanErr)
 	}
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Fatalf("descendant process %d survived cancellation", pid)
-	}
+	waitForProcessExit(t, pid)
 }
 
 func TestSchemaFileIsRemovedAfterCodexRun(t *testing.T) {

@@ -41,6 +41,8 @@ Bullets MUST follow this shape:
 
 ## Releases
 
+- [v0.73.1](releases/v0.73.1.md) — Correct headless cancellation verification after process exit.
+
 - [v0.73.0](releases/v0.73.0.md) — Shared headless execution, macOS credential recovery, and fleet diagnostics.
 
 - [v0.72.0](releases/v0.72.0.md) — the chat MCP surface stops reporting work it did not do
