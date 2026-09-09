@@ -98,6 +98,21 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+// jailReadyBudget bounds how long a freshly spawned tmux server may take to
+// schedule its pane script and paint its label. It is scaffolding readiness,
+// never the contract under test — assertTarget owns every correctness claim in
+// this file — so widening it cannot weaken an assertion, and it is only ever
+// paid in full when a start genuinely fails.
+//
+// The previous 5s was sized for an idle Linux box. Under `go test ./...` this
+// package competes with dozens of concurrently exec'd package binaries, one of
+// its own tests spawns sixty tmux servers, and on macOS the first exec of a
+// freshly written script costs ~120ms median and ~553ms peak against ~6ms
+// warm. At 5s the poll failed repeatedly under exactly that load while every
+// correctness assertion still held — a budget reporting a busy host as a
+// broken contract.
+const jailReadyBudget = 30 * time.Second
+
 func (jail *resolveJail) start(
 	t *testing.T,
 	socket, session, window, label string,
@@ -120,7 +135,8 @@ func (jail *resolveJail) start(
 		t.Fatalf("start %s: %v: %s", socket, err, output)
 	}
 	jail.sockets = append(jail.sockets, socket)
-	deadline := time.Now().Add(5 * time.Second)
+	started := time.Now()
+	deadline := started.Add(jailReadyBudget)
 	for {
 		output, err := jail.command(
 			"-L",
@@ -134,11 +150,30 @@ func (jail *resolveJail) start(
 			break
 		}
 		if time.Now().After(deadline) {
+			// Two different failures reach this line and they demand
+			// different answers. A capture-pane that kept erroring means we
+			// never managed to look; a capture-pane that kept succeeding on a
+			// blank pane means we looked and the label was not there yet.
+			// Printing %v of a nil error for the second case rendered it as
+			// "<nil>" beside a run of blank lines — an error surface reporting
+			// absence, which is the one thing it must never do.
+			waited := time.Since(started)
+			if err != nil {
+				t.Fatalf(
+					"wait for %s label %q: capture-pane kept failing for %s; last error: %v: %q",
+					socket,
+					label,
+					waited,
+					err,
+					output,
+				)
+			}
 			t.Fatalf(
-				"wait for %s label %q: %v: %s",
+				"wait for %s label %q: capture-pane succeeded throughout %s but the pane never painted the label — the session was accepted and its script had not been scheduled yet; last pane content (%d bytes): %q",
 				socket,
 				label,
-				err,
+				waited,
+				len(output),
 				output,
 			)
 		}

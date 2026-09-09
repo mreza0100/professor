@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type actionTmuxJail struct {
@@ -221,6 +222,7 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 	).CombinedOutput(); err != nil {
 		t.Fatalf("add Claude window: %v: %s", err, output)
 	}
+	waitForPaneCommand(t, jail, keepSocket, ":1", "claude")
 	if output, err := jail.command(
 		"-L",
 		keepSocket,
@@ -250,6 +252,36 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 	if strings.TrimSpace(string(output)) != "1" {
 		t.Fatalf("selfswitch active window=%q, want engine window 1", output)
 	}
+}
+
+func waitForPaneCommand(t *testing.T, jail *actionTmuxJail, socket, target, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	last := ""
+	for time.Now().Before(deadline) {
+		output, err := jail.command(
+			"-L", socket,
+			"list-panes",
+			"-t", target,
+			"-F", "#{pane_current_command}\t#{pane_dead}\t#{pane_dead_status}",
+		).CombinedOutput()
+		if err != nil {
+			t.Fatalf("read pane command for %s: %v: %s", target, err, output)
+		}
+		last = strings.TrimSuffix(string(output), "\n")
+		fields := strings.Split(last, "\t")
+		if len(fields) != 3 {
+			t.Fatalf("pane command row=%q, want command/dead/status", last)
+		}
+		if fields[0] == want {
+			return
+		}
+		if fields[1] == "1" {
+			t.Fatalf("pane %s died before reporting %q: command=%q status=%q", target, want, fields[0], fields[2])
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("pane %s never reported current command %q within 5s; last=%q", target, want, last)
 }
 
 // fakeEngine installs a runnable executable at target that behaves like the

@@ -323,30 +323,12 @@ func (spawner CommandThenSpawner) Spawn(
 	for _, steer := range request.Steers {
 		arguments = append(arguments, "--steer", steer)
 	}
-	setsid := spawner.Setsid
-	if setsid == "" {
-		setsid = "setsid"
+	launcher, prefixArgs, forked, err := deps.DetachLauncher(spawner.Setsid, spawner.Nohup)
+	if err != nil {
+		return fmt.Errorf("detach then waiter: %w", err)
 	}
-	setsidPath, setsidErr := deps.Resolve(setsid)
-	usingNohup := setsidErr != nil
-	launcher := setsidPath
-	if usingNohup {
-		nohup := spawner.Nohup
-		if nohup == "" {
-			nohup = "nohup"
-		}
-		var err error
-		launcher, err = deps.Resolve(nohup)
-		if err != nil {
-			return fmt.Errorf(
-				"detach then waiter: setsid unavailable (%v) and nohup unavailable (%w)",
-				setsidErr,
-				err,
-			)
-		}
-	} else {
-		arguments = append([]string{"-f"}, arguments...)
-	}
+	usingNohup := !forked
+	arguments = append(prefixArgs, arguments...)
 	if err := ctx.Err(); err != nil {
 		return err
 	}

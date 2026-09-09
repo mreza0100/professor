@@ -13,6 +13,7 @@ import (
 type CommandSpawner struct {
 	Executable string
 	Setsid     string
+	Nohup      string
 	ConfigPath string
 }
 
@@ -28,13 +29,11 @@ func (spawner CommandSpawner) Spawn(
 			return fmt.Errorf("resolve pfm executable: %w", err)
 		}
 	}
-	setsid := spawner.Setsid
-	if setsid == "" {
-		setsid = deps.Executable("setsid")
-	} else {
-		setsid = deps.Executable(setsid)
+	launcher, prefixArgs, forked, err := deps.DetachLauncher(spawner.Setsid, spawner.Nohup)
+	if err != nil {
+		return fmt.Errorf("detach kill finisher: %w", err)
 	}
-	arguments := []string{"-f", executable}
+	arguments := append(prefixArgs, executable)
 	if spawner.ConfigPath != "" {
 		arguments = append(arguments, "--config", spawner.ConfigPath)
 	}
@@ -54,7 +53,16 @@ func (spawner CommandSpawner) Spawn(
 		"--pane",
 		args.PaneID,
 	)
-	command := exec.CommandContext(ctx, setsid, arguments...)
+	var command *exec.Cmd
+	if forked {
+		command = exec.CommandContext(ctx, launcher, arguments...)
+	} else {
+		// The POSIX floor has no `setsid -f`; start it asynchronously and
+		// release the process handle so the finisher outlives this caller —
+		// under nohup the launched process IS the finisher, so waiting on it
+		// would block until the finisher itself completes.
+		command = exec.Command(launcher, arguments...)
+	}
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("open null device for kill finisher: %w", err)
@@ -63,8 +71,17 @@ func (spawner CommandSpawner) Spawn(
 	command.Stdin = null
 	command.Stdout = null
 	command.Stderr = null
+	if !forked {
+		if err := command.Start(); err != nil {
+			return fmt.Errorf("start detached kill finisher with nohup: %w", err)
+		}
+		if err := command.Process.Release(); err != nil {
+			return fmt.Errorf("release detached kill finisher: %w", err)
+		}
+		return nil
+	}
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("start detached kill finisher: %w", err)
+		return fmt.Errorf("start detached kill finisher with setsid: %w", err)
 	}
 	return nil
 }

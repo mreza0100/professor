@@ -184,7 +184,10 @@ scan_diff_stream() {
   # the zero-added-lines case, because that case is exactly the one a
   # coincidence detector would otherwise skip reporting on.
   local added_lines=${#contents[@]}
-  local -A seen_files=()
+  # bash 3.2 — the macOS system bash a git hook's restricted PATH resolves to —
+  # has no associative arrays, so the seen-set is a newline-delimited string.
+  # git quotes any path containing a newline, so the delimiter stays unambiguous.
+  local seen_files=$'\n'
   local distinct_files=0
   local unattributed=0
   local suppressed=0
@@ -200,8 +203,8 @@ scan_diff_stream() {
         unattributed=$((unattributed + 1))
         continue
       fi
-      if [[ -z "${seen_files[$f]+x}" ]]; then
-        seen_files[$f]=1
+      if [[ "$seen_files" != *$'\n'"$f"$'\n'* ]]; then
+        seen_files+="$f"$'\n'
         distinct_files=$((distinct_files + 1))
       fi
     done

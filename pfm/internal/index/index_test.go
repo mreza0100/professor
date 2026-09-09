@@ -635,6 +635,58 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	}
 }
 
+func TestAttachmentMarkerAloneDoesNotFlagBackground(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "attached-interactive.jsonl")
+	content := `{"type":"user","cwd":"/work/attached","sessionKind":"bg","entrypoint":"cli","promptSource":"typed","message":{"content":"Typed while detached"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := diskFile{ID: "attached-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
+	transcript, _, err := parseClaude(file, 0, store.Transcript{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcript.IsBG || transcript.PromptCount != 1 {
+		t.Fatalf(
+			"attached interactive transcript = %#v, want is_bg=false (sessionKind:\"bg\" measures pane attachment, not who spawned the session)",
+			transcript,
+		)
+	}
+}
+
+func TestBackgroundMarkerOnLaterRecordDoesNotRetroactivelyFlagInteractiveSession(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "sticky-interactive.jsonl")
+	content := strings.Join([]string{
+		`{"type":"user","cwd":"/work/sticky","entrypoint":"cli","promptSource":"typed","message":{"content":"First, attached"}}`,
+		`{"type":"user","cwd":"/work/sticky","sessionKind":"bg","entrypoint":"cli","promptSource":"typed","message":{"content":"Second, detached mid-session"}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := diskFile{ID: "sticky-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
+	transcript, _, err := parseClaude(file, 0, store.Transcript{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcript.IsBG || transcript.PromptCount != 2 {
+		t.Fatalf(
+			"sticky-interactive transcript = %#v, want is_bg=false across the whole session even after a later detached-pane record",
+			transcript,
+		)
+	}
+}
+
 func TestPriorityProjectPassUpdatesOnlyLaunchCWDThenFullPass(t *testing.T) {
 	fixture := setupIndexFixture(t)
 	database := openIndexStore(t)

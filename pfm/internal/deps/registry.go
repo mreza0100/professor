@@ -207,6 +207,43 @@ func Executable(name string) string {
 	return path
 }
 
+// DetachLauncher resolves how this host detaches a helper into its own
+// session: setsid where it exists (Linux), nohup as the documented POSIX
+// fallback (macOS, and any other host without setsid). setsidOverride and
+// nohupOverride let a caller pin a specific binary (tests, config); an empty
+// override falls back to the bare name for a normal PATH lookup through
+// Resolve.
+//
+// prefixArgs carries setsid's own "-f" flag, prepended ahead of the caller's
+// argv; nohup takes no such flag, so prefixArgs is empty on that branch.
+// forked reports whether the launcher forks into the background and returns
+// immediately (setsid -f) or IS the detached helper itself (nohup) — a
+// caller may Run() the former but must Start() and Release() the latter, or
+// it blocks until the helper it meant to detach from finishes.
+func DetachLauncher(setsidOverride, nohupOverride string) (path string, prefixArgs []string, forked bool, err error) {
+	setsid := setsidOverride
+	if setsid == "" {
+		setsid = "setsid"
+	}
+	setsidPath, setsidErr := Resolve(setsid)
+	if setsidErr == nil {
+		return setsidPath, []string{"-f"}, true, nil
+	}
+	nohup := nohupOverride
+	if nohup == "" {
+		nohup = "nohup"
+	}
+	nohupPath, nohupErr := Resolve(nohup)
+	if nohupErr != nil {
+		return "", nil, false, fmt.Errorf(
+			"setsid unavailable (%v) and nohup unavailable (%w)",
+			setsidErr,
+			nohupErr,
+		)
+	}
+	return nohupPath, nil, false, nil
+}
+
 // AppliesTo reports whether the entry belongs to goos.
 func (entry Entry) AppliesTo(goos string) bool {
 	if len(entry.Platforms) == 0 {

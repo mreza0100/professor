@@ -338,6 +338,95 @@ func (tmux CommandTmux) RenameWindow(
 	return nil
 }
 
+// ShowGlobalOption reads one global tmux option's raw value off a live
+// server, the same `show -gv` read tmux-title-renudge performs. tmux always
+// answers with the option's actual value here — unlike `show-options`
+// without `-A`, which omits a line entirely when an option sits at its
+// default — so an "off" server reads back "off", never silence mistaken for
+// "unset".
+func (tmux CommandTmux) ShowGlobalOption(
+	ctx context.Context,
+	socket, name string,
+) (string, error) {
+	binary := tmux.Binary
+	if binary == "" {
+		binary = deps.Executable("tmux")
+	}
+	command := exec.CommandContext(ctx, binary, "-L", socket, "show", "-gv", name)
+	command.Env = append(
+		os.Environ(),
+		"TMUX=",
+		"TMUX_TMPDIR="+tmux.TmuxTmpDir,
+	)
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, err)
+	}
+	return strings.TrimRight(string(output), "\n"), nil
+}
+
+// ApplyGlobalOptions runs each `set-option -g` argument vector against socket
+// — the exact argv shape config.TmuxTitles.Options() returns, and the same
+// shape action.CommandTmux and spawn.CommandTmux apply at server creation.
+// Reusing that shape here means an EXISTING server converges onto the same
+// policy a fresh one is created with, through one option-setting mechanism
+// rather than a second one (K3).
+func (tmux CommandTmux) ApplyGlobalOptions(
+	ctx context.Context,
+	socket string,
+	options [][]string,
+) error {
+	binary := tmux.Binary
+	if binary == "" {
+		binary = deps.Executable("tmux")
+	}
+	for _, arguments := range options {
+		command := exec.CommandContext(
+			ctx,
+			binary,
+			append([]string{"-L", socket}, arguments...)...,
+		)
+		command.Env = append(
+			os.Environ(),
+			"TMUX=",
+			"TMUX_TMPDIR="+tmux.TmuxTmpDir,
+		)
+		if output, err := command.CombinedOutput(); err != nil {
+			return fmt.Errorf(
+				"apply tmux option %v on %s: %w: %s",
+				arguments, socket, err, output,
+			)
+		}
+	}
+	return nil
+}
+
+// NudgeTitlesString flips a live server's set-titles-string away from value
+// and back to it — the identical "flip and restore" mechanism
+// tmux-title-renudge performs (internal/installer/assets/bin/tmux-title-renudge),
+// kept here rather than reimplemented: tmux re-sends the OSC title escape only
+// when the COMPUTED title changes, so a terminal that revived a persistent
+// pane with a cached, unchanged title (VS Code Remote's window reload is the
+// case that motivated the script) never gets a fresh one without this forced
+// two-step. Both steps end at value, so the visible title never actually
+// changes.
+func (tmux CommandTmux) NudgeTitlesString(
+	ctx context.Context,
+	socket, value string,
+) error {
+	if err := tmux.ApplyGlobalOptions(ctx, socket, [][]string{
+		{"set-option", "-g", "set-titles-string", value + " "},
+	}); err != nil {
+		return fmt.Errorf("nudge tmux titles string on %s: %w", socket, err)
+	}
+	if err := tmux.ApplyGlobalOptions(ctx, socket, [][]string{
+		{"set-option", "-g", "set-titles-string", value},
+	}); err != nil {
+		return fmt.Errorf("restore tmux titles string on %s: %w", socket, err)
+	}
+	return nil
+}
+
 // ProbeTmux enumerates chat sockets and probes each server concurrently.
 func ProbeTmux(
 	ctx context.Context,
