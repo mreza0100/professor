@@ -37,8 +37,13 @@ const (
 // misreading is exactly how eight live servers had their tab badges destroyed
 // by a well-meaning fix.
 //
-// It is INFO, never a warning: both states are legitimate. The config key says
-// which one pfm intends; these lines say which one each server is actually in.
+// Both states are legitimate — INFO, never a warning — ONLY when a server's
+// actual ownership matches what the config key intends. When it does not, the
+// line says so explicitly as a DIVERGENCE and the summary counts it: a server
+// left behind by a policy change, or by a scheduler outage that never reached
+// it, is not a deliberate opt-out, and reporting it as one is exactly how five
+// live servers went unnoticed for weeks with the wrong OSC title never
+// emitted at all.
 func printTmuxTitlesDoctor(
 	ctx context.Context,
 	stdout io.Writer,
@@ -75,10 +80,32 @@ func printTmuxTitlesDoctor(
 		fmt.Fprintln(stdout, "doctor: tmux titles sockets=none live")
 		return
 	}
+	divergent := 0
 	for _, socket := range sockets {
 		state, detail := readTmuxTitlesState(ctx, resolved, socket)
-		fmt.Fprintf(stdout, "doctor: tmux titles %s=%s (%s)\n", socket, state, detail)
+		// A server whose state could not be read is neither a match nor a
+		// divergence — it is an unanswered question, and claiming either
+		// answer for it would be a guess reported as a fact.
+		if state != titlesPfmOwned && state != titlesHostOwned {
+			fmt.Fprintf(stdout, "doctor: tmux titles %s=%s (%s)\n", socket, state, detail)
+			continue
+		}
+		if state == intended {
+			fmt.Fprintf(stdout, "doctor: tmux titles %s=%s (%s)\n", socket, state, detail)
+			continue
+		}
+		divergent++
+		expected := "off"
+		if intended == titlesPfmOwned {
+			expected = "on"
+		}
+		fmt.Fprintf(
+			stdout,
+			"doctor: tmux titles %s=%s (%s) DIVERGES from policy=%s: expected set-titles %s\n",
+			socket, state, detail, intended, expected,
+		)
 	}
+	fmt.Fprintf(stdout, "doctor: tmux titles divergent=%d\n", divergent)
 }
 
 // readTmuxTitlesState asks one live server for its set-titles value. It is

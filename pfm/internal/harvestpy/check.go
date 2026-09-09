@@ -200,6 +200,9 @@ func verifyCurrentTarget(current string, digest EnvironmentDigest) error {
 	if err != nil {
 		return fmt.Errorf("resolve recorded environment path: %w", err)
 	}
+	if canonical, symErr := filepath.EvalSymlinks(want); symErr == nil {
+		want = canonical
+	}
 	if resolved != want {
 		return fmt.Errorf("current target resolves to %s, recorded %s", resolved, want)
 	}

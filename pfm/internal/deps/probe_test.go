@@ -29,7 +29,7 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 		{Name: "failed", Command: "failed", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 	}
 	results := Probe(context.Background(), entries, ProbeOptions{
-		GOOS: "linux", Timeout: 2 * time.Second,
+		GOOS: "linux", Timeout: ProbeTimeout,
 	})
 	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateBroken, StateBroken}
 	for index := range want {
@@ -259,8 +259,13 @@ func TestProbeSelfDoctorTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	// Subprocess startup competes with every other package during `go test
 	// ./...`; 200ms made the quick --version/--help probes fail under ordinary
 	// suite contention before this test ever reached the deliberate timeout.
-	// Two seconds preserves a bounded test while leaving ample scheduling room.
-	const timeout = 2 * time.Second
+	// On macOS the first exec of a freshly written executable — exactly what
+	// writeProbeStub hands each subtest — costs ~120ms median and ~553ms peak
+	// (vs ~6ms warm, measured over 60 stubs on an idle box), and `go test
+	// ./...` execs dozens of those concurrently; matching production's
+	// ProbeTimeout leaves ample scheduling room instead of re-deriving a
+	// shorter number that flakes under load.
+	const timeout = ProbeTimeout
 	durationPattern := regexp.MustCompile(`\d+(\.\d+)?\s*(ms|s|m)\b`)
 
 	t.Run("slow but healthy self-doctor stays ok and is named as a timeout", func(t *testing.T) {
