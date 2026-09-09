@@ -7,5 +7,3 @@ Shape: `- {Tier}: {scope} — {semantic change}`, plus a `#### → For:` line wh
 and `(cost)` on any env / hook / permission / model-config delta.
 
 ## Pending
-
-- Patch: headless cancellation verification — wait for descendant exit and distinguish a killed zombie from a live process, eliminating the CI race while preserving detection of surviving descendants.
