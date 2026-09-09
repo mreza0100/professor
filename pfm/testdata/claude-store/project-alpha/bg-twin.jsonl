@@ -1,1 +1,1 @@
-{"type":"user","cwd":"/work/background","sessionKind":"bg","message":{"content":"Background prompt"}}
+{"type":"user","cwd":"/work/background","promptSource":"sdk","entrypoint":"sdk-cli","message":{"content":"Background prompt"}}

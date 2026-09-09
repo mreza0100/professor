@@ -211,7 +211,8 @@ func (jail *injectTmuxJail) startBusyPane(
 	pane := strings.TrimSpace(string(output))
 	// The pane is only busy once its UI has rendered the spinner detail line;
 	// asserting before that would measure the fixture's startup, not the guard.
-	deadline := time.Now().Add(10 * time.Second)
+	started := time.Now()
+	deadline := started.Add(jailPaneReadyBudget)
 	for {
 		capture, err := CommandTmux{}.Capture(
 			context.Background(),
@@ -224,11 +225,30 @@ func (jail *injectTmuxJail) startBusyPane(
 			return pane
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("jailed pane never became busy: %q", capture)
+			// The capture error was consulted above and then thrown away here,
+			// so a capture that never succeeded reported itself as an empty
+			// pane — an error rendering as absence. Say which happened, and
+			// for how long, because the recoveries differ: a failing capture
+			// is a broken jail, a blank pane is a fixture that never rendered.
+			waited := time.Since(started)
+			if err != nil {
+				t.Fatalf("jailed pane capture kept failing for %s; last error: %v: %q", waited, err, capture)
+			}
+			t.Fatalf("jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q", waited, capture)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// jailPaneReadyBudget bounds how long a jailed fixture pane may take to render
+// its first frame. These fixtures start a python3 interpreter inside tmux, not
+// a shell, so readiness pays interpreter startup plus a first render; under
+// `go test ./...` on macOS that ran past the previous 10s and the pane was
+// still blank when the deadline fired. It is scaffolding readiness, never the
+// contract under test — the guards these tests assert on run after the pane is
+// ready — and it is only ever paid in full when a fixture genuinely never
+// starts.
+const jailPaneReadyBudget = 60 * time.Second
 
 func (jail *injectTmuxJail) startCompactTranscriptPane(
 	t *testing.T,
@@ -261,7 +281,8 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 		t.Fatal(err)
 	}
 	pane := strings.TrimSpace(string(output))
-	deadline := time.Now().Add(10 * time.Second)
+	started := time.Now()
+	deadline := started.Add(jailPaneReadyBudget)
 	for {
 		capture, captureErr := CommandTmux{}.Capture(
 			context.Background(),
@@ -274,7 +295,14 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 			return pane
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("compact transcript pane never became ready: %q", capture)
+			// Same asymmetry as startBusyPane: captureErr gated the success
+			// test and then vanished from the report, so a jail that could not
+			// be read at all looked identical to a pane that stayed blank.
+			waited := time.Since(started)
+			if captureErr != nil {
+				t.Fatalf("compact transcript pane capture kept failing for %s; last error: %v: %q", waited, captureErr, capture)
+			}
+			t.Fatalf("compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q", waited, capture)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -118,6 +118,51 @@ func (signal *toolProgressSignal) Write(content []byte) (int, error) {
 	return len(content), nil
 }
 
+// entryProgressGate orders a test's writes behind Await's own report of what
+// it has already read. Settle is a race between the writer and a timer, and a
+// wall-clock sleep only makes the writer PROBABLY win it: under suite load a
+// 20ms sleep stretches past the 60ms Settle, Await correctly returns the answer
+// it had, and a healthy implementation reads as a broken one. Gating on the
+// progress stream — Await's own account of the entries it has consumed — makes
+// the ordering a fact instead of a bet. TestAwaitWaitsThroughToolWork
+// established this technique here for a single checkpoint; this carries it to
+// an ordering that needs several.
+type entryProgressGate struct {
+	mutex sync.Mutex
+	text  strings.Builder
+}
+
+func (gate *entryProgressGate) Write(content []byte) (int, error) {
+	gate.mutex.Lock()
+	defer gate.mutex.Unlock()
+	gate.text.Write(content)
+	return len(content), nil
+}
+
+func (gate *entryProgressGate) seen() string {
+	gate.mutex.Lock()
+	defer gate.mutex.Unlock()
+	return gate.text.String()
+}
+
+// await blocks until Await reports the given condensed line and returns false
+// when it never does. It runs on a writer goroutine, so it reports with Errorf
+// and hands the decision back rather than calling FailNow off the test
+// goroutine, and it says what Await actually read so a failure names the
+// entries observed instead of only the one missing.
+func (gate *entryProgressGate) await(t *testing.T, want string) bool {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(gate.seen(), want) {
+		if time.Now().After(deadline) {
+			t.Errorf("Await never reported %q in its progress stream; it read: %q", want, gate.seen())
+			return false
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return true
+}
+
 // TestAwaitReturnsTheAnswerToTheQuestionJustAsked is the two-way contract: the
 // frontier is taken before the message, so nothing said earlier can be
 // mistaken for the reply.
@@ -284,14 +329,29 @@ func TestAwaitStopsAtDeliveryWhenAskedTo(t *testing.T) {
 // makes everything said before it the answer to something else.
 func TestAwaitAnswersTheLatestQuestion(t *testing.T) {
 	talk := newConversation(t)
+	// This is the one test in this file whose answer exists early enough for
+	// Settle to expire against it: "answer to first" is readable immediately,
+	// so the 60ms Settle starts running while the second question is still
+	// being written. Two sleeps totalling 40ms left 20ms of margin, and under
+	// `go test ./...` on macOS that margin is not there. The gate supplies the
+	// ordering and the widened Settle supplies the margin; every assertion
+	// below is unchanged.
+	gate := &entryProgressGate{}
 	go func() {
 		talk.say(user("first"), assistant("answer to first"))
-		time.Sleep(20 * time.Millisecond)
+		if !gate.await(t, "A answer to first") {
+			return
+		}
 		talk.say(user("second"))
-		time.Sleep(20 * time.Millisecond)
+		if !gate.await(t, "U second") {
+			return
+		}
 		talk.say(assistant("answer to second"))
 	}()
-	turn, err := Await(context.Background(), talk.resolve, fastOptions())
+	options := fastOptions()
+	options.Progress = gate
+	options.Settle = 2 * time.Second
+	turn, err := Await(context.Background(), talk.resolve, options)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}

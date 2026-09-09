@@ -16,7 +16,6 @@ type claudeRecord struct {
 	CustomTitle      string `json:"customTitle"`
 	AgentName        string `json:"agentName"`
 	AITitle          string `json:"aiTitle"`
-	SessionKind      string `json:"sessionKind"`
 	Entrypoint       string `json:"entrypoint"`
 	PromptSource     string `json:"promptSource"`
 	IsCompactSummary bool   `json:"isCompactSummary"`
@@ -51,7 +50,13 @@ func parseClaude(
 		if err := json.Unmarshal(line, &record); err != nil {
 			return
 		}
-		if record.SessionKind == "bg" || sdkSpawned(record) {
+		// Provenance is the only background signal. Claude Code stamps
+		// sessionKind:"bg" on the records of every turn produced while nobody is
+		// attached to the pane, which is exactly how the fleet drives its named
+		// chats through `pfm chat inject`; that marker measures attachment, not
+		// who spawned the session, so reading it retroactively reclassified deep
+		// interactive chats as machine work and dropped them from the picker.
+		if sdkSpawned(record) {
 			transcript.IsBG = true
 		}
 
@@ -119,6 +124,5 @@ func relevantClaudeLine(line []byte) bool {
 		bytes.Contains(line, []byte(`"agent-name"`)) ||
 		bytes.Contains(line, []byte(`"ai-title"`)) ||
 		bytes.Contains(line, []byte(`"type":"user"`)) ||
-		bytes.Contains(line, []byte(`"sessionKind":"bg"`)) ||
 		bytes.Contains(line, []byte(`"isCompactSummary"`))
 }

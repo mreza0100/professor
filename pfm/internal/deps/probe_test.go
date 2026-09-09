@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,9 +30,9 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 		{Name: "failed", Command: "failed", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 	}
 	results := Probe(context.Background(), entries, ProbeOptions{
-		GOOS: "linux", Timeout: 2 * time.Second,
+		GOOS: "linux", Timeout: ProbeTimeout,
 	})
-	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateBroken, StateBroken}
+	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateTimeout, StateBroken}
 	for index := range want {
 		if results[index].State != want[index] {
 			t.Errorf("%s state=%s error=%q raw=%q, want %s", entries[index].Name, results[index].State, results[index].Error, results[index].Raw, want[index])
@@ -40,9 +41,201 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	if results[0].Version != "3.4" || results[1].Version != "1.7" {
 		t.Fatalf("parsed versions ok=%q old=%q", results[0].Version, results[1].Version)
 	}
-	if results[4].Error != context.DeadlineExceeded.Error() {
-		t.Fatalf("timeout error=%q, want %q", results[4].Error, context.DeadlineExceeded)
+	if !strings.HasPrefix(results[4].Error, "timeout (") || !strings.Contains(results[4].Error, ProbeTimeout.String()) {
+		t.Fatalf("timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel", results[4].Error, ProbeTimeout)
 	}
+}
+
+// Regression: probeOne's version branch mapped every failure — including
+// context.DeadlineExceeded — straight to StateBroken, the same bucket as an
+// actually-broken binary. A version probe that legitimately outran its bound
+// must be named as a timeout distinct from a real failure, and a genuinely
+// broken tool in the same run must still read as broken — proving the fix
+// distinguishes the two rather than relabelling every failure as a timeout.
+func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
+	directory := t.TempDir()
+	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	writeProbeStub(t, directory, "broken", "printf 'permission denied by fixture\\n'; exit 7")
+	t.Setenv("PATH", directory)
+
+	entries := []Entry{
+		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
+		{Name: "broken", Command: "broken", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
+	}
+	results := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
+
+	if results[0].State != StateTimeout {
+		t.Fatalf("hung state=%s error=%q, want StateTimeout — an outran bound must not read as broken", results[0].State, results[0].Error)
+	}
+	if !strings.HasPrefix(results[0].Error, "timeout (") || !strings.Contains(results[0].Error, ProbeTimeout.String()) {
+		t.Fatalf("hung error=%q, want the enforced bound named", results[0].Error)
+	}
+	if results[1].State != StateBroken {
+		t.Fatalf("broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout", results[1].State, results[1].Error)
+	}
+}
+
+func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
+	directory := t.TempDir()
+	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	t.Setenv("PATH", directory)
+	entry := Entry{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}
+
+	t.Run("cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		resultCh := make(chan Result, 1)
+		go func() {
+			resultCh <- Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+		}()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		result := <-resultCh
+		if result.State != StateCancelled {
+			t.Fatalf("state=%s error=%q, want StateCancelled", result.State, result.Error)
+		}
+		if result.Error != "cancelled by parent context" {
+			t.Fatalf("error=%q, want parent cancellation provenance", result.Error)
+		}
+	})
+
+	t.Run("parent deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		result := Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+		if result.State != StateCancelled {
+			t.Fatalf("state=%s error=%q, want StateCancelled", result.State, result.Error)
+		}
+		if result.Error != "parent context deadline exceeded before probe timeout" {
+			t.Fatalf("error=%q, want parent deadline provenance", result.Error)
+		}
+	})
+}
+
+func TestSelfDoctorParentStopsRemainCancelledInHelpAndSummary(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      string
+		selfDoctor []string
+	}{
+		{name: "help cancellation", phase: "help", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "help deadline", phase: "help", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "summary cancellation", phase: "summary", selfDoctor: []string{"doctor", "--summary"}},
+		{name: "summary deadline", phase: "summary", selfDoctor: []string{"doctor", "--summary"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			marker := filepath.Join(directory, "phase-ready")
+			t.Setenv("PROBE_PHASE", test.phase)
+			t.Setenv("PROBE_PHASE_MARKER", marker)
+			writeProbeStub(t, directory, "engine", `
+if [ "$1" = "--version" ]; then printf 'engine-cli 1.2.3\n'; exit 0; fi
+if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then
+  if [ "$PROBE_PHASE" = "help" ]; then : > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30; fi
+  printf 'usage: engine doctor\n'; exit 0
+fi
+if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then
+  if [ "$PROBE_PHASE" = "summary" ]; then : > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30; fi
+  printf 'healthy\n'; exit 0
+fi
+exit 2`)
+			t.Setenv("PATH", directory)
+			entry := Entry{
+				Name: "engine", Command: "engine",
+				VersionArgs: []string{"--version"}, Parse: firstVersion,
+				SelfDoctorArgs: test.selfDoctor,
+			}
+
+			var (
+				parent   context.Context
+				cancel   func()
+				deadline *deferredDeadlineContext
+			)
+			if strings.HasSuffix(test.name, "deadline") {
+				deadline = newDeferredDeadlineContext()
+				parent = deadline
+				cancel = deadline.expire
+			} else {
+				var cancelContext context.CancelFunc
+				parent, cancelContext = context.WithCancel(context.Background())
+				cancel = cancelContext
+			}
+			defer cancel()
+
+			resultCh := make(chan Result, 1)
+			go func() {
+				resultCh <- Probe(parent, []Entry{entry}, ProbeOptions{
+					GOOS: "linux", Timeout: 2 * time.Second, SelfDoctorTimeout: 2 * time.Second,
+				})[0]
+			}()
+			waitForProbePhaseMarker(t, marker)
+			cancel()
+			result := <-resultCh
+			if result.Version != "1.2.3" {
+				t.Fatalf("version=%q state=%s error=%q, want version probe to pass before %s stop", result.Version, result.State, result.Error, test.phase)
+			}
+			if result.State != StateCancelled || result.SelfDoctor != "cancelled" {
+				t.Fatalf("result=%#v, want StateCancelled/SelfDoctor=cancelled", result)
+			}
+			wantError := "cancelled by parent context"
+			if strings.HasSuffix(test.name, "deadline") {
+				wantError = "parent context deadline exceeded before probe timeout"
+			}
+			if result.Error != wantError {
+				t.Fatalf("error=%q, want %q", result.Error, wantError)
+			}
+		})
+	}
+}
+
+// deferredDeadlineContext lets this test release a parent deadline only after
+// the version probe and the selected self-doctor phase have reached the marker.
+// A short real timeout would race fixture startup and could fail before the
+// test reaches the phase whose provenance it is meant to pin.
+type deferredDeadlineContext struct {
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newDeferredDeadlineContext() *deferredDeadlineContext {
+	return &deferredDeadlineContext{done: make(chan struct{})}
+}
+
+func (ctx *deferredDeadlineContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (ctx *deferredDeadlineContext) Done() <-chan struct{} { return ctx.done }
+
+func (ctx *deferredDeadlineContext) Err() error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.err
+}
+
+func (ctx *deferredDeadlineContext) Value(any) any { return nil }
+
+func (ctx *deferredDeadlineContext) expire() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if ctx.err != nil {
+		return
+	}
+	ctx.err = context.DeadlineExceeded
+	close(ctx.done)
+}
+
+func waitForProbePhaseMarker(t *testing.T, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat probe phase marker %q: %v", marker, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("probe phase marker %q was not created within 5s", marker)
 }
 
 func TestProbePlatformAndHarvestFiltering(t *testing.T) {
@@ -195,14 +388,20 @@ exec /bin/sleep 30`)
 		{Name: "unsupported", Command: "unsupported", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
 		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
 	}
-	// Package-level stress runs can delay a 50ms timer past a one-second
-	// fixture process, making a deliberate timeout finish successfully before
-	// the scheduler delivers cancellation. Preserve a wide separation between
-	// the bound and the hung command.
+	// The separation that matters is between the bound and the hung command's
+	// 30s sleep, never between the bound and a healthy stub's startup. A 250ms
+	// self-doctor bound sat BELOW this platform's own cost to launch the very
+	// fixtures written above — on macOS the first exec of a freshly written
+	// script costs ~120ms median and ~553ms peak against ~6ms warm — so under
+	// suite load the unsupported stub's --help was cancelled before it could
+	// answer, and a healthy fixture reported itself as a broken engine. Match
+	// production's ProbeTimeout, exactly as the sibling regression below does:
+	// still six times clear of the 30s sleep the hung fixture must outrun,
+	// while no longer racing the operating system to start a shell.
 	results := Probe(context.Background(), entries, ProbeOptions{
 		GOOS:              "linux",
-		Timeout:           2 * time.Second,
-		SelfDoctorTimeout: 250 * time.Millisecond,
+		Timeout:           ProbeTimeout,
+		SelfDoctorTimeout: ProbeTimeout,
 	})
 	if results[0].State != StateOK || results[0].SelfDoctor != "unavailable" {
 		t.Fatalf("unsupported self-doctor=%#v", results[0])
@@ -259,8 +458,13 @@ func TestProbeSelfDoctorTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	// Subprocess startup competes with every other package during `go test
 	// ./...`; 200ms made the quick --version/--help probes fail under ordinary
 	// suite contention before this test ever reached the deliberate timeout.
-	// Two seconds preserves a bounded test while leaving ample scheduling room.
-	const timeout = 2 * time.Second
+	// On macOS the first exec of a freshly written executable — exactly what
+	// writeProbeStub hands each subtest — costs ~120ms median and ~553ms peak
+	// (vs ~6ms warm, measured over 60 stubs on an idle box), and `go test
+	// ./...` execs dozens of those concurrently; matching production's
+	// ProbeTimeout leaves ample scheduling room instead of re-deriving a
+	// shorter number that flakes under load.
+	const timeout = ProbeTimeout
 	durationPattern := regexp.MustCompile(`\d+(\.\d+)?\s*(ms|s|m)\b`)
 
 	t.Run("slow but healthy self-doctor stays ok and is named as a timeout", func(t *testing.T) {

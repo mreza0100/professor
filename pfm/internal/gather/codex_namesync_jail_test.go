@@ -13,13 +13,14 @@ import (
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
+	"hostops/pfm/internal/testjail"
 )
 
 func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	root := t.TempDir()
+	root := testjail.ShortRoot(t)
 	home := filepath.Join(root, "home")
 	codexRoot := filepath.Join(root, "codex")
 	for _, directory := range []string{home, codexRoot, filepath.Join(root, "claude")} {

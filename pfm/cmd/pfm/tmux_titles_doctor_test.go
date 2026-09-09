@@ -66,6 +66,14 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 	if output, err := setTitles.CombinedOutput(); err != nil {
 		t.Fatalf("set-titles on: %v: %s", err, output)
 	}
+	setTitlesString := exec.Command(
+		"tmux", "-S", filepath.Join(tmuxDir, owned),
+		"set-option", "-g", "set-titles-string", config.TmuxTitlesString,
+	)
+	setTitlesString.Env = append(os.Environ(), "TMUX=")
+	if output, err := setTitlesString.CombinedOutput(); err != nil {
+		t.Fatalf("set-titles-string: %v: %s", err, output)
+	}
 
 	// The probe-socket allowance keeps the fixture off every live cc-/cx-
 	// name while still exercising the production discovery path.
@@ -80,7 +88,8 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 	for _, want := range []string{
 		"doctor: tmux titles policy=pfm-owned (config tmux.titles.enabled=true default)",
 		"doctor: tmux titles " + owned + "=pfm-owned (set-titles on)",
-		"doctor: tmux titles " + hostOwned + "=host-owned (set-titles off)",
+		"doctor: tmux titles " + hostOwned + "=divergent (set-titles off; set-titles-string \"#S:#I:#W - \\\"#T\\\" #{session_alerts}\"; expected set-titles on and set-titles-string \"" + config.TmuxTitlesString + "\") DIVERGES from policy=pfm-owned: expected set-titles on",
+		"doctor: tmux titles divergent=1",
 	} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)

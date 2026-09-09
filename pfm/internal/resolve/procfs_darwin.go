@@ -4,16 +4,24 @@ package resolve
 
 import (
 	"fmt"
+	"os"
 
 	"golang.org/x/sys/unix"
 )
 
 type darwinProcFS struct{}
 
-func newNativeProcFS(string) ProcFS { return darwinProcFS{} }
+func newNativeProcFS(root string) ProcFS {
+	if root != "" {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			return fileProcFS{root: root}
+		}
+	}
+	return darwinProcFS{}
+}
 
 func (darwinProcFS) Environ(pid int) (map[string]string, error) {
-	return nil, fmt.Errorf("process environment for %d is not available through sysctl", pid)
+	return nil, fmt.Errorf("process environment for %d is not implemented on darwin; KERN_PROCARGS2 is the reachable route", pid)
 }
 
 func (darwinProcFS) Stat(pid int) (ProcStat, error) {
