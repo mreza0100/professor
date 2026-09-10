@@ -454,8 +454,8 @@ tonight's four bugs all live in.
 | `chat_read` bounds: `last_n` ≤200, `max_bytes` ≤1Mi, Claude and Codex turn shapes                         | JAIL                                                           | `mcpserv/read.go:18-21,49-70,199-273`                              |                                                                   |
 | `chat_status summary=true` delegates to the canonical CLI and returns `summary` + `summary_cached` | JAIL | `TestChatStatusSummaryUsesCanonicalCommandAndReturnsField` | |
 | `chat_branch` binds `_meta.threadId` to its Codex id/CWD/account and refuses metadata-free shared-daemon calls before dispatch | JAIL | `TestChatBranchUsesRequestScopedCodexCaller` | |
-| `chat_goal` injects an already-compiled one-line body at the request caller; empty, multiline, and >4,000-character bodies are refused | JAIL+tmux | `TestWorkflowToolsUseRequestIdentityAndPreserveCompleteData`, `mcpserv/workflows.go` | |
-| `chat_load` returns the complete text set or fails the whole request at `max_bytes`; it never samples | UNIT+JAIL | `internal/chatload/load_test.go`, `TestWorkflowToolsUseRequestIdentityAndPreserveCompleteData` | |
+| `chat_goal` injects an already-compiled one-line body at the request caller; empty, multiline, and >4,000-character bodies are refused | JAIL+tmux | `TestChatGoalUsesRequestIdentity`, `mcpserv/workflows.go` | |
+| `chat_load` / `pfm chat load` stay retired — the MCP roster never advertises the tool and the CLI verb refuses as an unknown command | UNIT+JAIL | `TestChatMCPRosterNeverAdvertisesChatLoad`, `TestChatLoadVerbIsRetired` | |
 
 ## H — `pfm chat`: subcommands, guards, `--then`, exit codes
 

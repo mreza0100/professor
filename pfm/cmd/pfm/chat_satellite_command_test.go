@@ -178,26 +178,22 @@ func TestChatFindSearchesEveryConfiguredTranscriptRegistry(t *testing.T) {
 	}
 }
 
-func TestChatLoadEnumeratesTextAndSkipsBuildTrees(t *testing.T) {
+// TestChatLoadVerbIsRetired pins that `pfm chat load` is gone: the verb must
+// fail as an unknown command, never enumerate files.
+func TestChatLoadVerbIsRetired(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "one.txt"), []byte("one\ntwo\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ignored := filepath.Join(root, "node_modules")
-	if err := os.MkdirAll(ignored, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ignored, "large.txt"), []byte("ignored\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "one.txt"), []byte("one\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"chat", "load", root}, &stdout, &stderr); code != 0 {
-		t.Fatalf("load code=%d stderr=%q", code, stderr.String())
+	if code := run([]string{"chat", "load", root}, &stdout, &stderr); code != 2 {
+		t.Fatalf("chat load code=%d stdout=%q stderr=%q, want 2", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "      2  "+filepath.Join(root, "one.txt")) ||
-		strings.Contains(stdout.String(), "node_modules") ||
-		!strings.Contains(stdout.String(), "1 files, 2 total lines") {
-		t.Fatalf("stdout=%q", stdout.String())
+	if !strings.Contains(stderr.String(), `pfm chat: unknown command "load"`) {
+		t.Fatalf("stderr=%q, want the unknown-command refusal", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "one.txt") {
+		t.Fatalf("stdout=%q, a retired verb must not enumerate files", stdout.String())
 	}
 }
 

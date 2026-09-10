@@ -10,7 +10,6 @@ func TestChatMCPAdvertisesEveryNativeWorkflowTool(t *testing.T) {
 	for _, name := range []string{
 		"chat_branch",
 		"chat_goal",
-		"chat_load",
 	} {
 		if !slices.Contains(tools, name) {
 			t.Errorf("chat MCP tool roster lacks %q", name)
@@ -36,5 +35,13 @@ func TestChatMCPRosterNeverAdvertisesRetiredGroupTools(t *testing.T) {
 		if slices.Contains(tools, name) {
 			t.Errorf("chat MCP tool roster still advertises retired tool %q", name)
 		}
+	}
+}
+
+// TestChatMCPRosterNeverAdvertisesChatLoad pins the retired file-set loader's
+// absence: reading files is the model's own tool, never a chat-fleet verb.
+func TestChatMCPRosterNeverAdvertisesChatLoad(t *testing.T) {
+	if slices.Contains(ToolNames(), "chat_load") {
+		t.Error("chat MCP tool roster still advertises retired tool \"chat_load\"")
 	}
 }

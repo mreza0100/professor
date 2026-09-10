@@ -124,7 +124,7 @@ func runChatWithRuntime(
 		// remains a compatibility alias for callers already spelling it
 		// this way.
 		return runWhoami(rest, stdout, stderr, runtime)
-	case "find", "save", "load", "branch", "history", "ls":
+	case "find", "save", "branch", "history", "ls":
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, runtime)
 	case "modal":
 		return runChatModal(rest, stdout, stderr)
@@ -162,7 +162,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  unkill      remove a chat kill")
 	fmt.Fprintln(w, "  end         end a chat's tmux server")
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
-	fmt.Fprintln(w, "  find/save/load/branch/history/ls/resolve")
+	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat")
 	fmt.Fprintln(w, "            5 answer timed out · 6 message not delivered")

@@ -315,26 +315,6 @@ type GoalInput struct {
 	Goal   string `json:"goal" jsonschema:"already-compiled inline /goal body, one line and at most 4000 characters"`
 }
 
-type LoadInput struct {
-	Paths    []string `json:"paths" jsonschema:"files or directories whose complete text set must be returned"`
-	MaxBytes int      `json:"max_bytes,omitempty" jsonschema:"whole-result byte ceiling, default 1048576 and maximum 4194304"`
-}
-
-type LoadFile struct {
-	Path  string `json:"path"`
-	Lines int    `json:"lines"`
-	Bytes int    `json:"bytes"`
-	Text  string `json:"text"`
-}
-
-type LoadOutput struct {
-	Files      []LoadFile `json:"files"`
-	Warnings   []string   `json:"warnings,omitempty"`
-	Count      int        `json:"count"`
-	TotalLines int        `json:"total_lines"`
-	TotalBytes int        `json:"total_bytes"`
-}
-
 // IssueInput is one agent complaint filed against Professor itself. Reporter
 // identity is never accepted here — issue_servicedesk captures it the same
 // way chat_inject captures a sender, so a model can complain but never say

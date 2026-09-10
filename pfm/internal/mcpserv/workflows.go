@@ -6,7 +6,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"hostops/pfm/internal/chatload"
 	"hostops/pfm/internal/inject"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -86,33 +85,4 @@ func (service *Service) chatGoal(
 	}
 	result, err := injector.Inject(ctx, inject.Request{Target: target, Message: "/goal " + goal})
 	return nil, outputFromInject(result), err
-}
-
-func (service *Service) chatLoad(
-	_ context.Context,
-	_ *mcp.CallToolRequest,
-	input LoadInput,
-) (*mcp.CallToolResult, LoadOutput, error) {
-	limit := input.MaxBytes
-	if limit == 0 {
-		limit = 1 << 20
-	}
-	if limit < 1 || limit > maxCaptureBytes {
-		return nil, LoadOutput{}, fmt.Errorf("max_bytes must be between 1 and %d", maxCaptureBytes)
-	}
-	loaded, err := chatload.Load(input.Paths, limit)
-	if err != nil {
-		return nil, LoadOutput{}, err
-	}
-	output := LoadOutput{
-		Warnings: loaded.Warnings, Count: len(loaded.Files),
-		TotalLines: loaded.TotalLines, TotalBytes: loaded.TotalBytes,
-		Files: make([]LoadFile, 0, len(loaded.Files)),
-	}
-	for _, file := range loaded.Files {
-		output.Files = append(output.Files, LoadFile{
-			Path: file.Path, Lines: file.Lines, Bytes: file.Bytes, Text: file.Text,
-		})
-	}
-	return nil, output, nil
 }

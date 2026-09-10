@@ -33,7 +33,7 @@ const selfCompactDescription = "The ONLY answer to \"compact yourself\", \"give 
 
 var chatToolNames = []string{
 	"chat_branch", "chat_capture", "chat_find", "chat_goal", "chat_inject",
-	"chat_keys", "chat_kill", "chat_last", "chat_load", "chat_ls", "chat_name",
+	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_reload", "chat_resolve",
 	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
 	"chat_whoami", "issue_servicedesk",
@@ -100,7 +100,7 @@ func newService(version string, backend *backend) *Service {
 		Name:    "pfm",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: "The local pfm chat fleet: inspect, resolve, capture, search, read/load complete file sets, branch, compile/fire goals, name, kill, reload, save, and safely inject. Routing for common asks — any phrasing of delivering text to another chat (\"send\", \"tell\", \"message\", \"reply to\", \"inject into\" chat X) is chat_inject; \"give yourself a compact\" / \"self-compact at this milestone\" is chat_self_compact (single-line focus plus exactly ONE continuation steer); \"who are you / what is your address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn/start a new chat\" is chat_new. Excluded interactive/plumbing verbs: end, modal, watch, stream, recover, and history.",
+		Instructions: "The local pfm chat fleet — cross-chat communication between independent chats, never parent/child agent communication (a sub-agent and its parent use the harness's native agent tools). Verbs: inspect, resolve, capture, search, read transcripts, branch, compile/fire goals, name, kill, reload, save, and safely inject. Routing for common asks — any phrasing of delivering text to another chat (\"send\", \"tell\", \"message\", \"reply to\", \"inject into\" chat X) is chat_inject; \"give yourself a compact\" / \"self-compact at this milestone\" is chat_self_compact (single-line focus plus exactly ONE continuation steer); \"who are you / what is your address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn/start a new chat\" is chat_new. Excluded interactive/plumbing verbs: end, modal, watch, stream, recover, and history.",
 	})
 	service := &Service{server: server, backend: backend}
 	service.register()
@@ -140,7 +140,7 @@ func (service *Service) register() {
 	}, service.chatResolve)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_inject",
-		Description: "Send a message to a live chat — the verb behind every \"send / tell / message / reply to chat X\" request. Safely types and submits after selector, busy, draft, and submit-confirm guards.",
+		Description: "Send a message to a live chat — the cross-chat verb behind every \"send / tell / message / reply to chat X\" request. Do NOT use this tool, or any chat MCP tool, for parent/child agent communication; a sub-agent and its parent talk through the harness's native agent tools. Safely types and submits after selector, busy, draft, and submit-confirm guards.",
 		Annotations: mutating,
 	}, service.chatInject)
 	mcp.AddTool(service.server, &mcp.Tool{
@@ -151,9 +151,6 @@ func (service *Service) register() {
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name: "chat_goal", Description: "Fire an already-compiled, single-line /goal body (maximum 4000 characters) at a live chat or the requesting chat.", Annotations: mutating,
 	}, service.chatGoal)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_load", Description: "Return every complete non-empty text file beneath the requested paths; fail atomically if the complete set exceeds max_bytes.", Annotations: readOnly,
-	}, service.chatLoad)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_keys",
 		Description: "Press validated tmux key names or explicitly type literal key text into a live chat.",

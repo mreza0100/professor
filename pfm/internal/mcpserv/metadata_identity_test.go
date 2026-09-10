@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -231,23 +230,10 @@ func TestChatBranchUsesRequestScopedCodexCaller(t *testing.T) {
 	}
 }
 
-func TestWorkflowToolsUseRequestIdentityAndPreserveCompleteData(t *testing.T) {
+func TestChatGoalUsesRequestIdentity(t *testing.T) {
 	service := metadataIdentityService(t)
 	protocol := connectInMemory(t, service.Server())
 	alpha := mcp.Meta{"threadId": "thread-a"}
-
-	loadRoot := t.TempDir()
-	wantText := "first line\nsecond line\n"
-	loadPath := loadRoot + "/complete.txt"
-	if err := os.WriteFile(loadPath, []byte(wantText), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded := callToolWithMeta[LoadOutput](
-		t, protocol.clientSession, "chat_load", nil, LoadInput{Paths: []string{loadRoot}},
-	)
-	if loaded.Count != 1 || loaded.Files[0].Text != wantText || loaded.TotalBytes != len(wantText) {
-		t.Fatalf("chat_load = %+v", loaded)
-	}
 
 	goal := callToolWithMeta[InjectOutput](
 		t, protocol.clientSession, "chat_goal", alpha,

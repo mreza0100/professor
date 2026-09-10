@@ -20,7 +20,6 @@ import (
 	"unicode"
 
 	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/chatload"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
@@ -376,27 +375,6 @@ func writeRepositorySnapshot(writer io.Writer) {
 		return
 	}
 	fmt.Fprintf(writer, "Branch: %s\n\n```\n%s```\n\nWorktrees:\n```\n%s```\n", strings.TrimSpace(string(branch)), status, worktrees)
-}
-
-func runChatLoad(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm chat load <dir-or-file>...")
-		return 2
-	}
-	loaded, err := chatload.Load(args, 0)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat load: %v\n", err)
-		return 1
-	}
-	for _, warning := range loaded.Warnings {
-		fmt.Fprintf(stderr, "WARN: %s\n", warning)
-	}
-	for _, file := range loaded.Files {
-		fmt.Fprintf(stdout, "%7d  %s\n", file.Lines, file.Path)
-	}
-	fmt.Fprintln(stdout, "---")
-	fmt.Fprintf(stdout, "%d files, %d total lines. READ EVERY ONE in full with the Read tool — no skim, no sampling. Write nothing.\n", len(loaded.Files), loaded.TotalLines)
-	return 0
 }
 
 func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
