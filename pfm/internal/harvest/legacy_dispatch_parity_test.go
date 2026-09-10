@@ -188,7 +188,7 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	if result.Error == "" || !strings.Contains(result.Error, "HARVESTER_PDF_OCR") || !strings.Contains(strings.ToLower(result.Error), "search") {
+	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "search") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
 	}
 }

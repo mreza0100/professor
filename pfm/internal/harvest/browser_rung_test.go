@@ -81,10 +81,11 @@ func TestBrowserRungSitsBetweenDefuddleAndWayback(t *testing.T) {
 	}
 }
 
-// TestBrowserRungIsOffByDefault pins R5: with HARVESTER_BROWSER unset the
-// rung label never appears and the worker is never started.
+// TestBrowserRungIsOffByDefault pins R5: with fetch.browser off the rung
+// label never appears and the worker is never started — and the retired
+// HARVESTER_BROWSER variable can no longer switch it on.
 func TestBrowserRungIsOffByDefault(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "")
+	t.Setenv("HARVESTER_BROWSER", "1")
 	spy := &browserSpyConverter{err: errors.New("browser must not be consulted")}
 	h := wallHarvester(t, spy, nil)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -120,7 +121,7 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 	spy := &browserSpyConverter{err: errors.New("must never run")}
 	h := wallHarvester(t, spy, nil)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if !strings.Contains(result.Error, "DISABLED") || !strings.Contains(result.Error, "HARVESTER_BROWSER=1") {
+	if !strings.Contains(result.Error, "DISABLED") || !strings.Contains(result.Error, "fetch.browser=true in harvester.config.json") {
 		t.Fatalf("disabled state not named with enable path: %q", result.Error)
 	}
 }

@@ -84,8 +84,8 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	}
 
 	t.Run("modern no-auth loopback routes are complete", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`)
-		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8377/mcp/harvester\"\n")
+		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
+		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
 		output := run(t)
 		if !strings.Contains(output, "doctor: mcp client-cutover=complete") {
 			t.Fatalf("modern no-auth routes were not reported complete:\n%s", output)
@@ -93,8 +93,8 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 
 	t.Run("loopback routes with retired authentication are incomplete", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester","headers":{"Authorization":"Bearer retired"}}}}`)
-		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8377/mcp/harvester\"\n[mcp_servers.harvester.headers]\nAuthorization = \"Bearer retired\"\n")
+		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester","headers":{"Authorization":"Bearer retired"}}}}`)
+		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n[mcp_servers.harvester.headers]\nAuthorization = \"Bearer retired\"\n")
 		runtime, err := loadCommandRuntime("")
 		if err != nil {
 			t.Fatal(err)
@@ -134,7 +134,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 
 	t.Run("malformed Claude JSON is unreadable", func(t *testing.T) {
 		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":`)
-		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8377/mcp/harvester\"\n")
+		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
 		runtime, err := loadCommandRuntime("")
 		if err != nil {
 			t.Fatal(err)
@@ -150,7 +150,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 
 	t.Run("malformed Codex TOML is unreadable", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`)
+		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
 		write(codexPath, "[mcp_servers.harvester\n")
 		runtime, err := loadCommandRuntime("")
 		if err != nil {
@@ -168,7 +168,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 }
 
 func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "") // golden doctor output must not depend on the ambient opt-in gate (review-2 S3)
+	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	jailTest(t)
 	runtime, err := loadCommandRuntime("")
 	if err != nil {

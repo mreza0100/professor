@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
@@ -65,6 +66,11 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", runtimeErr)
 		return 1
 	}
+	migrated, migrateCode := migrateMachineConfig(mode, stdout, stderr, runtime)
+	if migrateCode != 0 {
+		return migrateCode
+	}
+	runtime = migrated
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
@@ -106,6 +112,40 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintln(stdout, confirmation)
 	}
 	return code
+}
+
+// migrateMachineConfig moves a pre-split machine to the current layout
+// (pfm.config.json + harvester.config.json, loopback port 8377 → 18377)
+// BEFORE the installer reads the port it wires every client to — so client
+// registrations and the restarted daemon always agree. A preview prints the
+// plan and wires what the apply would.
+func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime commandRuntime) (commandRuntime, int) {
+	migration, err := pfmconfig.PlanMigration(runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: plan config migration: %v\n", err)
+		return runtime, 1
+	}
+	if migration.Empty() {
+		return runtime, 0
+	}
+	fmt.Fprintln(stdout, "config migration (pre-split layout):")
+	for _, step := range migration.Steps() {
+		fmt.Fprintf(stdout, "  change  %s\n", step)
+	}
+	if mode != installer.ModeApply {
+		runtime.Config = migration.Preview(runtime.Config)
+		return runtime, 0
+	}
+	if err := pfmconfig.ApplyMigration(migration); err != nil {
+		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
+		return runtime, 1
+	}
+	reloaded, err := loadCommandRuntime(migration.Path)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: reload migrated config %s: %v\n", migration.Path, err)
+		return runtime, 1
+	}
+	return reloaded, 0
 }
 
 func professorThemeManifestURL(currentVersion string) string {

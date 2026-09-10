@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,16 +95,6 @@ func (h *Harvester) SearchCache(pattern string, maxResults int, ignoreCase bool)
 func newCache(root string, ttl time.Duration) *Cache { return &Cache{root: root, ttl: ttl} }
 
 func defaultCacheDir() (string, error) {
-	if root := os.Getenv("WEBFETCH_DIR"); strings.TrimSpace(root) != "" {
-		return filepath.Clean(expandCachePath(root)), nil
-	}
-	if root := os.Getenv("HARVESTER_CACHE_DIR"); strings.TrimSpace(root) != "" {
-		p := filepath.Clean(expandCachePath(root))
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(projectRoot(), p)
-		}
-		return p, nil
-	}
 	// The default cache lives in exactly ONE place: <home>/.professor/.cache
 	// (beside pfm's other home state such as ~/.professor/agents). It must
 	// never follow the process's working directory — the cwd-walking default
@@ -119,81 +108,15 @@ func defaultCacheDir() (string, error) {
 	return filepath.Join(home, ".professor", ".cache"), nil
 }
 
-func expandCachePath(raw string) string {
-	p := os.ExpandEnv(strings.TrimSpace(raw))
-	if strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, p[2:])
-		}
+// CacheRoot is the cache directory New uses: the configured dir
+// (harvester.config.json cache.dir) when set, else the one default
+// <home>/.professor/.cache. Doctor and the MCP adapter resolve through it so
+// every consumer agrees on one directory.
+func CacheRoot(configured string) (string, error) {
+	if strings.TrimSpace(configured) != "" {
+		return filepath.Clean(configured), nil
 	}
-	return p
-}
-
-// CacheRoot resolves the same precedence used by New: WEBFETCH_DIR, then
-// HARVESTER_CACHE_DIR (relative to the project root), then the one default
-// <home>/.professor/.cache.
-func CacheRoot() (string, error) { return defaultCacheDir() }
-
-// projectRoot anchors an explicitly configured RELATIVE cache dir
-// (HARVESTER_CACHE_DIR) — it plays no part in the default. A configured
-// relative cache must not move merely because the caller launched pfm from
-// another directory. The Go project marker is go.mod; falling back to the
-// current directory keeps installed binaries usable.
-func projectRoot() string {
-	wd, err := os.Getwd()
-	if err != nil || wd == "" {
-		return "."
-	}
-	wd, err = filepath.Abs(wd)
-	if err != nil {
-		return "."
-	}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return dir
-		}
-		next := filepath.Dir(dir)
-		if next == dir {
-			return wd
-		}
-	}
-}
-
-func cacheTTLFromEnv() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("HARVESTER_CACHE_TTL"))
-	if raw == "" {
-		return 24 * time.Hour
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds < 0 {
-		log.Printf("harvest: invalid HARVESTER_CACHE_TTL=%q; using default 86400", raw)
-		return 24 * time.Hour
-	}
-	return time.Duration(seconds) * time.Second
-}
-func negTTLFromEnv() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("HARVESTER_NEG_TTL"))
-	if raw == "" {
-		return 120 * time.Second
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds < 0 {
-		log.Printf("harvest: invalid HARVESTER_NEG_TTL=%q; using default 120", raw)
-		return 120 * time.Second
-	}
-	return time.Duration(seconds) * time.Second
-}
-func negTransientTTLFromEnv() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("HARVESTER_NEG_TTL_TRANSIENT"))
-	if raw == "" {
-		return 15 * time.Second
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds < 0 {
-		log.Printf("harvest: invalid HARVESTER_NEG_TTL_TRANSIENT=%q; using default 15", raw)
-		return 15 * time.Second
-	}
-	return time.Duration(seconds) * time.Second
+	return defaultCacheDir()
 }
 
 // CacheKey returns a stable type-specific filesystem key.
@@ -353,20 +276,6 @@ func truncateInline(body string, limit int) string {
 		return body
 	}
 	return string(runes[:limit]) + "\n\n[content truncated; read the cached path for the complete artifact]"
-}
-
-func maxInlineFromEnv() int {
-	const fallback = 50000
-	raw := strings.TrimSpace(os.Getenv("HARVESTER_MAX_INLINE_CHARS"))
-	if raw == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		log.Printf("harvest: invalid HARVESTER_MAX_INLINE_CHARS=%q; using default %d", raw, fallback)
-		return fallback
-	}
-	return n
 }
 
 var volatileKinds = map[string]bool{"html": true, "pdf": true, "docx": true, "xlsx": true,

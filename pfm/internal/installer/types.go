@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"time"
 
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvestpy"
 )
@@ -157,7 +158,7 @@ func normalize(options Options) (Options, error) {
 		options.ConfigDir = options.Home + "/.claude"
 	}
 	if options.MCPPort == 0 {
-		options.MCPPort = 8377
+		options.MCPPort = pfmconfig.DefaultMCPPort
 	}
 	if options.CodexYolo == nil {
 		options.CodexYolo = map[int]bool{1: true, 2: true, 3: true}

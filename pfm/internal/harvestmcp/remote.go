@@ -1,7 +1,6 @@
 package harvestmcp
 
 import (
-	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -13,32 +12,29 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
+
+	"hostops/pfm/internal/harvest"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const mcpPath = "/mcp"
 
-// RemoteOptions is the HTTP deployment contract.  Handler tests use it
-// without opening a listener; the CLI is the only caller of ServeRemote.
+// RemoteOptions is the external gateway contract. The daemon (pfm mcp serve)
+// mounts it on its second, authenticated port; handler tests use it without
+// opening a listener.
 type RemoteOptions struct {
-	Runtime      Runtime
-	Version      string
-	PublicURL    string
-	Passphrase   string
-	StaticToken  string
-	StatePath    string
-	ConfineReads bool
-	// DisableConfinement is the explicit opt-out. The zero value preserves
-	// the old remote default: cache-root-only local reads.
-	DisableConfinement bool
+	Runtime     Runtime
+	Version     string
+	PublicURL   string
+	Passphrase  string
+	StaticToken string
+	StatePath   string
 }
 
-// RemoteServer is one exact-path HTTP gateway.  A second internal gateway
-// can be built from the same service with PlanRemoteGateways.
+// RemoteServer is the external gateway: exact /mcp path, bearer/OAuth wall,
+// and local reads confined to the cache root. It is never unauthenticated.
 type RemoteServer struct {
 	publicURL string
 	resource  string
@@ -46,55 +42,27 @@ type RemoteServer struct {
 	service   *Service
 	store     *authStore
 	mcp       http.Handler
-	confined  bool
 }
 
-// GatewaySpec is the side-effect-free result of remote bind planning. Tests
-// and callers can inspect exact labels/ports without opening sockets.
-type GatewaySpec struct {
-	Handler http.Handler
-	Host    string
-	Port    int
-	Label   string
-}
-
-func PlanRemoteGateways(external *RemoteServer, externalHost string, externalPort int, internal *RemoteServer, internalHost string, internalPort int, allowUnauthenticated bool) ([]GatewaySpec, error) {
-	if external == nil {
-		return nil, errors.New("external gateway is nil")
-	}
-	if err := ValidateRemoteBind(externalHost, external.store != nil, allowUnauthenticated); err != nil {
-		return nil, err
-	}
-	planned := []GatewaySpec{{Handler: external.Handler(), Host: externalHost, Port: externalPort, Label: "external"}}
-	if internal == nil || internalPort == 0 || external.store == nil {
-		return planned, nil
-	}
-	if err := ValidateRemoteBind(internalHost, false, allowUnauthenticated); err != nil {
-		return nil, fmt.Errorf("internal gateway: %w", err)
-	}
-	return append(planned, GatewaySpec{Handler: internal.Handler(), Host: internalHost, Port: internalPort, Label: "internal"}), nil
-}
-
-// NewRemote builds an HTTP handler without binding a socket.
+// NewRemote builds the external gateway handler without binding a socket. It
+// refuses to exist without a credential, and always confines local reads to
+// the cache root: a remote caller never owns this machine.
 func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	publicURL := strings.TrimRight(strings.TrimSpace(options.PublicURL), "/")
 	parsed, err := url.Parse(publicURL)
 	if err != nil || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("public_url must include a hostname, got %q", publicURL)
 	}
+	if options.Passphrase == "" && options.StaticToken == "" {
+		return nil, errors.New("the external harvester gateway requires external.auth.passphrase and/or external.auth.staticToken; it is never unauthenticated")
+	}
 	runtime := options.Runtime
-	confine := !options.DisableConfinement
-	if options.ConfineReads {
-		confine = true
+	cache, err := harvest.CacheRoot(runtime.CacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
 	}
-	if confine {
-		cache := runtime.CacheDir
-		if cache == "" {
-			cache = resolveCacheDir(runtime)
-		}
-		runtime.CacheDir = cache
-		runtime.LocalRoots = []string{cache}
-	}
+	runtime.CacheDir = cache
+	runtime.LocalRoots = []string{cache}
 	version := options.Version
 	if version == "" {
 		version = "dev"
@@ -103,28 +71,14 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &RemoteServer{publicURL: publicURL, resource: publicURL + mcpPath, parsed: parsed, service: service, confined: confine}
-	if options.Passphrase != "" || options.StaticToken != "" {
-		statePath := options.StatePath
-		if statePath == "" {
-			statePath = defaultAuthStatePath(service.runtime.CacheDir)
-		}
-		r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
+	r := &RemoteServer{publicURL: publicURL, resource: publicURL + mcpPath, parsed: parsed, service: service}
+	statePath := options.StatePath
+	if statePath == "" {
+		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
+	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
 	r.mcp = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return service.Server() }, &mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true})
 	return r, nil
-}
-
-// NewInternalRemote shares a service but has a distinct public origin and no
-// credentials. It is used for the old external/internal gateway split.
-func (r *RemoteServer) NewInternalRemote(publicURL string) (*RemoteServer, error) {
-	u, err := url.Parse(strings.TrimRight(publicURL, "/"))
-	if err != nil || u.Hostname() == "" {
-		return nil, fmt.Errorf("internal public_url must include a hostname, got %q", publicURL)
-	}
-	clone := &RemoteServer{publicURL: strings.TrimRight(publicURL, "/"), resource: strings.TrimRight(publicURL, "/") + mcpPath, parsed: u, service: r.service, confined: true}
-	clone.mcp = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return r.service.Server() }, &mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true})
-	return clone, nil
 }
 
 // Handler returns a net/http handler suitable for httptest.NewRecorder or a
@@ -556,110 +510,4 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func (r *RemoteServer) ListenAndServe(ctx context.Context, host string, port int) error {
-	defer func() {
-		if err := r.service.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "harvester remote: close converter: %v\n", err)
-		}
-	}()
-	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
-	if err != nil {
-		return err
-	}
-	server := &http.Server{Handler: r.Handler()}
-	go func() {
-		<-ctx.Done()
-		_ = server.Shutdown(context.Background())
-	}()
-	err = server.Serve(listener)
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
-}
-
-// ValidateRemoteBind is the preflight shared by CLI and tests. An open
-// gateway on a public interface is never implicit.
-func ValidateRemoteBind(host string, authenticated, allowUnauthenticated bool) error {
-	if authenticated || allowUnauthenticated || isLoopback(host) {
-		return nil
-	}
-	return fmt.Errorf("refusing unauthenticated public bind on %q; set --allow-unauthenticated explicitly", host)
-}
-
-// ServeRemotePair runs the external authenticated and optional internal open
-// gateways from one process. It is intentionally the only function here that
-// opens listeners; handler tests use RemoteServer.Handler instead.
-func ServeRemotePair(ctx context.Context, external *RemoteServer, externalHost string, externalPort int, internal *RemoteServer, internalHost string, internalPort int, allowUnauthenticated bool) int {
-	if external == nil {
-		return 1
-	}
-	planned, err := PlanRemoteGateways(external, externalHost, externalPort, internal, internalHost, internalPort, allowUnauthenticated)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "harvester remote: %v\n", err)
-		return 2
-	}
-	if len(planned) == 1 {
-		if err := external.ListenAndServe(ctx, externalHost, externalPort); err != nil {
-			fmt.Fprintf(os.Stderr, "harvester remote: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	defer func() {
-		if err := external.service.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "harvester remote: close converter: %v\n", err)
-		}
-	}()
-	listeners := make([]net.Listener, 0, len(planned))
-	for _, gateway := range planned {
-		address := net.JoinHostPort(gateway.Host, strconv.Itoa(gateway.Port))
-		listener, err := net.Listen("tcp", address)
-		if err != nil {
-			for _, opened := range listeners {
-				_ = opened.Close()
-			}
-			fmt.Fprintf(os.Stderr, "harvester remote: listen %s: %v\n", address, err)
-			return 1
-		}
-		listeners = append(listeners, listener)
-	}
-	servers := make([]*http.Server, 0, len(planned))
-	for _, gateway := range planned {
-		servers = append(servers, &http.Server{Handler: gateway.Handler})
-	}
-	for _, server := range servers {
-		go func(server *http.Server) {
-			<-ctx.Done()
-			_ = server.Shutdown(context.Background())
-		}(server)
-	}
-	results := make(chan error, len(servers))
-	for i, server := range servers {
-		go func(server *http.Server, listener net.Listener) { results <- server.Serve(listener) }(server, listeners[i])
-	}
-	for range servers {
-		if err := <-results; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return 1
-		}
-	}
-	return 0
-}
-
-func resolveCacheDir(runtime Runtime) string {
-	if configured := os.Getenv("WEBFETCH_DIR"); configured != "" {
-		return configured
-	}
-	if configured := os.Getenv("HARVESTER_CACHE_DIR"); configured != "" {
-		if filepath.IsAbs(configured) {
-			return configured
-		}
-		cwd, err := os.Getwd()
-		if err == nil {
-			return filepath.Join(cwd, configured)
-		}
-	}
-	return filepath.Join(".cache")
 }

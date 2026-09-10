@@ -83,8 +83,7 @@ func TestVolatileCacheTTLBackdatedStampAndZeroOverride(t *testing.T) {
 		t.Fatalf("old cache=%#v hits=%d", result, hits)
 	}
 
-	t.Setenv("HARVESTER_CACHE_TTL", "0")
-	noExpiry := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Converter: &fakeConverter{}})
+	noExpiry := mustNew(t, Options{CacheDir: t.TempDir(), CacheTTL: -1, Client: client, Converter: &fakeConverter{}})
 	zeroSource := "http://example.test/never-stale"
 	if result := noExpiry.Fetch(context.Background(), zeroSource); result.Error != "" {
 		t.Fatalf("zero seed fetch=%#v", result)

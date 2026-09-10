@@ -37,20 +37,41 @@ const (
 	maxCacheResults    = 1000
 )
 
-// Runtime contains only machine-local paths and backend settings. The MCP
-// service never reads a machine config file itself; the command passes this
-// already-resolved runtime in.
+// Runtime is the resolved harvester.config.json plus machine-local paths. The
+// MCP service never reads a machine config file or the process environment
+// itself; the command passes this already-resolved runtime in.
 type Runtime struct {
-	Home        string
-	CacheDir    string
-	LocalRoots  []string
-	Python      string
-	Script      string
-	SearXNGURL  string
-	BraveAPIKey string
-	UserAgent   string
-	ProxyURL    string
-	Client      *http.Client
+	Home       string
+	CacheDir   string
+	LocalRoots []string
+	Python     string
+	Script     string
+	UserAgent  string
+	ProxyURL   string
+	Client     *http.Client
+
+	SearXNGURL    string
+	BraveAPIKey   string
+	DisableSearch bool
+
+	ContactEmail          string
+	GoogleBooksAPIKey     string
+	CoreAPIKey            string
+	SemanticScholarAPIKey string
+
+	Browser   bool
+	PDFOCR    bool
+	PDFLayout bool
+
+	// CacheTTL / NegativeTTL / NegativeTransientTTL carry harvester.config.json
+	// values when TTLsConfigured is set, where 0 is a real zero (never expire /
+	// never cache failures). A zero-value runtime (tests, embeddings) leaves
+	// TTLsConfigured false and gets the harvest defaults.
+	CacheTTL             time.Duration
+	NegativeTTL          time.Duration
+	NegativeTransientTTL time.Duration
+	TTLsConfigured       bool
+	MaxInlineChars       int
 }
 
 // Service is one independent Harvester MCP server.
@@ -66,9 +87,11 @@ type Service struct {
 // wiring. A nil converter is not used: all document conversion is delegated
 // to the pinned Python worker selected by the runtime.
 func NewConfigured(version string, runtime Runtime) (*Service, error) {
-	if runtime.CacheDir == "" {
-		runtime.CacheDir = resolveCacheDir(runtime)
+	cacheDir, err := harvest.CacheRoot(runtime.CacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
 	}
+	runtime.CacheDir = cacheDir
 	// Keep the resolver's direct client separate from harvest.New's default
 	// ladder. Passing one client into every rung silently demotes Chrome and
 	// changes the old resolver's polite-UA behavior.
@@ -88,7 +111,11 @@ func NewConfigured(version string, runtime Runtime) (*Service, error) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "harvester", Version: version}, &mcp.ServerOptions{
 		Instructions: "Public-document retrieval with Harvester. Routing for common asks — \"fetch / get / read this URL, DOI, ISBN, PMID, PMCID, or local file\" is fetch; \"find papers / works / literature about X\" is findWorks; \"search the web for X\" is search; \"fetch this image\" is fetchImage; \"did we already fetch it / check the cache\" is searchCache; \"open / browse this .zip, .tar, .7z, or .rar\" is archive (a compressed-archive browser, NOT a webpage snapshotter). Results cache locally — prefer searchCache before re-fetching a document you may already hold.",
 	})
-	service := &Service{server: server, harvester: h, resolver: &harvest.Resolver{Client: resolverClient}, runtime: runtime, worker: worker}
+	resolver := &harvest.Resolver{
+		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
+		CoreAPIKey: runtime.CoreAPIKey, SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
+	}
+	service := &Service{server: server, harvester: h, resolver: resolver, runtime: runtime, worker: worker}
 	service.register()
 	return service, nil
 }
@@ -109,23 +136,16 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 	if runtime.LocalRoots == nil {
 		runtime.LocalRoots = []string{}
 	}
-	if runtime.CacheDir == "" {
-		runtime.CacheDir = resolveCacheDir(runtime)
+	cacheDir, err := harvest.CacheRoot(runtime.CacheDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve harvester cache root: %w", err)
 	}
-	if runtime.SearXNGURL == "" {
-		runtime.SearXNGURL = os.Getenv("SEARXNG_URL")
-	}
-	if runtime.BraveAPIKey == "" {
-		runtime.BraveAPIKey = os.Getenv("BRAVE_API_KEY")
-	}
+	runtime.CacheDir = cacheDir
 	if runtime.Client != nil && runtime.Client.CheckRedirect == nil {
 		runtime.Client.CheckRedirect = func(request *http.Request, _ []*http.Request) error {
 			parsed := request.URL
 			return assertPublicURL(parsed)
 		}
-	}
-	if runtime.Python == "" {
-		runtime.Python = os.Getenv("PFM_HARVEST_PYTHON")
 	}
 	if runtime.Python == "" {
 		root, rootErr := harvestStateRoot(runtime)
@@ -138,7 +158,7 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 			runtime.Script = filepath.Join(current, "project", "converter.py")
 		}
 	}
-	worker := harvestpy.NewConverter(harvestpy.Runtime{Python: runtime.Python, Script: runtime.Script})
+	worker := harvestpy.NewConverter(harvestpy.Runtime{Python: runtime.Python, Script: runtime.Script, PDFOCR: runtime.PDFOCR, PDFLayout: runtime.PDFLayout})
 	browserRoot, rootErr := harvestStateRoot(runtime)
 	if rootErr != nil {
 		return nil, nil, rootErr
@@ -148,21 +168,44 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		browserRoot: browserRoot,
 		proxyURL:    runtime.ProxyURL,
 	}
+	browser := runtime.Browser
 	harvester, err := harvest.New(harvest.Options{
-		CacheDir:   runtime.CacheDir,
-		Client:     runtime.Client,
-		Chrome:     nil,
-		Jina:       nil,
-		OA:         nil,
-		Converter:  converter,
-		LocalRoots: runtime.LocalRoots,
-		ProxyURL:   runtime.ProxyURL,
-		UserAgent:  runtime.UserAgent,
+		CacheDir:              runtime.CacheDir,
+		CacheTTL:              configTTL(runtime.CacheTTL, runtime.TTLsConfigured),
+		NegativeTTL:           configTTL(runtime.NegativeTTL, runtime.TTLsConfigured),
+		NegativeTransientTTL:  configTTL(runtime.NegativeTransientTTL, runtime.TTLsConfigured),
+		MaxInlineChars:        runtime.MaxInlineChars,
+		Client:                runtime.Client,
+		Chrome:                nil,
+		Jina:                  nil,
+		OA:                    nil,
+		Converter:             converter,
+		LocalRoots:            runtime.LocalRoots,
+		ProxyURL:              runtime.ProxyURL,
+		UserAgent:             runtime.UserAgent,
+		BrowserRung:           &browser,
+		ContactEmail:          runtime.ContactEmail,
+		GoogleBooksAPIKey:     runtime.GoogleBooksAPIKey,
+		CoreAPIKey:            runtime.CoreAPIKey,
+		SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
+		SearXNGURL:            runtime.SearXNGURL,
+		BraveAPIKey:           runtime.BraveAPIKey,
+		DisableSearch:         runtime.DisableSearch,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct harvester: %w", err)
 	}
 	return harvester, worker, nil
+}
+
+// configTTL maps a runtime TTL onto harvest.Options, whose 0 means "default"
+// and whose negative means "explicit zero": a configured 0 becomes -1, an
+// unconfigured runtime passes 0 through to keep the defaults.
+func configTTL(value time.Duration, configured bool) time.Duration {
+	if configured && value == 0 {
+		return -1
+	}
+	return value
 }
 
 // harvestStateRoot resolves the managed harvest-python state root. PFM_HARVEST_ROOT
@@ -241,7 +284,7 @@ const browserHardDeadline = 3 * time.Minute
 // harvest.AssertFetchableStrict — strict, because Chrome re-resolves without a
 // pinning hop — and a refusal is re-wrapped as harvest.ErrBrowserPolicyDenied so callers can
 // tell POLICY from OUTAGE. Provisioning is lazy and only ever happens after
-// HARVESTER_BROWSER=1 gated this method; a missing environment is an outage,
+// fetch.browser gated this method; a missing environment is an outage,
 // never a silent skip.
 func (converter pythonConverter) FetchBrowser(ctx context.Context, source string) (string, int, error) {
 	runtime, err := converter.browserRuntime(ctx)
@@ -292,7 +335,7 @@ func (converter pythonConverter) browserRuntime(ctx context.Context) (harvestpy.
 	interpreter, script := converter.browserPaths()
 	if _, statErr := os.Stat(interpreter); errors.Is(statErr, os.ErrNotExist) {
 		if _, provisionErr := harvestpy.ProvisionBrowser(ctx, harvestpy.ProvisionOptions{Root: converter.browserRoot}); provisionErr != nil {
-			return harvestpy.Runtime{}, fmt.Errorf("browser environment is NOT provisioned and lazy provisioning failed (%v) — run `pfm install` with HARVESTER_BROWSER=1 to provision it", provisionErr)
+			return harvestpy.Runtime{}, fmt.Errorf("browser environment is NOT provisioned and lazy provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry", provisionErr)
 		}
 	} else if statErr != nil {
 		return harvestpy.Runtime{}, fmt.Errorf("probe browser environment interpreter %s: %w", interpreter, statErr)
@@ -399,7 +442,7 @@ func (service *Service) register() {
 		result, _, err := service.findWorks(ctx, request, input)
 		return result, nil, err
 	})
-	if harvest.SearchAdvertised() {
+	if !service.runtime.DisableSearch {
 		mcp.AddTool(service.server, &mcp.Tool{Name: "search", Description: searchDescription, InputSchema: searchInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
 			result, _, err := service.search(ctx, request, input)
 			return result, nil, err
@@ -434,10 +477,10 @@ A *source* is either a **location** (where something lives) or an **identity** (
 - **DOI** — ` + codeTick + `10.xxxx/…` + codeTick + `, ` + codeTick + `doi:…` + codeTick + `, or a ` + codeTick + `doi.org` + codeTick + ` URL.
 - **Book by ISBN** — ` + codeTick + `isbn:9780262300988` + codeTick + ` (or a bare ISBN) → a free OA/public-domain copy.
 - **PMID / PMCID** — a bare PubMed ID (e.g. 30220343) or a PMC accession (PMC1234567) → resolved via Europe PMC/PMC.
-Harvester runs the legal open-access chain — for papers: OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, Crossref, CORE, DOAJ (+ Unpaywall when HARVESTER_CONTACT_EMAIL is set; arXiv/ar5iv & OSF/SocArXiv resolve by DOI prefix); for books: OAPEN, DOAB, Internet Archive, HathiTrust (full view), Project Gutenberg — returning the first copy that yields real content. Only API-sanctioned sources; no shadow libraries.
+Harvester runs the legal open-access chain — for papers: OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, Crossref, CORE, DOAJ (+ Unpaywall when scholarly.contactEmail is set in harvester.config.json; arXiv/ar5iv & OSF/SocArXiv resolve by DOI prefix); for books: OAPEN, DOAB, Internet Archive, HathiTrust (full view), Project Gutenberg — returning the first copy that yields real content. Only API-sanctioned sources; no shadow libraries.
 **Have only a TITLE?** Titles are ambiguous, so ` + codeTick + `fetch` + codeTick + ` won't guess — call the **` + codeTick + `findWorks` + codeTick + ` tool first (it lists candidate works), then fetch the one you choose by its DOI/URL.
 
-**Wall-bypass — when ANY URL is blocked, it goes down the rabbit hole:** httpx → Chrome-fingerprint impersonation (tls-client) → Jina Reader → defuddle.md → real browser (opt-in: Patchright + system Chrome behind ` + codeTick + `HARVESTER_BROWSER=1` + codeTick + `; passes passive Cloudflare managed challenges, never solves interactive CAPTCHAs) → then it extracts the DOI from the page/URL (or a ` + codeTick + `citation_pdf_url` + codeTick + ` meta tag) and runs the open-access chain → Wayback Machine. So a paywalled or bot-blocked publisher link still returns the open copy when one legally exists. Hard IP-reputation blocks need a residential exit — the server says so plainly.
+**Wall-bypass — when ANY URL is blocked, it goes down the rabbit hole:** httpx → Chrome-fingerprint impersonation (tls-client) → Jina Reader → defuddle.md → real browser (opt-in: Patchright + system Chrome behind ` + codeTick + `fetch.browser` + codeTick + ` in harvester.config.json; passes passive Cloudflare managed challenges, never solves interactive CAPTCHAs) → then it extracts the DOI from the page/URL (or a ` + codeTick + `citation_pdf_url` + codeTick + ` meta tag) and runs the open-access chain → Wayback Machine. So a paywalled or bot-blocked publisher link still returns the open copy when one legally exists. Hard IP-reputation blocks need a residential exit — the server says so plainly.
 
 **Sibling tools:** ` + codeTick + `search` + codeTick + ` (open-web search → URLs to fetch), ` + codeTick + `findWorks` + codeTick + ` (a title → candidate works to choose from), ` + codeTick + `fetchImage` + codeTick + ` (an image → a local path to read with vision), ` + codeTick + `archive` + codeTick + ` (browse a .zip/.tar/.7z/.rar), ` + codeTick + `searchCache` + codeTick + ` (search what you already fetched).
 
@@ -616,14 +659,14 @@ func (service *Service) fetch(ctx context.Context, _ *mcp.CallToolRequest, input
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
-				contents[index] = describeFetch(source, harvest.Result{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}, input.SizeOnly)
+				contents[index] = service.describeFetch(source, harvest.Result{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}, input.SizeOnly)
 				items[index] = FetchItem{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}
 				return
 			}
 			defer func() { <-semaphore }()
 			fetched := service.harvester.FetchWithOptions(ctx, source, harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly})
 			items[index] = fetchItem(fetched)
-			contents[index] = describeFetch(source, fetched, input.SizeOnly)
+			contents[index] = service.describeFetch(source, fetched, input.SizeOnly)
 		}(index, source)
 	}
 	wait.Wait()
@@ -662,12 +705,17 @@ func (service *Service) search(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if input.Count < 1 || input.Count > maxSearchResults {
 		return nil, SearchOutput{}, fmt.Errorf("count must be between 1 and %d", maxSearchResults)
 	}
-	results, backend, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{SearXNGURL: service.runtime.SearXNGURL, BraveAPIKey: service.runtime.BraveAPIKey, Lang: input.Lang, Engines: input.Engines, Count: input.Count})
-	if err != nil && backend != "" && backend != "error" {
-		return nil, SearchOutput{Backend: backend}, err
+	results, backend, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{
+		SearXNGURL: service.runtime.SearXNGURL, BraveAPIKey: service.runtime.BraveAPIKey, DisableSearch: service.runtime.DisableSearch,
+		Lang: input.Lang, Engines: input.Engines, Count: input.Count,
+	})
+	if err != nil && backend == "error" {
+		// Every configured backend failed: render each backend's own error so
+		// the caller sees WHAT broke, never a generic "unreachable".
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}}, IsError: true}, SearchOutput{Backend: backend}, nil
 	}
 	if err != nil {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, backend)}}}, SearchOutput{Results: results, Backend: backend}, nil
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}, SearchOutput{Backend: backend}, nil
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, backend)}}}, SearchOutput{Results: results, Backend: backend}, nil
 }
@@ -716,12 +764,12 @@ func (service *Service) archive(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 	result, err := service.harvester.Archive(ctx, input.Source, input.Member)
 	if err != nil {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
 	}
 	if input.Member == "" {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderArchiveListing(input.Source, result.Members)}}}, ArchiveOutput{Result: result}, nil
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
 }
 
 func (service *Service) searchCache(_ context.Context, _ *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, CacheOutput, error) {
@@ -771,7 +819,7 @@ func (service *Service) fetchPrompt(ctx context.Context, request *mcp.GetPromptR
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Contents of %s", source),
 		Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{
-			Text: describeFetch(source, fetched, false),
+			Text: service.describeFetch(source, fetched, false),
 		}}},
 	}, nil
 }
@@ -780,7 +828,7 @@ func fetchItem(result harvest.Result) FetchItem {
 	return FetchItem{Source: result.Source, Content: result.Content, CacheStatus: result.CacheStatus, Method: result.Method, Bytes: result.Bytes, Tokens: result.Tokens, Chars: result.Chars, Path: result.Path, Error: result.Error, Rungs: result.Rungs}
 }
 
-func describeFetch(source string, result harvest.Result, sizeOnly bool) string {
+func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	if result.Error != "" {
 		return "# " + source + "\nERROR: " + result.Error
 	}
@@ -830,7 +878,7 @@ func describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	} else if len(result.Rungs) > 1 {
 		header += " / rungs: " + strings.Join(result.Rungs, ", ")
 	}
-	cap := inlineCap()
+	cap := service.inlineCap()
 	if cap > 0 && len([]rune(body)) > cap {
 		runes := []rune(body)
 		body = string(runes[:cap]) + fmt.Sprintf("\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]", cap, len(runes), result.Path, cap)
@@ -838,13 +886,11 @@ func describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	return header + "\n\n" + body
 }
 
-func inlineCap() int {
-	if raw := os.Getenv("HARVESTER_MAX_INLINE_CHARS"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err == nil {
-			return value
-		}
-		fmt.Fprintf(os.Stderr, "harvester: invalid HARVESTER_MAX_INLINE_CHARS=%q; using default %d\n", raw, defaultInlineChars)
+// inlineCap is output.maxInlineChars from harvester.config.json; an
+// unconfigured runtime keeps the default.
+func (service *Service) inlineCap() int {
+	if service != nil && service.runtime.MaxInlineChars > 0 {
+		return service.runtime.MaxInlineChars
 	}
 	return defaultInlineChars
 }
@@ -921,13 +967,21 @@ func renderArchiveListing(source string, members []harvest.Member) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+// renderSearchFailure names each configured backend's failure. A policy
+// refusal (a refused redirect) and a network/HTTP failure read differently
+// because they ARE different: the text is the backend's own error.
+func renderSearchFailure(err error) string {
+	lines := []string{"Web search failed — every configured backend returned an error:"}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, "- "+line)
+		}
+	}
+	lines = append(lines, "Backends are configured in harvester.config.json (search.searxngURL, search.braveApiKey).")
+	return strings.Join(lines, "\n")
+}
+
 func renderSearch(query string, results []harvest.SearchResult, backend string) string {
-	if backend == "" {
-		return "No web-search backend is configured. Set SEARXNG_URL (self-hosted SearXNG) and/or BRAVE_API_KEY to enable the `search` tool."
-	}
-	if backend == "error" {
-		return "The web-search backend(s) are configured but unreachable or failing right now — retry shortly, or check that SEARXNG_URL is up and BRAVE_API_KEY is valid."
-	}
 	if len(results) == 0 {
 		return fmt.Sprintf("No results for %q (via %s). Try different terms or a broader query.", query, backend)
 	}

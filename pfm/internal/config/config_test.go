@@ -21,7 +21,7 @@ func TestResolvePathUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
 	t.Run("absolute XDG", func(t *testing.T) {
 		xdg := filepath.Join(t.TempDir(), "xdg")
 		t.Setenv("XDG_CONFIG_HOME", xdg)
-		want := filepath.Join(xdg, "pfm", "config.json")
+		want := filepath.Join(xdg, "pfm", FileName)
 		if got := ResolvePath(home); got != want {
 			t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
 		}
@@ -36,7 +36,7 @@ func TestResolvePathUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", tc.xdg)
-			want := filepath.Join(home, ".config", "pfm", "config.json")
+			want := filepath.Join(home, ".config", "pfm", FileName)
 			if got := ResolvePath(home); got != want {
 				t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
 			}
@@ -393,8 +393,10 @@ func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
 	if got.Source("mcp.servers.chat.enabled") != SourceDefault {
 		t.Fatalf("chat source = %q, want default", got.Source("mcp.servers.chat.enabled"))
 	}
-	if got.Source("mcp.servers.harvester.enabled") != SourceFile {
-		t.Fatalf("harvester source = %q, want file", got.Source("mcp.servers.harvester.enabled"))
+	// A pre-split file's mcp.servers.harvester is honored, but reported as
+	// legacy so `pfm config show` / doctor point at the migration.
+	if got.MCPServerSource("harvester") != SourceLegacy {
+		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceLegacy)
 	}
 }
 
@@ -595,7 +597,7 @@ func TestV1ConfigStillLoadsWithV2Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(v1) error = %v", err)
 	}
-	if got.Version != Version || got.Theme != "default" || got.MCP.HTTP.Port != 8377 || got.Ask.Engine != pfmengine.Codex {
+	if got.Version != Version || got.Theme != "default" || got.MCP.HTTP.Port != DefaultMCPPort || got.Ask.Engine != pfmengine.Codex {
 		t.Fatalf("v1 defaults = version:%d theme:%q port:%d engine:%q", got.Version, got.Theme, got.MCP.HTTP.Port, got.Ask.Engine)
 	}
 	if got.EmojiFor(4) != "🍀" {

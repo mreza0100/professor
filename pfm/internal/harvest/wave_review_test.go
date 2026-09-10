@@ -22,7 +22,7 @@ func TestReviewFindCrossrefKeepsRowsSeparateFromContact(t *testing.T) {
 		seen = r.URL.String()
 		return jsonResponse(r, `{"message":{"items":[]}}`), nil
 	})}
-	resolver := &Resolver{Client: client, ContactEmail: "ops@example.org", snapshot: true}
+	resolver := &Resolver{Client: client, ContactEmail: "ops@example.org"}
 	resolver.findCrossref(context.Background(), client, "Attention is all you need", 7)
 
 	parsed, err := url.Parse(seen)

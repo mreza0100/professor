@@ -50,54 +50,39 @@ func TestLegacyTokenEstimatorAllTenBehaviors(t *testing.T) {
 	}
 }
 
-func TestLegacyCacheLocationPrecedenceAndTTL(t *testing.T) {
+// TestCacheRootIsConfiguredDirOrTheOneDefault pins the single cache-root
+// rule: the configured dir (harvester.config.json cache.dir) when set, else
+// <home>/.professor/.cache — never the working directory, and never the
+// retired WEBFETCH_DIR / HARVESTER_CACHE_DIR variables.
+func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fixture\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	nested := filepath.Join(root, "nested")
-	if err := os.Mkdir(nested, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(nested)
-	t.Setenv("WEBFETCH_DIR", "")
-	t.Setenv("HARVESTER_CACHE_DIR", "")
+	t.Chdir(root)
+	t.Setenv("WEBFETCH_DIR", filepath.Join(root, "legacy"))
+	t.Setenv("HARVESTER_CACHE_DIR", ".harvest-cache")
 	jailHome := filepath.Join(root, "home")
 	t.Setenv(paths.EnvHome, jailHome)
-	if got, err := CacheRoot(); err != nil || got != filepath.Join(jailHome, ".professor", ".cache") {
-		t.Fatalf("default cache root=%q err=%v", got, err)
+	if got, err := CacheRoot(""); err != nil || got != filepath.Join(jailHome, ".professor", ".cache") {
+		t.Fatalf("default cache root=%q err=%v; the retired env variables must be ignored", got, err)
 	}
 	t.Setenv(paths.EnvHome, "")
-	if got, err := CacheRoot(); err == nil {
+	if got, err := CacheRoot(""); err == nil {
 		t.Fatalf("unjailed default cache root resolved to %q; want the real-home refusal", got)
 	}
-	t.Setenv(paths.EnvHome, jailHome)
-	t.Setenv("HARVESTER_CACHE_DIR", ".harvest-cache")
-	if got, err := CacheRoot(); err != nil || got != filepath.Join(root, ".harvest-cache") {
-		t.Fatalf("relative cache root=%q err=%v", got, err)
-	}
 	abs := filepath.Join(root, "elsewhere")
-	t.Setenv("HARVESTER_CACHE_DIR", abs)
-	if got, err := CacheRoot(); err != nil || got != abs {
-		t.Fatalf("absolute cache root=%q err=%v", got, err)
+	if got, err := CacheRoot(abs); err != nil || got != abs {
+		t.Fatalf("configured cache root=%q err=%v", got, err)
 	}
-	legacy := filepath.Join(root, "legacy")
-	t.Setenv("WEBFETCH_DIR", legacy)
-	if got, err := CacheRoot(); err != nil || got != legacy {
-		t.Fatalf("WEBFETCH_DIR cache root=%q err=%v", got, err)
-	}
+}
 
-	t.Setenv("HARVESTER_CACHE_TTL", "3600")
-	if got := cacheTTLFromEnv(); got != time.Hour {
-		t.Fatalf("configured TTL=%s", got)
+func TestResolveTTLDefaultsZeroAndHonorsExplicitZero(t *testing.T) {
+	if got := resolveTTL(0, time.Hour); got != time.Hour {
+		t.Fatalf("zero TTL = %s, want the default", got)
 	}
-	t.Setenv("HARVESTER_CACHE_TTL", "0")
-	if got := cacheTTLFromEnv(); got != 0 {
-		t.Fatalf("zero TTL=%s", got)
+	if got := resolveTTL(-1, time.Hour); got != 0 {
+		t.Fatalf("negative TTL = %s, want explicit zero", got)
 	}
-	t.Setenv("HARVESTER_CACHE_TTL", "not-a-number")
-	if got := cacheTTLFromEnv(); got != 24*time.Hour {
-		t.Fatalf("invalid TTL fallback=%s", got)
+	if got := resolveTTL(time.Minute, time.Hour); got != time.Minute {
+		t.Fatalf("configured TTL = %s", got)
 	}
 }
 
@@ -246,12 +231,11 @@ func TestLegacyWaybackAndPMCIDResponses(t *testing.T) {
 	}
 }
 
-func TestLegacySearchVisibilityAndForceDisable(t *testing.T) {
-	t.Setenv("SEARXNG_URL", "")
-	t.Setenv("BRAVE_API_KEY", "")
-	t.Setenv("HARVESTER_DISABLE_SEARCH", "")
+func TestSearchEnabledNeedsABackendAndNotDisabled(t *testing.T) {
+	t.Setenv("SEARXNG_URL", "https://env.example.test")
+	t.Setenv("BRAVE_API_KEY", "env-key")
 	if SearchEnabled(SearchOptions{}) {
-		t.Fatal("search enabled without a backend")
+		t.Fatal("search enabled without a configured backend (retired env variables must be ignored)")
 	}
 	if !SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test"}) {
 		t.Fatal("SearXNG did not enable search")
@@ -259,14 +243,7 @@ func TestLegacySearchVisibilityAndForceDisable(t *testing.T) {
 	if !SearchEnabled(SearchOptions{BraveAPIKey: "fixture-key"}) {
 		t.Fatal("Brave did not enable search")
 	}
-	if !SearchAdvertised() {
-		t.Fatal("search must remain advertised when unconfigured")
-	}
-	t.Setenv("HARVESTER_DISABLE_SEARCH", "true")
-	if SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test", BraveAPIKey: "fixture-key"}) {
-		t.Fatal("force-disabled search reported enabled")
-	}
-	if SearchAdvertised() {
-		t.Fatal("force-disabled search remained advertised")
+	if SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test", BraveAPIKey: "fixture-key", DisableSearch: true}) {
+		t.Fatal("disabled search reported enabled")
 	}
 }

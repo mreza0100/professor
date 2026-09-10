@@ -308,8 +308,9 @@ func TestDoctorConfigRenderingShowsEffectiveValuesAndSources(t *testing.T) {
 		"doctor: config codex.yolo=false (file)",
 		"doctor: config codex.binary=codex-fixture (file)",
 		"doctor: config mcp.servers.chat.enabled=true (file)",
-		"doctor: config mcp.servers.harvester.enabled=false (default)",
-		"doctor: config mcp.http.port=8377 (default)",
+		"doctor: config harvester.enabled=false (default)",
+		"doctor: config mcp.http.port=18377 (default)",
+		"doctor: config harvester path=" + filepath.Join(root, config.HarvesterFileName) + " exists=false",
 	}, "\n") + "\n"
 	if stdout.String() != want {
 		t.Fatalf("printDoctorConfig() = %q, want %q", stdout.String(), want)

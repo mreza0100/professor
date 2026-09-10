@@ -455,9 +455,9 @@ func (s *authStore) revoke(raw string) {
 	s.mu.Unlock()
 }
 
+// defaultAuthStatePath keeps the OAuth store beside — never inside — the
+// cache root, which the gateway serves to remote callers. The daemon passes
+// external.stateDir from harvester.config.json when it is set.
 func defaultAuthStatePath(cacheDir string) string {
-	if root := os.Getenv("HARVESTER_STATE_DIR"); root != "" {
-		return filepath.Join(root, "auth.json")
-	}
 	return filepath.Join(filepath.Dir(cacheDir), ".harvester-state", "auth.json")
 }

@@ -7,12 +7,10 @@ package harvestmcp
 // pin), because these are contract tests for the remote HTTP/OAuth boundary.
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -193,7 +191,18 @@ func legacyBasic(id, secret string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(id+":"+secret))
 }
 
-// ── transport wiring and unauthenticated modes ──────────────────────────────
+// ── transport wiring ─────────────────────────────────────────────────────────
+
+// The external gateway has no unauthenticated mode: the retired standalone
+// server's open gateway and its open "internal" twin are gone — the daemon's
+// loopback port is the internal door now.
+func TestRemoteRefusesToExistWithoutCredentials(t *testing.T) {
+	base := t.TempDir()
+	_, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: filepath.Join(base, "cache")}, PublicURL: legacyPublicURL})
+	if err == nil || !strings.Contains(err.Error(), "never unauthenticated") {
+		t.Fatalf("credential-free NewRemote error = %v; want the refusal", err)
+	}
+}
 
 func TestRemoteLegacy_ExactMCPPath(t *testing.T) {
 	server := legacyNewRemote(t, legacyPublicURL, legacyPass, legacyStatic)
@@ -204,18 +213,21 @@ func TestRemoteLegacy_ExactMCPPath(t *testing.T) {
 }
 
 func TestRemoteLegacy_PublicHostAllowedByDNSRebindingProtection(t *testing.T) {
-	server := legacyNewRemote(t, legacyPublicURL, "", "")
-	rec := legacyDo(t, server, http.MethodPost, "/mcp", legacyMCPInit, "application/json", http.Header{"Accept": {"application/json, text/event-stream"}})
+	server := legacyNewRemote(t, legacyPublicURL, "", legacyStatic)
+	rec := legacyDo(t, server, http.MethodPost, "/mcp", legacyMCPInit, "application/json", http.Header{
+		"Accept": {"application/json, text/event-stream"}, "Authorization": {"Bearer " + legacyStatic},
+	})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "harvester") {
 		t.Fatalf("public host initialize = %d %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestRemoteLegacy_ForeignHostRejected(t *testing.T) {
-	server := legacyNewRemote(t, legacyPublicURL, "", "")
+	server := legacyNewRemote(t, legacyPublicURL, "", legacyStatic)
 	req := httptest.NewRequest(http.MethodPost, legacyPublicURL+"/mcp", strings.NewReader(legacyMCPInit))
 	req.Host = "evil.example.com"
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+legacyStatic)
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)
 	if rec.Code < http.StatusBadRequest {
@@ -224,107 +236,9 @@ func TestRemoteLegacy_ForeignHostRejected(t *testing.T) {
 }
 
 func TestRemoteLegacy_PublicURLRequiresHostname(t *testing.T) {
-	_, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: t.TempDir()}, PublicURL: "not-a-url"})
+	_, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: t.TempDir()}, PublicURL: "not-a-url", StaticToken: legacyStatic})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "hostname") {
 		t.Fatalf("invalid public URL error = %v", err)
-	}
-}
-
-func TestRemoteLegacy_OpenAppServesMCPAndHealth(t *testing.T) {
-	server := legacyNewRemote(t, legacyPublicURL, "", "")
-	rec := legacyDo(t, server, http.MethodPost, "/mcp", legacyMCPInit, "application/json", http.Header{"Accept": {"application/json, text/event-stream"}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("open MCP = %d %s", rec.Code, rec.Body.String())
-	}
-	health := legacyDo(t, server, http.MethodGet, "/healthz", "", "", nil)
-	if health.Code != http.StatusOK {
-		t.Fatalf("open health = %d %s", health.Code, health.Body.String())
-	}
-	value := legacyJSON(t, health)
-	if value["status"] != "ok" || value["auth"] != false {
-		t.Fatalf("open health = %d %s", health.Code, health.Body.String())
-	}
-}
-
-func TestRemoteLegacy_OpenAppPublishesNoOAuthMetadata(t *testing.T) {
-	server := legacyNewRemote(t, legacyPublicURL, "", "")
-	paths := []string{
-		"/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource",
-		"/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/mcp",
-		"/.well-known/openid-configuration", "/.well-known/openid-configuration/mcp",
-		"/authorize", "/token", "/register", "/revoke", "/consent",
-	}
-	for _, path := range paths {
-		for _, method := range []string{http.MethodGet, http.MethodPost} {
-			rec := legacyDo(t, server, method, path, "", "", nil)
-			if rec.Code != http.StatusNotFound {
-				t.Errorf("%s %s = %d, want 404", method, path, rec.Code)
-			}
-		}
-	}
-}
-
-func TestRemoteLegacy_UnauthenticatedPublicBindRefused(t *testing.T) {
-	if err := ValidateRemoteBind("0.0.0.0", false, false); err == nil || !strings.Contains(err.Error(), "unauthenticated") {
-		t.Fatalf("public open bind error = %v", err)
-	}
-}
-
-func TestRemoteLegacy_UnauthenticatedLoopbackBindAllowed(t *testing.T) {
-	server := legacyNewRemote(t, "http://127.0.0.1:8081", "", "")
-	gateways, err := PlanRemoteGateways(server, "127.0.0.1", 8081, nil, "127.0.0.1", 0, false)
-	if err != nil || len(gateways) != 1 || gateways[0].Host != "127.0.0.1" || gateways[0].Port != 8081 || gateways[0].Label != "external" {
-		t.Fatalf("loopback plan = %#v, err=%v", gateways, err)
-	}
-}
-
-func TestRemoteLegacy_TwoGatewaysFromOneInstance(t *testing.T) {
-	external := legacyNewRemote(t, legacyPublicURL, legacyPass, "")
-	internal, err := external.NewInternalRemote("http://127.0.0.1:8082")
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateways, err := PlanRemoteGateways(external, "0.0.0.0", 8081, internal, "127.0.0.1", 8082, false)
-	if err != nil || len(gateways) != 2 {
-		t.Fatalf("gateway plan = %#v, err=%v", gateways, err)
-	}
-	want := []GatewaySpec{{Host: "0.0.0.0", Port: 8081, Label: "external"}, {Host: "127.0.0.1", Port: 8082, Label: "internal"}}
-	for i := range want {
-		if gateways[i].Host != want[i].Host || gateways[i].Port != want[i].Port || gateways[i].Label != want[i].Label || gateways[i].Handler == nil {
-			t.Errorf("gateway %d = %#v, want host=%s port=%d label=%s", i, gateways[i], want[i].Host, want[i].Port, want[i].Label)
-		}
-	}
-}
-
-func TestRemoteLegacy_InternalGatewayNeedsNoCredentials(t *testing.T) {
-	external := legacyNewRemote(t, legacyPublicURL, legacyPass, "")
-	internal, err := external.NewInternalRemote("http://127.0.0.1:8082")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := legacyRequest(t, internal, http.MethodPost, "http://127.0.0.1:8082", "/mcp", legacyMCPInit, "application/json", http.Header{"Accept": {"application/json, text/event-stream"}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("internal open MCP = %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRemoteLegacy_InternalGatewaySkippedWhenExternalOpen(t *testing.T) {
-	server := legacyNewRemote(t, "http://127.0.0.1:8081", "", "")
-	gateways, err := PlanRemoteGateways(server, "127.0.0.1", 8081, server, "127.0.0.1", 8082, false)
-	if err != nil || len(gateways) != 1 || gateways[0].Label != "external" {
-		t.Fatalf("open dual plan = %#v, err=%v", gateways, err)
-	}
-}
-
-func TestRemoteLegacy_InternalGatewayRefusesPublicBind(t *testing.T) {
-	external := legacyNewRemote(t, legacyPublicURL, legacyPass, "")
-	internal, err := external.NewInternalRemote("http://0.0.0.0:8082")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = PlanRemoteGateways(external, "0.0.0.0", 8081, internal, "0.0.0.0", 8082, false)
-	if err == nil || !strings.Contains(err.Error(), "internal") {
-		t.Fatalf("public internal bind error = %v", err)
 	}
 }
 
@@ -789,7 +703,6 @@ func TestRemoteLegacy_ResourceServerRejectsForeignAudience(t *testing.T) {
 
 func TestRemoteLegacy_StateFileOutsideCacheRoot(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), ".cache")
-	t.Setenv("HARVESTER_STATE_DIR", "")
 	state := defaultAuthStatePath(cache)
 	if strings.HasPrefix(filepath.Clean(state), filepath.Clean(cache)+string(os.PathSeparator)) {
 		t.Fatalf("state path %q is inside cache root %q", state, cache)
@@ -914,23 +827,12 @@ func TestRemoteLegacy_UnconfinedByDefault(t *testing.T) {
 func TestRemoteLegacy_BuildAppConfinesReadsToCache(t *testing.T) {
 	base := t.TempDir()
 	cache := filepath.Join(base, "cache")
-	server, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: cache}, PublicURL: legacyPublicURL})
+	server, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: cache}, PublicURL: legacyPublicURL, StaticToken: legacyStatic})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(server.service.runtime.LocalRoots) != 1 || server.service.runtime.LocalRoots[0] != cache {
 		t.Fatalf("local roots = %#v", server.service.runtime.LocalRoots)
-	}
-}
-
-func TestRemoteLegacy_ConfinementCanBeDisabledExplicitly(t *testing.T) {
-	base := t.TempDir()
-	server, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: filepath.Join(base, "cache")}, PublicURL: legacyPublicURL, DisableConfinement: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(server.service.runtime.LocalRoots) != 0 {
-		t.Fatalf("disabled confinement roots = %#v", server.service.runtime.LocalRoots)
 	}
 }
 
@@ -956,58 +858,6 @@ func TestRemoteLegacy_ExpiryIsEnforced(t *testing.T) {
 	_, rec := legacyToken(t, server, url.Values{"grant_type": {"authorization_code"}, "code": {"expired-code"}, "client_id": {"c"}}, nil)
 	if rec.Code != http.StatusBadRequest || legacyJSON(t, rec)["error"] != "invalid_grant" {
 		t.Fatalf("expired authorization code = %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRemoteLegacy_PreflightOccursBeforeGatewayPlan(t *testing.T) {
-	server := legacyNewRemote(t, legacyPublicURL, legacyPass, "")
-	if _, err := PlanRemoteGateways(server, "0.0.0.0", 0, nil, "127.0.0.1", 0, false); err != nil {
-		t.Fatalf("authenticated preflight unexpectedly rejected: %v", err)
-	}
-	open := legacyNewRemote(t, "http://127.0.0.1:8081", "", "")
-	if _, err := PlanRemoteGateways(open, "0.0.0.0", 0, nil, "127.0.0.1", 0, false); err == nil {
-		t.Fatal("unsafe unauthenticated bind was not rejected before a listener plan")
-	}
-}
-
-func TestRemoteLegacy_PartialBindCleansUpEarlierListener(t *testing.T) {
-	base := t.TempDir()
-	external, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: filepath.Join(base, "cache")}, PublicURL: legacyPublicURL, Passphrase: legacyPass, StatePath: filepath.Join(base, "state", "auth.json")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	internal, err := external.NewInternalRemote("http://127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstPort := first.Addr().(*net.TCPAddr).Port
-	second, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_ = first.Close()
-		t.Fatal(err)
-	}
-	secondPort := second.Addr().(*net.TCPAddr).Port
-	if err := first.Close(); err != nil {
-		_ = second.Close()
-		t.Fatal(err)
-	}
-	defer second.Close()
-
-	// Holding the second port forces the pair's second listen to fail after the
-	// first one has been opened. The function must close the first listener.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if code := ServeRemotePair(ctx, external, "127.0.0.1", firstPort, internal, "127.0.0.1", secondPort, false); code == 0 {
-		t.Fatal("partial bind unexpectedly succeeded")
-	}
-	probe, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(firstPort)), 200*time.Millisecond)
-	if err == nil {
-		_ = probe.Close()
-		t.Fatal("first listener remained open after partial bind failure")
 	}
 }
 

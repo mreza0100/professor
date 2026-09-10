@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"hostops/pfm/internal/harvestmcp"
@@ -31,6 +34,11 @@ type mcpDaemonStatus struct {
 	PID             int                 `json:"pid"`
 	StartTime       string              `json:"startTime"`
 	Endpoint        string              `json:"endpoint"`
+	// HarvesterExternal is the authenticated external gateway's live state:
+	// "disabled", "listening on HOST:PORT as URL", or "failed: <error>". A
+	// failed external bind never takes the loopback port down with it, so it
+	// must be visible HERE — doctor reads it — not only in the service log.
+	HarvesterExternal string `json:"harvesterExternal,omitempty"`
 }
 
 type mcpDaemonOptions struct {
@@ -39,6 +47,8 @@ type mcpDaemonOptions struct {
 	Endpoint  string
 	Chat      http.Handler
 	Harvester http.Handler
+	// External reports the external gateway state at request time.
+	External *atomic.Pointer[string]
 }
 
 func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
@@ -78,7 +88,13 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 				writer.WriteHeader(http.StatusMethodNotAllowed)
 				return
 			}
-			writeMCPJSON(writer, status)
+			current := status
+			if options.External != nil {
+				if state := options.External.Load(); state != nil {
+					current.HarvesterExternal = *state
+				}
+			}
+			writeMCPJSON(writer, current)
 		case "/mcp/chat":
 			serveMCPDaemonRoute(writer, request, options.Chat, "chat")
 		case "/mcp/harvester":
@@ -165,6 +181,26 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		defer harvester.Close()
 		options.Harvester = harvester.NewHTTPHandler()
 	}
+	external := &atomic.Pointer[string]{}
+	setExternal := func(state string) { external.Store(&state) }
+	switch {
+	case !runtime.Config.Harvester.External.Enabled:
+		setExternal("disabled")
+	case !harvesterEnabled:
+		setExternal("off: external.enabled is true but harvester.enabled is false")
+		fmt.Fprintln(stderr, "pfm mcp serve: harvester external gateway NOT serving: external.enabled is true but harvester.enabled is false")
+	default:
+		stopExternal, err := startHarvesterExternal(runtime, stderr, setExternal)
+		if err != nil {
+			// The loopback port keeps serving chat + harvester; the failure is
+			// reported on /status (doctor) and here, never swallowed.
+			setExternal("failed: " + err.Error())
+			fmt.Fprintf(stderr, "pfm mcp serve: harvester external gateway NOT serving: %v\n", err)
+		} else {
+			defer stopExternal()
+		}
+	}
+	options.External = external
 	options.StartedAt = time.Now().UTC()
 	handler := newMCPDaemonHandler(options)
 	server := &http.Server{
@@ -175,14 +211,64 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		IdleTimeout:       2 * time.Minute,
 	}
 	fmt.Fprintf(
-		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\n",
-		address, enabledState(chatEnabled), enabledState(harvesterEnabled),
+		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\tharvester_external=%s\n",
+		address, enabledState(chatEnabled), enabledState(harvesterEnabled), *external.Load(),
 	)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(stderr, "pfm mcp serve: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// startHarvesterExternal opens the authenticated external harvester gateway on
+// its own port, inside the daemon process. It serves the harvester ONLY —
+// never the chat MCP, which drives live terminals — and harvestmcp.NewRemote
+// refuses to build it without a credential. The returned stop closes the
+// listener and the gateway's converter.
+func startHarvesterExternal(runtime commandRuntime, stderr io.Writer, setState func(string)) (func(), error) {
+	settings := runtime.Config.Harvester.External
+	statePath := ""
+	if settings.StateDir != "" {
+		statePath = filepath.Join(settings.StateDir, "auth.json")
+	}
+	remote, err := harvestmcp.NewRemote(harvestmcp.RemoteOptions{
+		Runtime: harvestRuntime(runtime), Version: version, PublicURL: settings.PublicURL,
+		Passphrase: settings.Passphrase, StaticToken: settings.StaticToken, StatePath: statePath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configure: %w", err)
+	}
+	address := net.JoinHostPort(settings.Host, strconv.Itoa(settings.Port))
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		if closeErr := remote.Close(); closeErr != nil {
+			fmt.Fprintf(stderr, "pfm mcp serve: close external harvester after failed listen: %v\n", closeErr)
+		}
+		return nil, fmt.Errorf("listen %s: %w", address, err)
+	}
+	server := &http.Server{
+		Handler:           remote.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	setState(fmt.Sprintf("listening on %s as %s", address, settings.PublicURL))
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			setState("failed: " + err.Error())
+			fmt.Fprintf(stderr, "pfm mcp serve: harvester external gateway stopped: %v\n", err)
+		}
+	}()
+	return func() {
+		if err := server.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm mcp serve: close external gateway: %v\n", err)
+		}
+		if err := remote.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm mcp serve: close external harvester: %v\n", err)
+		}
+	}, nil
 }
 
 // enabledState renders a config gate for the startup log line so the

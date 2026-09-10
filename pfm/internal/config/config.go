@@ -296,6 +296,9 @@ type Config struct {
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
+	// Harvester is harvester.config.json, loaded beside Path. Its Enabled is
+	// mirrored into MCPServers["harvester"] for server-generic consumers.
+	Harvester HarvesterConfig
 
 	Path    string
 	Exists  bool
@@ -436,7 +439,22 @@ func ResolvePath(home string) string {
 	if !filepath.IsAbs(root) {
 		root = filepath.Join(home, ".config")
 	}
-	return filepath.Join(filepath.Clean(root), "pfm", "config.json")
+	return filepath.Join(filepath.Clean(root), "pfm", FileName)
+}
+
+// resolveExistingPath is ResolvePath, except that a machine which still has
+// only the pre-split config.json reads that file until `pfm install`
+// migrates it — every command keeps working across the binary upgrade.
+func resolveExistingPath(home string) string {
+	current := ResolvePath(home)
+	if _, err := os.Stat(current); err == nil {
+		return current
+	}
+	legacy := filepath.Join(filepath.Dir(current), LegacyFileName)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return current
 }
 
 // Defaults returns today's effective behavior over the supplied discovery
@@ -513,7 +531,16 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		sources["mcp.servers."+name+".enabled"] = SourceDefault
+		if name != "harvester" {
+			sources["mcp.servers."+name+".enabled"] = SourceDefault
+		}
+	}
+	harvester := DefaultHarvester()
+	if server, found := registered["harvester"]; found {
+		harvester.Enabled = server.Enabled
+	}
+	for _, key := range harvesterSourceKeys {
+		sources[key] = SourceDefault
 	}
 	return Config{
 		Version:          Version,
@@ -529,7 +556,8 @@ func defaultsWithMCPServers(
 		Tmux:             Tmux{Titles: DefaultTmuxTitles()},
 		NameSync:         DefaultNameSync(),
 		MCPServers:       servers,
-		MCP:              MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: 8377}},
+		MCP:              MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
+		Harvester:        harvester,
 		Ask: AskConfig{
 			Engine: pfmengine.Codex,
 			Prefs: map[pfmengine.ID]EnginePrefs{
@@ -697,7 +725,7 @@ func loadWithMCPServers(
 ) (Config, error) {
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexRoots...)
 	if path == "" {
-		path = ResolvePath(home)
+		path = resolveExistingPath(home)
 	} else if !filepath.IsAbs(path) {
 		absolute, err := filepath.Abs(path)
 		if err != nil {
@@ -709,6 +737,9 @@ func loadWithMCPServers(
 
 	content, err := os.ReadFile(result.Path)
 	if errors.Is(err, os.ErrNotExist) {
+		if err := finishHarvester(&result, home, registered, nil); err != nil {
+			return Config{}, err
+		}
 		return result, nil
 	}
 	if err != nil {
@@ -875,6 +906,7 @@ func loadWithMCPServers(
 		result.Sources["nameSync.interval"] = SourceFile
 	}
 
+	var legacyHarvesterEnabled *bool
 	if raw.MCP != nil {
 		for name, server := range raw.MCP.Servers {
 			if _, known := registered[name]; !known {
@@ -882,6 +914,13 @@ func loadWithMCPServers(
 			}
 			if server.Enabled == nil {
 				return Config{}, fmt.Errorf("config %s: required key %q is missing", result.Path, "mcp.servers."+name+".enabled")
+			}
+			if name == "harvester" {
+				// Pre-split layout: the flag now lives in harvester.config.json.
+				// Honored until `pfm install` migrates it (PlanMigration).
+				enabled := *server.Enabled
+				legacyHarvesterEnabled = &enabled
+				continue
 			}
 			result.MCPServers[name] = MCPServer{Enabled: *server.Enabled}
 			result.MCP.Servers[name] = MCPServer{Enabled: *server.Enabled}
@@ -938,8 +977,27 @@ func loadWithMCPServers(
 			}
 		}
 	}
-	result.MCPServers = cloneMCPServers(result.MCP.Servers)
+	if err := finishHarvester(&result, home, registered, legacyHarvesterEnabled); err != nil {
+		return Config{}, err
+	}
 	return result, nil
+}
+
+// finishHarvester loads harvester.config.json, mirrors its enabled flag into
+// the server-generic MCP maps, and checks the one cross-file invariant.
+func finishHarvester(result *Config, home string, registered map[string]MCPServer, legacyEnabled *bool) error {
+	if err := loadHarvester(result, home, legacyEnabled); err != nil {
+		return err
+	}
+	if _, found := registered["harvester"]; found {
+		result.MCP.Servers["harvester"] = MCPServer{Enabled: result.Harvester.Enabled}
+	}
+	result.MCPServers = cloneMCPServers(result.MCP.Servers)
+	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
+		return fmt.Errorf("harvester config %s: external.port %d collides with mcp.http.port in %s; the two gateways need distinct ports",
+			result.Harvester.Path, result.Harvester.External.Port, result.Path)
+	}
+	return nil
 }
 
 // parseNameSyncInterval validates nameSync.interval the way compactNudge's
@@ -1360,6 +1418,9 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 	if !registered {
 		return false, fmt.Errorf("unknown MCP server %q", name)
 	}
+	if name == "harvester" {
+		return SetHarvesterEnabled(config, enabled)
+	}
 	if server.Enabled == enabled {
 		return false, nil
 	}
@@ -1556,6 +1617,9 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	servers := make(map[string]any, len(config.MCP.Servers))
 	for name, server := range config.MCP.Servers {
+		if name == "harvester" {
+			continue // lives in harvester.config.json (MarshalHarvester)
+		}
 		servers[name] = map[string]any{"enabled": server.Enabled}
 	}
 	codexValue := map[string]any{
@@ -1654,7 +1718,8 @@ func redactJSON(value any) {
 	case map[string]any:
 		for key, child := range typed {
 			lower := strings.ToLower(key)
-			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "credential") || strings.Contains(lower, "password") {
+			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "credential") || strings.Contains(lower, "password") ||
+				strings.Contains(lower, "passphrase") || strings.Contains(lower, "apikey") {
 				typed[key] = "<redacted>"
 				continue
 			}

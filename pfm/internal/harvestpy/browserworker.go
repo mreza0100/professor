@@ -207,7 +207,7 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 		return worker.worker, nil
 	}
 	if strings.TrimSpace(worker.runtime.Python) == "" {
-		return nil, errors.New("browser interpreter path is empty; the browser environment is NOT provisioned (set HARVESTER_BROWSER=1 and run pfm install)")
+		return nil, errors.New("browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)")
 	}
 	command, err := browserWorkerCommand(worker.runtime.Python, worker.runtime.Script)
 	if err != nil {

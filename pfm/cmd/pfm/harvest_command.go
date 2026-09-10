@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"hostops/pfm/internal/ask"
@@ -16,19 +15,37 @@ import (
 	"hostops/pfm/internal/harvestmcp"
 )
 
+// retiredHarvesterServeFlags maps every flag the pre-config `pfm mcp harvester
+// serve` accepted to where that setting lives now. A stale registration that
+// still passes one fails loudly with the exact key, never silently.
+var retiredHarvesterServeFlags = map[string]string{
+	"user-agent":            "fetch.userAgent in harvester.config.json",
+	"proxy-url":             "fetch.proxyURL in harvester.config.json",
+	"host":                  "external.host in harvester.config.json (served by `pfm mcp serve`)",
+	"port":                  "external.port in harvester.config.json (served by `pfm mcp serve`)",
+	"public-url":            "external.publicURL in harvester.config.json (served by `pfm mcp serve`)",
+	"internal-host":         "retired: the daemon's loopback port (mcp.http.port) is the internal gateway",
+	"internal-port":         "retired: the daemon's loopback port (mcp.http.port) is the internal gateway",
+	"allow-unauthenticated": "retired: the external gateway always authenticates (external.auth.*)",
+	"ignore-robots-txt":     "retired: Harvester never consulted robots.txt",
+}
+
+// runHarvesterMCP serves the harvester over stdio for a client that launches
+// it as a command. Both HTTP gateways — loopback and the authenticated
+// external one — belong to the one daemon process, `pfm mcp serve`.
 func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("mcp harvester serve", "usage: pfm mcp harvester serve [--transport stdio|http] [--user-agent UA] [--proxy-url URL] [--ignore-robots-txt]", stderr)
-	transport := flags.String("transport", "stdio", "MCP transport (stdio or http)")
-	userAgent := flags.String("user-agent", "", "override the autonomous fetch User-Agent")
-	proxyURL := flags.String("proxy-url", "", "HTTP proxy URL")
-	ignoreRobots := false
-	flags.Var(&presenceFlag{value: &ignoreRobots}, "ignore-robots-txt", "compatibility flag; Harvester does not consult robots.txt")
-	host := flags.String("host", "127.0.0.1", "HTTP listen host")
-	port := flags.Int("port", 8081, "HTTP listen port")
-	publicURL := flags.String("public-url", "", "public URL")
-	internalHost := flags.String("internal-host", "127.0.0.1", "internal host")
-	internalPort := flags.Int("internal-port", 8082, "internal port (zero disables the second gateway)")
-	allowUnauthenticated := flags.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback bind")
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if where, retired := retiredHarvesterServeFlags[name]; retired {
+			fmt.Fprintf(stderr, "pfm mcp harvester serve: --%s is retired; %s\n", name, where)
+			return 2
+		}
+	}
+	flags := newFlagSet("mcp harvester serve", "usage: pfm mcp harvester serve [--transport stdio]", stderr)
+	transport := flags.String("transport", "stdio", "MCP transport (stdio only; HTTP gateways are served by `pfm mcp serve`)")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -36,52 +53,11 @@ func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRun
 		flags.Usage()
 		return 2
 	}
-	if *transport != "stdio" && *transport != "http" {
-		fmt.Fprintf(stderr, "pfm mcp harvester: unsupported transport %q (want stdio or http)\n", *transport)
+	if *transport != "stdio" {
+		fmt.Fprintf(stderr, "pfm mcp harvester: --transport %q is retired; the loopback and authenticated external HTTP gateways are served by `pfm mcp serve` (harvester.config.json external.*)\n", *transport)
 		return 2
 	}
-	configured := harvestRuntime(runtime)
-	configured.UserAgent = *userAgent
-	configured.ProxyURL = *proxyURL
-	if *transport == "http" {
-		passphrase := os.Getenv("HARVESTER_AUTH_PASSPHRASE")
-		staticToken := os.Getenv("HARVESTER_STATIC_TOKEN")
-		if err := harvestmcp.ValidateRemoteBind(*host, passphrase != "" || staticToken != "", *allowUnauthenticated); err != nil {
-			fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
-			return 2
-		}
-		if *publicURL == "" {
-			*publicURL = fmt.Sprintf("http://%s:%d", *host, *port)
-		}
-		remote, err := harvestmcp.NewRemote(harvestmcp.RemoteOptions{Runtime: configured, Version: version, PublicURL: *publicURL, Passphrase: passphrase, StaticToken: staticToken, ConfineReads: true})
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
-			return 1
-		}
-		// An internal listener is only meaningful for an authenticated external
-		// gateway. It deliberately shares the service but has no bearer wall.
-		if *internalPort != 0 && (passphrase != "" || staticToken != "") {
-			internalURL := fmt.Sprintf("http://%s:%d", *internalHost, *internalPort)
-			internal, err := remote.NewInternalRemote(internalURL)
-			if err != nil {
-				_ = remote.Close()
-				fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
-				return 1
-			}
-			if err := harvestmcp.ValidateRemoteBind(*internalHost, false, *allowUnauthenticated); err != nil {
-				_ = remote.Close()
-				fmt.Fprintf(stderr, "pfm mcp harvester: internal gateway: %v\n", err)
-				return 2
-			}
-			return harvestmcp.ServeRemotePair(context.Background(), remote, *host, *port, internal, *internalHost, *internalPort, *allowUnauthenticated)
-		}
-		if err := remote.ListenAndServe(context.Background(), *host, *port); err != nil {
-			fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	service, err := harvestmcp.NewConfigured(version, configured)
+	service, err := harvestmcp.NewConfigured(version, harvestRuntime(runtime))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
 		return 1
@@ -97,22 +73,6 @@ func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRun
 	}
 	return 0
 }
-
-// presenceFlag matches Python argparse's store_true contract: the flag is
-// either absent or present, never an assignment accepting false.
-type presenceFlag struct{ value *bool }
-
-func (flag *presenceFlag) String() string {
-	return strconv.FormatBool(flag != nil && flag.value != nil && *flag.value)
-}
-func (flag *presenceFlag) Set(value string) error {
-	if value != "true" {
-		return fmt.Errorf("-%s does not accept a value", "ignore-robots-txt")
-	}
-	*flag.value = true
-	return nil
-}
-func (*presenceFlag) IsBoolFlag() bool { return true }
 
 // runHarvest is the command-line face of the same Harvester core served over
 // MCP. Sources remain ordered: each result is printed in the order supplied.
@@ -329,12 +289,32 @@ func writeHarvestAskReceipt(home, receiptDir string, index int, source string, r
 	return path, receiptDir, nil
 }
 
+// harvestRuntime is harvester.config.json resolved into the MCP adapter's
+// runtime — the ONE bridge between machine config and the harvester. Local
+// callers (CLI, stdio, loopback daemon) keep the unconfined local-read surface
+// subject to harvest.DenyLocalPath; the external gateway confines to the cache.
 func harvestRuntime(runtime commandRuntime) harvestmcp.Runtime {
+	harvester := runtime.Config.Harvester
 	return harvestmcp.Runtime{
-		Home: runtime.Paths.Home,
-		// The local CLI and stdio MCP preserve the oracle's unconfined local
-		// read surface, subject to harvest.DenyLocalPath. Remote construction
-		// supplies an explicit cache root instead.
+		Home:                  runtime.Paths.Home,
+		CacheDir:              harvester.Cache.Dir,
+		UserAgent:             harvester.Fetch.UserAgent,
+		ProxyURL:              harvester.Fetch.ProxyURL,
+		SearXNGURL:            harvester.Search.SearXNGURL,
+		BraveAPIKey:           harvester.Search.BraveAPIKey,
+		DisableSearch:         !harvester.Search.Enabled,
+		ContactEmail:          harvester.Scholarly.ContactEmail,
+		GoogleBooksAPIKey:     harvester.Scholarly.GoogleBooksAPIKey,
+		CoreAPIKey:            harvester.Scholarly.CoreAPIKey,
+		SemanticScholarAPIKey: harvester.Scholarly.SemanticScholarAPIKey,
+		Browser:               harvester.Fetch.Browser,
+		PDFOCR:                harvester.Convert.PDFOCR,
+		PDFLayout:             harvester.Convert.PDFLayout,
+		CacheTTL:              harvester.Cache.TTL,
+		NegativeTTL:           harvester.Cache.NegativeTTL,
+		NegativeTransientTTL:  harvester.Cache.NegativeTransientTTL,
+		TTLsConfigured:        true,
+		MaxInlineChars:        harvester.Output.MaxInlineChars,
 	}
 }
 

@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/ask"
@@ -78,6 +77,7 @@ func runDoctor(
 		warnings++
 	}
 	printDoctorConfig(stdout, runtime)
+	warnings += printHarvesterConfigDoctor(stdout, runtime)
 	warnings += printEngineDoctor(stdout, runtime.Config)
 	warnings += printOpencodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	warnings += printEngineCapabilities(stdout)
@@ -89,6 +89,7 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)
 		} else {
 			fmt.Fprintf(stdout, "doctor: mcp daemon=running pid=%d since=%s endpoint=%s\n", status.PID, status.StartTime, status.Endpoint)
+			warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
 			if status.PFMVersion != version {
 				warnings++
 				fmt.Fprintf(stdout, "doctor: mcp daemon=version-skew daemon=%s client=%s\n", status.PFMVersion, version)
@@ -290,9 +291,9 @@ func runDoctor(
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
-		warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor())
+		warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
 	}
-	warnings += printHarvestCacheDoctor(stdout)
+	warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
 	if warnings != 0 {
 		fmt.Fprintf(stdout, "doctor: warnings=%d\n", warnings)
 		return 1
@@ -810,8 +811,8 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 	return warnings
 }
 
-func printHarvestCacheDoctor(stdout io.Writer) int {
-	root, rootErr := harvest.CacheRoot()
+func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig) int {
+	root, rootErr := harvest.CacheRoot(harvester.Cache.Dir)
 	if rootErr != nil {
 		// An unresolvable root is "we failed to look", never "0 entries".
 		fmt.Fprintf(stdout, "doctor: harvester_cache dir=? error=%v\n", rootErr)
@@ -830,18 +831,9 @@ func printHarvestCacheDoctor(stdout io.Writer) int {
 	if os.IsNotExist(walkErr) {
 		walkErr = nil
 	}
-	ttl := 24 * time.Hour
-	ttlText := ttl.String()
-	if raw := strings.TrimSpace(os.Getenv("HARVESTER_CACHE_TTL")); raw != "" {
-		seconds, err := strconv.Atoi(raw)
-		if err != nil || seconds < 0 {
-			walkErr = errors.Join(walkErr, fmt.Errorf("invalid HARVESTER_CACHE_TTL=%q", raw))
-		} else if seconds == 0 {
-			ttlText = "never"
-		} else {
-			ttl = time.Duration(seconds) * time.Second
-			ttlText = ttl.String()
-		}
+	ttlText := harvester.Cache.TTL.String()
+	if harvester.Cache.TTL == 0 {
+		ttlText = "never"
 	}
 	if walkErr != nil {
 		fmt.Fprintf(stdout, "doctor: harvester_cache dir=%s entries=%d ttl=%s error=%v\n", root, entries, ttlText, walkErr)
@@ -867,7 +859,7 @@ func configuredHarvestDoctor() harvestDoctor {
 	return pinnedHarvestDoctor{}
 }
 
-func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string, platform harvestpy.Platform, doctor harvestDoctor) int {
+func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string, platform harvestpy.Platform, doctor harvestDoctor, browserGate bool) int {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = goRuntime.GOOS, goRuntime.GOARCH
 	}
@@ -877,9 +869,9 @@ func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped")
 		// The conversion env is absent (honest absence), but the opt-in
-		// browser row must still report: with HARVESTER_BROWSER=1 a missing
+		// browser row must still report: with fetch.browser on a missing
 		// environment is the NOT_PROVISIONED state, never silence.
-		return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, 0)
+		return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, 0, browserGate)
 	}
 	warnings := 0
 
@@ -962,7 +954,7 @@ func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string
 		}
 		fmt.Fprintf(stdout, "doctor: harvestpy live_smoke=(file) broken error=%s\n", smokeErr)
 	}
-	return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, warnings)
+	return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, warnings, browserGate)
 }
 
 // resolveChromeForDoctor re-checks the Google Chrome locations the browser
@@ -992,7 +984,7 @@ func resolveChromeForDoctor() string {
 // appendHarvestBrowserDoctorRow reports the opt-in real-browser rung
 // (Patchright + system Chrome). Its broken states are deliberately distinct:
 // NOT provisioned ≠ provisioned-but-Chrome-missing ≠ probe failed. With the
-// HARVESTER_BROWSER gate off the row is informational only — absence of an
+// fetch.browser gate off the row is informational only — absence of an
 // opt-in environment is not a defect.
 // doctorChromeResolver is injectable so tests can simulate a Chrome-less
 // host without depending on the machine they run on.
@@ -1013,8 +1005,9 @@ func browserEnvFingerprint(digest harvestpy.EnvironmentDigest) string {
 	return "unknown"
 }
 
-func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root string, platform harvestpy.Platform, warnings int) int {
-	gateOn := harvest.BrowserGateEnabled() // ONE gate implementation, shared with the harvester core
+// gateOn is harvester.config.json fetch.browser — the same value the core's
+// ladder receives, so doctor and the harvester can never disagree.
+func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root string, platform harvestpy.Platform, warnings int, gateOn bool) int {
 	digest, inspectErr := harvestpy.InspectBrowser(root, platform)
 	envDir := harvestpy.BrowserRuntimeRoot(root, platform)
 	interpreter := filepath.Join(envDir, "project", ".venv", "bin", "python")
@@ -1029,19 +1022,19 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	if !gateOn {
 		switch {
 		case inspectErr == nil && digest.State == "ready":
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s provisioned disabled gate=HARVESTER_BROWSER\n", fingerprint)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s provisioned disabled gate=fetch.browser\n", fingerprint)
 		case errors.Is(inspectErr, os.ErrNotExist):
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=HARVESTER_BROWSER\n")
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser\n")
 		case inspectErr != nil:
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=CORRUPT_RECORD disabled gate=HARVESTER_BROWSER error=%v\n", inspectErr)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=CORRUPT_RECORD disabled gate=fetch.browser error=%v\n", inspectErr)
 		default:
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s disabled gate=HARVESTER_BROWSER error=provision record state %q is not ready\n", fingerprint, digest.State)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s disabled gate=fetch.browser error=provision record state %q is not ready\n", fingerprint, digest.State)
 		}
 		return warnings
 	}
 	if inspectErr != nil {
 		if errors.Is(inspectErr, os.ErrNotExist) {
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned; run pfm install with HARVESTER_BROWSER=1\n", interpreter)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned; it provisions on the first browser fetch (check uv and network access)\n", interpreter)
 		} else {
 			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=PROBE_FAILED error=%v\n", inspectErr)
 		}
@@ -1059,7 +1052,7 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	// anything else — browser.py carries the SSRF route guard, and a file
 	// that does not match the pinned source invalidates every verdict below.
 	if strings.TrimSpace(digest.SourceSHA256) == "" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s SOURCE_UNPINNED error=provision record predates source pinning; re-run pfm install with HARVESTER_BROWSER=1\n", fingerprint)
+		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s SOURCE_UNPINNED error=provision record predates source pinning; remove the browser environment so the next browser fetch re-provisions it\n", fingerprint)
 		return warnings + 1
 	}
 	if err := harvestpy.VerifySHA256(script, digest.SourceSHA256); err != nil {
@@ -1136,10 +1129,94 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 	fmt.Fprintf(stdout, "doctor: config codex.yolo=%t (%s)\n", runtime.Config.Codex.Yolo, runtime.Config.Source("codex.yolo"))
 	fmt.Fprintf(stdout, "doctor: config codex.binary=%s (%s)\n", runtime.Config.Codex.Binary, runtime.Config.Source("codex.binary"))
 	for _, name := range config.RegisteredMCPServers() {
-		key := "mcp.servers." + name + ".enabled"
-		fmt.Fprintf(stdout, "doctor: config %s=%t (%s)\n", key, runtime.Config.MCPServers[name].Enabled, runtime.Config.Source(key))
+		fmt.Fprintf(stdout, "doctor: config %s=%t (%s)\n", mcpServerKey(name), runtime.Config.MCPServers[name].Enabled, runtime.Config.MCPServerSource(name))
 	}
 	fmt.Fprintf(stdout, "doctor: config mcp.http.port=%d (%s)\n", runtime.Config.MCP.HTTP.Port, runtime.Config.Source("mcp.http.port"))
+	fmt.Fprintf(stdout, "doctor: config harvester path=%s exists=%t\n", runtime.Config.Harvester.Path, runtime.Config.Harvester.Exists)
+}
+
+// mcpServerKey names where a registered server's enabled flag is configured.
+func mcpServerKey(name string) string {
+	if name == "harvester" {
+		return "harvester.enabled"
+	}
+	return "mcp.servers." + name + ".enabled"
+}
+
+// retiredHarvesterEnv maps every environment variable the harvester used to
+// read to where that setting lives now. The harvester ignores them all, so a
+// set one is a setting that silently stopped applying — doctor says so.
+var retiredHarvesterEnv = []struct{ name, now string }{
+	{"SEARXNG_URL", "search.searxngURL"},
+	{"BRAVE_API_KEY", "search.braveApiKey"},
+	{"HARVESTER_DISABLE_SEARCH", "search.enabled"},
+	{"HARVESTER_CONTACT_EMAIL", "scholarly.contactEmail"},
+	{"GOOGLE_BOOKS_API_KEY", "scholarly.googleBooksApiKey"},
+	{"CORE_API_KEY", "scholarly.coreApiKey"},
+	{"SEMANTIC_SCHOLAR_API_KEY", "scholarly.semanticScholarApiKey"},
+	{"HARVESTER_BROWSER", "fetch.browser"},
+	{"HARVESTER_PDF_OCR", "convert.pdfOcr"},
+	{"HARVESTER_PDF_LAYOUT", "convert.pdfLayout"},
+	{"WEBFETCH_DIR", "cache.dir"},
+	{"HARVESTER_CACHE_DIR", "cache.dir"},
+	{"HARVESTER_CACHE_TTL", "cache.ttlSeconds"},
+	{"HARVESTER_NEG_TTL", "cache.negativeTtlSeconds"},
+	{"HARVESTER_NEG_TTL_TRANSIENT", "cache.negativeTransientTtlSeconds"},
+	{"HARVESTER_MAX_INLINE_CHARS", "output.maxInlineChars"},
+	{"HARVESTER_STATE_DIR", "external.stateDir"},
+	{"HARVESTER_AUTH_PASSPHRASE", "external.auth.passphrase"},
+	{"HARVESTER_STATIC_TOKEN", "external.auth.staticToken"},
+	{"HARVESTER_LOCAL_ROOTS", ""},
+	{"PFM_HARVEST_PYTHON", ""},
+}
+
+// printHarvesterExternalDoctor reports the external gateway whenever it is
+// configured on: the daemon's live state, or why it cannot be running. A
+// configured gateway that never opened is a warning, never an absent line.
+func printHarvesterExternalDoctor(stdout io.Writer, harvester config.HarvesterConfig, reported string) int {
+	if !harvester.External.Enabled {
+		return 0
+	}
+	state := reported
+	switch {
+	case !harvester.Enabled:
+		state = "off (external.enabled is true but harvester.enabled is false; the gateway only runs with the harvester)"
+	case state == "":
+		state = "not reported (daemon predates the external gateway; restart it)"
+	}
+	fmt.Fprintf(stdout, "doctor: mcp harvester_external=%s\n", state)
+	if strings.HasPrefix(state, "listening") {
+		return 0
+	}
+	return 1
+}
+
+// printHarvesterConfigDoctor reports the two ways a harvester setting can stop
+// applying without an error: a config migration still pending (pre-split
+// layout, an interrupted migration's leftover, the old default port), and a
+// retired environment variable still set. Each is a warning.
+func printHarvesterConfigDoctor(stdout io.Writer, runtime commandRuntime) int {
+	warnings := 0
+	if migration, err := config.PlanMigration(runtime.Config); err != nil {
+		warnings++
+		fmt.Fprintf(stdout, "doctor: config layout=unknown error=%v\n", err)
+	} else if !migration.Empty() {
+		warnings++
+		fmt.Fprintf(stdout, "doctor: config layout=pre-split path=%s remediation=run pfm install --yes (%s)\n",
+			runtime.Config.Path, strings.Join(migration.Steps(), "; "))
+	}
+	for _, retired := range retiredHarvesterEnv {
+		if strings.TrimSpace(os.Getenv(retired.name)) == "" {
+			continue
+		}
+		warnings++
+		if retired.now == "" {
+			fmt.Fprintf(stdout, "doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n", retired.name)
+			continue
+		}
+		fmt.Fprintf(stdout, "doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n", retired.name, retired.now, runtime.Config.Harvester.Path)
+	}
+	return warnings
 }
 
 func printMCPClientCutover(stdout io.Writer, runtime commandRuntime) int {

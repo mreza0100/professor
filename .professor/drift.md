@@ -344,7 +344,7 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   displaced or a `statusLine.command` still names the raw `pfm statusline`. Neither ships to
   adopters — a per-host overlay, not a template asset.
 
-- 2026-08-29: this host runs `claude.systemPrompt = "professor"` (~/.config/pfm/config.json); the RND
+- 2026-08-29: this host runs `claude.systemPrompt = "professor"` (~/.config/pfm/pfm.config.json); the RND
   sandbox `.professor/RND/harness-prompt/1-load-bearing/` keeps the capture/drift tooling (sink.py,
   snapshot-harness-prompt.sh, check-harness-drift.sh) and the v2.1.251 baselines pfm's doctor check was
   built from. A bare `claude` typed inside an existing tmux pane still takes the launcher's TMUX

@@ -137,7 +137,7 @@ func runMCP(
 				"%s\t%t\t%s\n",
 				name,
 				server.Enabled,
-				runtime.Config.Source("mcp.servers."+name+".enabled"),
+				runtime.Config.MCPServerSource(name),
 			)
 		}
 		return 0

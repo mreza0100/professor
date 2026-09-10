@@ -20,6 +20,42 @@ import (
 type Runtime struct {
 	Python string
 	Script string
+	// PDFOCR / PDFLayout are harvester.config.json convert.pdfOcr /
+	// convert.pdfLayout, handed to converter.py through its own
+	// HARVESTER_PDF_* protocol variables (workerEnv).
+	PDFOCR    bool
+	PDFLayout bool
+}
+
+// converterProtocolEnv are the variables converter.py reads. The worker
+// environment carries them ONLY from Runtime — a value inherited from the pfm
+// process is stripped, so harvester.config.json stays the one source.
+var converterProtocolEnv = []string{"HARVESTER_PDF_OCR", "HARVESTER_PDF_LAYOUT"}
+
+// workerEnv is the converter process environment: the parent environment
+// minus the converter protocol variables, plus the configured flags.
+func workerEnv(parent []string, runtime Runtime) []string {
+	env := make([]string, 0, len(parent)+2)
+	for _, entry := range parent {
+		name, _, _ := strings.Cut(entry, "=")
+		protocol := false
+		for _, reserved := range converterProtocolEnv {
+			if name == reserved {
+				protocol = true
+				break
+			}
+		}
+		if !protocol {
+			env = append(env, entry)
+		}
+	}
+	if runtime.PDFOCR {
+		env = append(env, "HARVESTER_PDF_OCR=1")
+	}
+	if runtime.PDFLayout {
+		env = append(env, "HARVESTER_PDF_LAYOUT=1")
+	}
+	return env
 }
 
 // Request is the one protocol request for every supported document kind. Go's
@@ -201,6 +237,7 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 		return nil, err
 	}
 	command := exec.Command(converter.runtime.Python, script)
+	command.Env = workerEnv(os.Environ(), converter.runtime)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open harvestpy worker stdin: %w", err)

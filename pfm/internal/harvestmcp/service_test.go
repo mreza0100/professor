@@ -2,6 +2,7 @@ package harvestmcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestpy"
+	"hostops/pfm/internal/paths"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -61,9 +63,6 @@ func TestOracleReceiptRenderers(t *testing.T) {
 	if !contains(listing, `| a\|b.txt | 7 | file |`) {
 		t.Fatalf("archive listing does not escape table member: %q", listing)
 	}
-	if got := renderSearch("q", nil, "error"); got != "The web-search backend(s) are configured but unreachable or failing right now — retry shortly, or check that SEARXNG_URL is up and BRAVE_API_KEY is valid." {
-		t.Fatalf("search failure receipt = %q", got)
-	}
 }
 
 func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
@@ -100,7 +99,7 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := describeFetch("https://fixture.example/source", test.result, false)
+			got := (*Service)(nil).describeFetch("https://fixture.example/source", test.result, false)
 			for _, want := range test.want {
 				if !strings.Contains(got, want) {
 					t.Fatalf("describe receipt missing %q: %q", want, got)
@@ -110,23 +109,35 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 	}
 }
 
-func TestCacheDirectoryPrecedenceMatchesHarvesterOracle(t *testing.T) {
-	t.Setenv("WEBFETCH_DIR", "/fixture/webfetch")
-	t.Setenv("HARVESTER_CACHE_DIR", "relative-harvest")
-	if got := resolveCacheDir(Runtime{}); got != "/fixture/webfetch" {
-		t.Fatalf("WEBFETCH_DIR precedence = %q", got)
+// TestServiceCacheIsTheOneRootNotTheWorkingDirectory pins the split-cache
+// defect: NewConfigured resolved a cwd-relative ".cache", so the daemon
+// (systemd cwd = $HOME) cached into ~/.cache while the CLI used
+// ~/.professor/.cache and the two never shared a hit.
+func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("WEBFETCH_DIR", filepath.Join(t.TempDir(), "legacy"))
+	service, err := NewConfigured("test", Runtime{Home: home})
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("WEBFETCH_DIR", "")
-	if got := resolveCacheDir(Runtime{}); got != filepath.Join(mustWorkingDir(t), "relative-harvest") {
-		t.Fatalf("relative HARVESTER_CACHE_DIR = %q", got)
+	defer func() { _ = service.Close() }()
+	if want := filepath.Join(home, ".professor", ".cache"); service.runtime.CacheDir != want {
+		t.Fatalf("service cache root = %q, want the one default %q", service.runtime.CacheDir, want)
 	}
-	t.Setenv("HARVESTER_CACHE_DIR", "/fixture/absolute")
-	if got := resolveCacheDir(Runtime{}); got != "/fixture/absolute" {
-		t.Fatalf("absolute HARVESTER_CACHE_DIR = %q", got)
+}
+
+// A failed search renders every backend's own error, one per line.
+func TestSearchFailureRendersEachBackend(t *testing.T) {
+	text := renderSearchFailure(errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")))
+	for _, want := range []string{"searxng http://127.0.0.1:8888: HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("search failure text lacks %q:\n%s", want, text)
+		}
 	}
-	t.Setenv("HARVESTER_CACHE_DIR", "")
-	if got := resolveCacheDir(Runtime{}); got != ".cache" {
-		t.Fatalf("default cache = %q", got)
+	if strings.Contains(text, "unreachable or failing") {
+		t.Fatalf("search failure text kept the generic message:\n%s", text)
 	}
 }
 

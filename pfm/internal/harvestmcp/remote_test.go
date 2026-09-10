@@ -67,21 +67,17 @@ func TestConsentPageTxnInputIsHidden(t *testing.T) {
 	t.Fatal("consent page txn input has no type attribute, want \"hidden\"")
 }
 
-func TestRemoteOpenAndStaticGateway(t *testing.T) {
+func TestRemoteStaticGateway(t *testing.T) {
 	base := t.TempDir()
-	open, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", DisableConfinement: false})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rec := remoteRequest(t, open, http.MethodGet, "/healthz", "", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"auth":false`) {
-		t.Fatalf("open health = %d %s", rec.Code, rec.Body.String())
-	}
-	if rec := remoteRequest(t, open, http.MethodGet, "/mcp/", "", ""); rec.Code == http.StatusPermanentRedirect || rec.Code == http.StatusTemporaryRedirect {
-		t.Fatalf("/mcp/ unexpectedly redirected: %d", rec.Code)
-	}
 	static, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", StaticToken: "fixture-token"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rec := remoteRequest(t, static, http.MethodGet, "/healthz", "", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"auth":true`) {
+		t.Fatalf("static health = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := remoteRequest(t, static, http.MethodGet, "/mcp/", "", ""); rec.Code == http.StatusPermanentRedirect || rec.Code == http.StatusTemporaryRedirect {
+		t.Fatalf("/mcp/ unexpectedly redirected: %d", rec.Code)
 	}
 	rec := remoteRequest(t, static, http.MethodGet, "/mcp", "", "")
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Header().Get("WWW-Authenticate"), "resource_metadata") {
@@ -149,48 +145,12 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	}
 }
 
-func TestRemoteBindAndResourceRules(t *testing.T) {
-	if err := ValidateRemoteBind("0.0.0.0", false, false); err == nil || !strings.Contains(err.Error(), "unauthenticated") {
-		t.Fatalf("public open bind error = %v", err)
-	}
-	if err := ValidateRemoteBind("127.0.0.1", false, false); err != nil {
-		t.Fatal(err)
-	}
+func TestRemoteResourceRules(t *testing.T) {
 	if ResourceMatches("HTTPS://Harvester.Example/mcp", "https://harvester.example/mcp") != true {
 		t.Fatal("scheme/host case should match")
 	}
 	if ResourceMatches("https://harvester.example/mcp/", "https://harvester.example/mcp") {
 		t.Fatal("trailing slash should not match")
-	}
-}
-
-func TestRemoteGatewayPlanSkipsUnsafeSecondDoor(t *testing.T) {
-	base := t.TempDir()
-	open, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "http://127.0.0.1:8081"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateways, err := PlanRemoteGateways(open, "127.0.0.1", 8081, nil, "127.0.0.1", 8082, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(gateways) != 1 || gateways[0].Label != "external" {
-		t.Fatalf("open plan = %#v", gateways)
-	}
-	authed, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", Passphrase: "pass"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	internal, err := authed.NewInternalRemote("http://127.0.0.1:8082")
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateways, err = PlanRemoteGateways(authed, "0.0.0.0", 8081, internal, "127.0.0.1", 8082, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(gateways) != 2 || gateways[0].Label != "external" || gateways[1].Label != "internal" {
-		t.Fatalf("authenticated plan = %#v", gateways)
 	}
 }
 

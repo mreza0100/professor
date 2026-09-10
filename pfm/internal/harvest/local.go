@@ -24,29 +24,16 @@ func fileURLPath(raw string) (string, error) {
 	return path, nil
 }
 
-func localRootsFromEnv() []string {
-	raw := strings.TrimSpace(os.Getenv("HARVESTER_LOCAL_ROOTS"))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, string(os.PathListSeparator))
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(part) != "" {
-			out = append(out, strings.TrimSpace(part))
-		}
-	}
-	return out
-}
-
 var systemRoots = []string{"/proc", "/sys", "/dev", "/etc"}
 var denyDirs = map[string]bool{".ssh": true, ".gnupg": true, ".aws": true, ".password-store": true, ".docker": true, ".config": true, ".kube": true}
 var denyNames = map[string]bool{"id_rsa": true, "id_ed25519": true, "id_dsa": true, "id_ecdsa": true, "credentials": true, ".netrc": true, ".pgpass": true, ".htpasswd": true, "shadow": true, "master.key": true, "passwd": true, ".git-credentials": true, ".bash_history": true}
 var denySuffixes = []string{".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".asc", ".gpg", ".kdbx", ".ppk", ".env"}
 
 // DenyLocalPath returns a human-readable refusal reason, or an empty string
-// when the canonical path is safe. roots is a confinement list; nil means
-// unconfined (the stdio deployment's caller owns the machine).
+// when the canonical path is safe. roots is a confinement list; an empty list
+// means unconfined (a local caller owns the machine). A NON-empty list whose
+// roots all fail to resolve refuses everything — confinement fails closed,
+// never open.
 func DenyLocalPath(path string, roots []string) string {
 	rp, err := filepath.EvalSymlinks(filepath.Clean(path))
 	if err != nil {
@@ -67,8 +54,11 @@ func DenyLocalPath(path string, roots []string) string {
 				resolvedRoots = append(resolvedRoots, filepath.Clean(a))
 			}
 		} else {
-			log.Printf("harvest: ignoring unresolvable HARVESTER_LOCAL_ROOTS entry %q: %v", root, e)
+			log.Printf("harvest: ignoring unresolvable local root %q: %v", root, e)
 		}
+	}
+	if len(roots) > 0 && len(resolvedRoots) == 0 {
+		return "refusing to read: none of this server's permitted directories resolves"
 	}
 	if len(resolvedRoots) > 0 && !insideAny(rp, resolvedRoots) {
 		return "refusing to read outside this server's permitted directory"

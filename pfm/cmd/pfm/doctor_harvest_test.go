@@ -70,7 +70,6 @@ func doctorHarvestDigest() harvestpy.EnvironmentDigest {
 }
 
 func TestDoctorHarvestReportsPinnedInterpreterLockInventoryAndLiveSmokeHealthy(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "") // the browser row is informational while the gate is off
 	digest := doctorHarvestDigest()
 	fake := harvestDoctorFake{
 		digest: digest,
@@ -92,7 +91,7 @@ func TestDoctorHarvestReportsPinnedInterpreterLockInventoryAndLiveSmokeHealthy(t
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake)
+	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake, false)
 	if warnings != 0 {
 		t.Fatalf("healthy doctor warnings=%d, want 0\n%s", warnings, output.String())
 	}
@@ -130,7 +129,7 @@ func TestDoctorHarvestDistinguishesBrokenEnvironmentAndSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake)
+	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake, false)
 	if warnings == 0 {
 		t.Fatalf("broken doctor warnings=%d, want nonzero\n%s", warnings, output.String())
 	}
@@ -174,7 +173,7 @@ func TestDoctorHarvestLockIncompleteReflectsInterruptedProvisionState(t *testing
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake)
+	warnings := printHarvestPythonDoctor(context.Background(), &output, home, harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, fake, false)
 	if warnings == 0 {
 		t.Fatalf("interrupted-provision doctor warnings=%d, want nonzero\n%s", warnings, output.String())
 	}
@@ -188,7 +187,6 @@ func TestDoctorHarvestLockIncompleteReflectsInterruptedProvisionState(t *testing
 }
 
 func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "") // the skipped golden must not depend on the ambient opt-in gate (review-2 S3)
 	var output strings.Builder
 	warnings := printHarvestPythonDoctor(
 		context.Background(),
@@ -199,6 +197,7 @@ func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
 			inspect:  errors.New("harvestpy root is absent"),
 			checkErr: errors.New("harvestpy root is absent"),
 		},
+		false,
 	)
 	if warnings != 0 {
 		t.Fatalf("missing harvest root warnings=%d, want 0\n%s", warnings, output.String())
@@ -206,7 +205,7 @@ func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
 	// The skipped conversion env is followed by the informational gate-off
 	// browser row (absence of an opt-in environment is not a defect).
 	// S7: even disabled, never-provisioned is NAMED, not folded into a bare "disabled".
-	if got, want := output.String(), "doctor: harvestpy skipped\ndoctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=HARVESTER_BROWSER\n"; got != want {
+	if got, want := output.String(), "doctor: harvestpy skipped\ndoctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser\n"; got != want {
 		t.Fatalf("missing harvest root output=%q, want %q", got, want)
 	}
 }
@@ -230,6 +229,7 @@ func TestDoctorHarvestUnreadableRootIsNotSkipped(t *testing.T) {
 			inspect:  os.ErrPermission,
 			checkErr: os.ErrPermission,
 		},
+		false,
 	)
 	if warnings == 0 {
 		t.Fatalf("unreadable harvest root warnings=0, want a visible probe failure\n%s", output.String())
@@ -256,9 +256,8 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root := newRoot()
 	t.Run("gate off is informational and warns about nothing", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "")
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, false)
 		if warnings != 0 || !strings.Contains(output.String(), "NOT_PROVISIONED") || !strings.Contains(output.String(), "disabled") {
 			t.Fatalf("gate-off row=%q warnings=%d", output.String(), warnings)
 		}
@@ -266,7 +265,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate off with a corrupt record still NAMES the corruption", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "")
 		env := harvestpy.BrowserRuntimeRoot(root, platform)
 		if err := os.MkdirAll(env, 0o700); err != nil {
 			t.Fatal(err)
@@ -275,7 +273,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, false)
 		if warnings != 0 || !strings.Contains(output.String(), "CORRUPT_RECORD") {
 			t.Fatalf("corrupt gate-off row=%q warnings=%d — a broken state rendered as plain disabled", output.String(), warnings)
 		}
@@ -283,9 +281,8 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on without an environment reports NOT provisioned", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "NOT_PROVISIONED") {
 			t.Fatalf("unprovisioned row=%q warnings=%d", output.String(), warnings)
 		}
@@ -293,7 +290,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on with a corrupt record reports probe failed", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		env := harvestpy.BrowserRuntimeRoot(root, platform)
 		if err := os.MkdirAll(env, 0o700); err != nil {
 			t.Fatal(err)
@@ -302,7 +298,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "PROBE_FAILED") {
 			t.Fatalf("corrupt-record row=%q warnings=%d", output.String(), warnings)
 		}
@@ -310,7 +306,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on without a pinned source refuses to vouch for the guard", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		digest := doctorHarvestDigest()
 		digest.Digest = "abcdef1234567890"
 		digest.Imports = map[string]any{"patchright": true}
@@ -325,7 +320,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "SOURCE_UNPINNED") {
 			t.Fatalf("unpinned-source row=%q warnings=%d", output.String(), warnings)
 		}
@@ -333,7 +328,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on with a tampered worker reports SOURCE MISMATCH", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		digest := doctorHarvestDigest()
 		digest.Digest = "abcdef1234567890"
 		digest.Imports = map[string]any{"patchright": true}
@@ -343,7 +337,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "SOURCE_MISMATCH") {
 			t.Fatalf("tampered-worker row=%q warnings=%d", output.String(), warnings)
 		}
@@ -351,7 +345,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on with failing live smoke reports BROKEN SMOKE", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		digest := doctorHarvestDigest()
 		digest.Digest = "abcdef1234567890"
 		digest.Imports = map[string]any{"patchright": true}
@@ -360,7 +353,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			return nil, errors.New("smoke subprocess died")
 		})
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "BROKEN_SMOKE") {
 			t.Fatalf("broken-smoke row=%q warnings=%d", output.String(), warnings)
 		}
@@ -368,7 +361,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("gate on with a ready environment but no Chrome reports the missing binary", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		goneChrome := filepath.Join(t.TempDir(), "uninstalled-chrome")
 		previous := doctorChromeResolver
 		doctorChromeResolver = func() string { return "" } // simulate a Chrome-less host
@@ -381,7 +373,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		digest.Imports = map[string]any{"patchright": true, "chrome_path": goneChrome}
 		writeProvisionedBrowserEnv(t, root, platform, digest)
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "chrome=MISSING") {
 			t.Fatalf("missing-chrome row=%q warnings=%d", output.String(), warnings)
 		}
@@ -389,7 +381,6 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 
 	root = newRoot()
 	t.Run("the healthy verdict is earned by LIVE smoke, not the record", func(t *testing.T) {
-		t.Setenv("HARVESTER_BROWSER", "1")
 		liveChrome := filepath.Join(t.TempDir(), "live-chrome")
 		if err := os.WriteFile(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
 			t.Fatal(err)
@@ -402,7 +393,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		digest.Imports = map[string]any{"patchright": false, "chrome_path": ""} // stale record must not decide
 		writeProvisionedBrowserEnv(t, root, platform, digest)
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 0 || !strings.Contains(output.String(), "healthy") || !strings.Contains(output.String(), "live smoke") {
 			t.Fatalf("healthy row=%q warnings=%d — a stale record decided the verdict", output.String(), warnings)
 		}
@@ -414,9 +405,8 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 // return — the browser row must still print there, or a gated-on unprovisioned
 // rung renders as silence.
 func TestDoctorBrowserRowPrintsEvenWhenHarvestpyIsSkipped(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "1")
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(context.Background(), &output, t.TempDir(), harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, harvestDoctorFake{})
+	warnings := printHarvestPythonDoctor(context.Background(), &output, t.TempDir(), harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}, harvestDoctorFake{}, true)
 	if !strings.Contains(output.String(), "harvestpy_browser") || !strings.Contains(output.String(), "NOT_PROVISIONED") {
 		t.Fatalf("skipped-harvestpy host lost the browser row: %q", output.String())
 	}

@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -50,7 +49,6 @@ type Resolver struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
-	snapshot              bool
 }
 
 type doabMetadata struct {
@@ -223,13 +221,10 @@ func (r *Resolver) client() *http.Client {
 }
 
 func (r *Resolver) contact() string {
-	if r != nil && r.snapshot {
-		return strings.TrimSpace(r.ContactEmail)
+	if r == nil {
+		return ""
 	}
-	if r != nil && strings.TrimSpace(r.ContactEmail) != "" {
-		return strings.TrimSpace(r.ContactEmail)
-	}
-	return contactEmail()
+	return strings.TrimSpace(r.ContactEmail)
 }
 
 func (r *Resolver) withContact(raw, key string) string {
@@ -243,16 +238,6 @@ func (r *Resolver) withContact(raw, key string) string {
 	return raw + sep + key + "=" + url.QueryEscape(r.contact())
 }
 
-func (r *Resolver) apiKey(value string, fallback func() string) string {
-	if r != nil && r.snapshot {
-		return strings.TrimSpace(value)
-	}
-	if strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	return fallback()
-}
-
 func (r *Resolver) scholarlyUA() string {
 	if email := r.contact(); email != "" {
 		return "harvester-mcp/1.0 (mailto:" + email + ")"
@@ -264,8 +249,8 @@ func (h *Harvester) resolver() *Resolver {
 	if h == nil {
 		return &Resolver{}
 	}
-	return &Resolver{Client: h.oa, ContactEmail: h.env.contactEmail, GoogleBooksAPIKey: h.env.googleBooksAPIKey,
-		CoreAPIKey: h.env.coreAPIKey, SemanticScholarAPIKey: h.env.semanticScholarKey, snapshot: true}
+	return &Resolver{Client: h.oa, ContactEmail: h.settings.contactEmail, GoogleBooksAPIKey: h.settings.googleBooksAPIKey,
+		CoreAPIKey: h.settings.coreAPIKey, SemanticScholarAPIKey: h.settings.semanticScholarKey}
 }
 
 func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, error) {
@@ -513,7 +498,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	if cands, err := r.hathitrust(ctx, client, query); err == nil {
 		out = append(out, cands...)
 	}
-	if key := r.apiKey(r.GoogleBooksAPIKey, func() string { return strings.TrimSpace(os.Getenv("GOOGLE_BOOKS_API_KEY")) }); key != "" {
+	if key := strings.TrimSpace(r.GoogleBooksAPIKey); key != "" {
 		var data struct {
 			Items []struct {
 				Access struct {
@@ -985,7 +970,7 @@ func (r *Resolver) semanticScholar(ctx context.Context, client *http.Client, doi
 		External map[string]string `json:"externalIds"`
 	}
 	headers := map[string]string{}
-	if key := r.apiKey(r.SemanticScholarAPIKey, func() string { return strings.TrimSpace(os.Getenv("SEMANTIC_SCHOLAR_API_KEY")) }); key != "" {
+	if key := strings.TrimSpace(r.SemanticScholarAPIKey); key != "" {
 		headers["x-api-key"] = key
 	}
 	if err := getJSONWithHeaders(ctx, client, "https://api.semanticscholar.org/graph/v1/paper/DOI:"+url.PathEscape(doi)+"?fields=openAccessPdf,externalIds", headers, &data); err != nil {
@@ -1016,7 +1001,7 @@ func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([
 	if err != nil {
 		return nil, err
 	}
-	if key := r.apiKey(r.CoreAPIKey, func() string { return strings.TrimSpace(os.Getenv("CORE_API_KEY")) }); key != "" {
+	if key := strings.TrimSpace(r.CoreAPIKey); key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := client.Do(req)
@@ -1066,7 +1051,7 @@ func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([
 	return out, nil
 }
 func (r *Resolver) europePMCDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
-	pmcid, err := idToPMCID(ctx, client, doi)
+	pmcid, err := idToPMCID(ctx, client, doi, r)
 	if err != nil || pmcid == "" {
 		return nil, err
 	}
@@ -1120,7 +1105,7 @@ func postJSON(ctx context.Context, client *http.Client, raw string, payload any,
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", scholarlyUA())
+	req.Header.Set("User-Agent", contextualUA(ctx))
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -1135,12 +1120,17 @@ func postJSON(ctx context.Context, client *http.Client, raw string, payload any,
 	return nil
 }
 
-func getJSONWithHeaders(ctx context.Context, client *http.Client, raw string, headers map[string]string, dst any) error {
-	ua := scholarlyUA()
+// contextualUA is the resolver's polite scholarly identity when the call
+// runs under resolverContext, else the bare harvester UA.
+func contextualUA(ctx context.Context) string {
 	if contextual, ok := ctx.Value(resolverUAContextKey{}).(string); ok && contextual != "" {
-		ua = contextual
+		return contextual
 	}
-	body, status, _, err := getBodyWithHeaders(ctx, client, raw, ua, headers, 10*1024*1024)
+	return searchUA
+}
+
+func getJSONWithHeaders(ctx context.Context, client *http.Client, raw string, headers map[string]string, dst any) error {
+	body, status, _, err := getBodyWithHeaders(ctx, client, raw, contextualUA(ctx), headers, 10*1024*1024)
 	if err != nil {
 		return err
 	}
@@ -1151,26 +1141,6 @@ func getJSONWithHeaders(ctx context.Context, client *http.Client, raw string, he
 		return fmt.Errorf("decode JSON: %w", err)
 	}
 	return nil
-}
-
-func scholarlyUA() string {
-	if email := contactEmail(); email != "" {
-		return "harvester-mcp/1.0 (mailto:" + email + ")"
-	}
-	return "harvester-mcp/1.0"
-}
-
-func contactEmail() string { return strings.TrimSpace(os.Getenv("HARVESTER_CONTACT_EMAIL")) }
-
-func withContact(raw, key string) string {
-	if contactEmail() == "" {
-		return raw
-	}
-	sep := "?"
-	if strings.Contains(raw, "?") {
-		sep = "&"
-	}
-	return raw + sep + key + "=" + url.QueryEscape(contactEmail())
 }
 
 func sortCandidates(in []Candidate) []Candidate {
@@ -1313,7 +1283,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		// Name only what was ACTUALLY queried: Unpaywall is gated on an operator
 		// email, so a keyless run must not claim to have checked it.
 		checked := "OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, CORE, DOAJ, arXiv/ar5iv/OSF, and the Wayback Machine"
-		skipped := " Unpaywall was SKIPPED — it requires an operator email (HARVESTER_CONTACT_EMAIL)."
+		skipped := " Unpaywall was SKIPPED — it requires an operator email (scholarly.contactEmail in harvester.config.json)."
 		if h.resolver().contact() != "" {
 			checked = "Unpaywall, " + checked
 			skipped = ""

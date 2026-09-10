@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +43,9 @@ type BrowserFetcher interface {
 }
 
 // Options configures a Harvester. Nil HTTP clients use safe defaults.
+// Every TTL field treats 0 as "use the default" and any NEGATIVE value as an
+// explicit zero: CacheTTL < 0 never expires cached documents, NegativeTTL /
+// NegativeTransientTTL < 0 never cache failures.
 type Options struct {
 	CacheDir       string
 	CacheTTL       time.Duration
@@ -65,14 +67,16 @@ type Options struct {
 	// ResolvePublic is called once for each production dial. It is injectable
 	// for deterministic DNS-rebinding tests; nil uses net.LookupIP.
 	ResolvePublic func(context.Context, string) ([]net.IP, error)
-	// BrowserRung explicitly overrides the HARVESTER_BROWSER gate for tests
-	// and embeddings; nil reads the environment once at New. The rung is
-	// opt-in and OFF by default: any value other than 1/true/yes/on disables
-	// it and the ladder never starts the browser worker.
+	// BrowserRung opts the real-browser rung in (harvester.config.json
+	// fetch.browser). The rung is OFF by default: nil or false never starts
+	// the browser worker.
 	BrowserRung *bool
-	// Scholarly/search settings are snapshotted by New, matching the Python
-	// worker's import-time configuration. Non-empty values are explicit test
-	// or embedding overrides; empty values read the process environment once.
+	// NegativeTTL / NegativeTransientTTL bound the failure caches; zero uses
+	// the defaults (120s / 15s).
+	NegativeTTL          time.Duration
+	NegativeTransientTTL time.Duration
+	// Scholarly/search settings come from harvester.config.json through the
+	// adapter. The core reads no process environment.
 	ContactEmail          string
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
@@ -82,7 +86,9 @@ type Options struct {
 	DisableSearch         bool
 }
 
-type envSnapshot struct {
+// settings is the resolved scholarly/search/browser configuration New takes
+// from Options — the one place the ladder reads it from.
+type settings struct {
 	contactEmail       string
 	googleBooksAPIKey  string
 	coreAPIKey         string
@@ -93,32 +99,26 @@ type envSnapshot struct {
 	browser            bool
 }
 
-func snapshotEnv() envSnapshot {
-	return envSnapshot{
-		contactEmail:       strings.TrimSpace(os.Getenv("HARVESTER_CONTACT_EMAIL")),
-		googleBooksAPIKey:  strings.TrimSpace(os.Getenv("GOOGLE_BOOKS_API_KEY")),
-		coreAPIKey:         strings.TrimSpace(os.Getenv("CORE_API_KEY")),
-		semanticScholarKey: strings.TrimSpace(os.Getenv("SEMANTIC_SCHOLAR_API_KEY")),
-		searXNGURL:         strings.TrimSpace(os.Getenv("SEARXNG_URL")),
-		braveAPIKey:        strings.TrimSpace(os.Getenv("BRAVE_API_KEY")),
-		disableSearch:      envBool("HARVESTER_DISABLE_SEARCH"),
-		browser:            envBool("HARVESTER_BROWSER"),
-	}
-}
-
-func envBool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
-	case "1", "true", "yes", "on":
-		return true
+// resolveTTL maps the Options TTL convention onto the cache's: 0 selects the
+// default, a negative value is an explicit zero.
+func resolveTTL(value, fallback time.Duration) time.Duration {
+	switch {
+	case value == 0:
+		return fallback
+	case value < 0:
+		return 0
 	default:
-		return false
+		return value
 	}
 }
 
-// BrowserGateEnabled reports whether HARVESTER_BROWSER opts the real-browser
-// rung in. The single gate implementation: the harvester core snapshots it at
-// New and doctor reads it live, so their answers can never desync.
-func BrowserGateEnabled() bool { return envBool("HARVESTER_BROWSER") }
+// Default cache policy, used when an Options field is zero.
+const (
+	defaultCacheTTL             = 24 * time.Hour
+	defaultNegativeTTL          = 120 * time.Second
+	defaultNegativeTransientTTL = 15 * time.Second
+	defaultMaxInlineChars       = 50000
+)
 
 // FetchOptions controls one fetch. Refresh bypasses both positive and
 // negative caches; SizeOnly still fetches/caches the complete artifact.
@@ -162,7 +162,7 @@ type Harvester struct {
 	neg          *negativeCache
 	flightMu     sync.Mutex
 	flights      map[string]*fetchFlight
-	env          envSnapshot
+	settings     settings
 }
 
 type fetchFlight struct {
@@ -176,30 +176,15 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
-	env := snapshotEnv()
-	if strings.TrimSpace(options.ContactEmail) != "" {
-		env.contactEmail = strings.TrimSpace(options.ContactEmail)
-	}
-	if strings.TrimSpace(options.GoogleBooksAPIKey) != "" {
-		env.googleBooksAPIKey = strings.TrimSpace(options.GoogleBooksAPIKey)
-	}
-	if strings.TrimSpace(options.CoreAPIKey) != "" {
-		env.coreAPIKey = strings.TrimSpace(options.CoreAPIKey)
-	}
-	if strings.TrimSpace(options.SemanticScholarAPIKey) != "" {
-		env.semanticScholarKey = strings.TrimSpace(options.SemanticScholarAPIKey)
-	}
-	if strings.TrimSpace(options.SearXNGURL) != "" {
-		env.searXNGURL = strings.TrimSpace(options.SearXNGURL)
-	}
-	if strings.TrimSpace(options.BraveAPIKey) != "" {
-		env.braveAPIKey = strings.TrimSpace(options.BraveAPIKey)
-	}
-	if options.DisableSearch {
-		env.disableSearch = true
-	}
-	if options.BrowserRung != nil {
-		env.browser = *options.BrowserRung
+	resolved := settings{
+		contactEmail:       strings.TrimSpace(options.ContactEmail),
+		googleBooksAPIKey:  strings.TrimSpace(options.GoogleBooksAPIKey),
+		coreAPIKey:         strings.TrimSpace(options.CoreAPIKey),
+		semanticScholarKey: strings.TrimSpace(options.SemanticScholarAPIKey),
+		searXNGURL:         strings.TrimSpace(options.SearXNGURL),
+		braveAPIKey:        strings.TrimSpace(options.BraveAPIKey),
+		disableSearch:      options.DisableSearch,
+		browser:            options.BrowserRung != nil && *options.BrowserRung,
 	}
 	if options.CacheDir == "" {
 		dir, err := defaultCacheDir()
@@ -208,17 +193,14 @@ func New(options Options) (*Harvester, error) {
 		}
 		options.CacheDir = dir
 	}
-	if options.CacheTTL == 0 {
-		options.CacheTTL = cacheTTLFromEnv()
-	}
+	options.CacheTTL = resolveTTL(options.CacheTTL, defaultCacheTTL)
+	options.NegativeTTL = resolveTTL(options.NegativeTTL, defaultNegativeTTL)
+	options.NegativeTransientTTL = resolveTTL(options.NegativeTransientTTL, defaultNegativeTransientTTL)
 	if options.MaxBytes <= 0 {
 		options.MaxBytes = 50 * 1024 * 1024
 	}
 	if options.MaxInlineChars <= 0 {
-		options.MaxInlineChars = maxInlineFromEnv()
-	}
-	if options.LocalRoots == nil {
-		options.LocalRoots = localRootsFromEnv()
+		options.MaxInlineChars = defaultMaxInlineChars
 	}
 	if options.JinaURL == "" {
 		options.JinaURL = "https://r.jina.ai/"
@@ -281,7 +263,7 @@ func New(options Options) (*Harvester, error) {
 	setUserAgent(binaryDirect, userAgent)
 	setUserAgent(jina, userAgent)
 	return &Harvester{options: options, client: client, chrome: chrome, binaryDirect: binaryDirect, binaryChrome: binaryChrome, jina: jina, oa: oa,
-		userAgent: userAgent, cache: newCache(options.CacheDir, options.CacheTTL), neg: newNegativeCache(negTTLFromEnv(), negTransientTTLFromEnv()), flights: make(map[string]*fetchFlight), env: env}, nil
+		userAgent: userAgent, cache: newCache(options.CacheDir, options.CacheTTL), neg: newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL), flights: make(map[string]*fetchFlight), settings: resolved}, nil
 }
 
 // Fetch executes one request with default options.

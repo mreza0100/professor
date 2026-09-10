@@ -73,9 +73,9 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("PFM_ASK_CAPTURE", capture)
-			t.Setenv("WEBFETCH_DIR", filepath.Join(home, "cache"))
 
 			machine := pfmconfig.Config{
+				Harvester: askHarvester(home),
 				Ask: pfmconfig.AskConfig{
 					Engine: testCase.engine,
 					Prefs: map[pfmengine.ID]pfmconfig.EnginePrefs{
@@ -140,9 +140,9 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
 	t.Setenv("PFM_ASK_FILES", fileCapture)
-	t.Setenv("WEBFETCH_DIR", filepath.Join(home, "cache"))
 	runtime := commandRuntime{
 		Config: pfmconfig.Config{
+			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
 			CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: accountHome}},
 			Ask: pfmconfig.AskConfig{
@@ -210,7 +210,7 @@ func TestHarvestAskValidatesBoundsBeforeEngineOrFetch(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := runHarvest(testCase.args, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}}); code != 2 {
+			if code := runHarvest(testCase.args, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}}); code != 2 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "usage: pfm harvest ask") {
@@ -237,9 +237,9 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
-	t.Setenv("WEBFETCH_DIR", filepath.Join(home, "cache"))
 	runtime := commandRuntime{
 		Config: pfmconfig.Config{
+			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
 			CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: accountHome}},
 			Ask:           pfmconfig.AskConfig{Engine: pfmengine.Codex},
@@ -274,9 +274,9 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'fixture failure\\n' >&2\nexit 7\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("WEBFETCH_DIR", filepath.Join(home, "cache"))
 	runtime := commandRuntime{
 		Config: pfmconfig.Config{
+			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
 			CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: accountHome}},
 			Ask:           pfmconfig.AskConfig{Engine: pfmengine.Codex},
@@ -307,9 +307,8 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 	if err := os.WriteFile(source, []byte("plain harvest remains plain\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("WEBFETCH_DIR", filepath.Join(home, "cache"))
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest([]string{source, "--json"}, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}}); code != 0 {
+	if code := runHarvest([]string{source, "--json"}, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}}); code != 0 {
 		t.Fatalf("plain harvest code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{`"source": "` + source + `"`, "\"content\": \"plain harvest remains plain\\n\"", `"method": "local"`} {
@@ -317,4 +316,13 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 			t.Errorf("plain JSON omitted %q:\n%s", want, stdout.String())
 		}
 	}
+}
+
+// askHarvester is the harvester config these CLI tests run under: the
+// defaults with the cache pointed into the test home (the config key that
+// replaced WEBFETCH_DIR).
+func askHarvester(home string) pfmconfig.HarvesterConfig {
+	harvester := pfmconfig.DefaultHarvester()
+	harvester.Cache.Dir = filepath.Join(home, "cache")
+	return harvester
 }

@@ -12,17 +12,20 @@ import (
 )
 
 func DOIToPMCID(ctx context.Context, client *http.Client, doi string) (string, error) {
-	return idToPMCID(ctx, client, doi)
+	return idToPMCID(ctx, client, doi, nil)
 }
 func PMIDToPMCID(ctx context.Context, client *http.Client, pmid string) (string, error) {
-	return idToPMCID(ctx, client, pmid)
+	return idToPMCID(ctx, client, pmid, nil)
 }
-func idToPMCID(ctx context.Context, client *http.Client, id string) (string, error) {
+
+// idToPMCID converts through the NCBI ID converter. A nil resolver sends no
+// operator identity; the ladder passes its own so NCBI sees the contact.
+func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver) (string, error) {
 	if client == nil {
 		client = safeHTTPClientTimeout(false, 15*time.Second)
 	}
-	raw := withContact("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(id)+"&format=json&tool=harvester-mcp", "email")
-	body, status, _, err := getBody(ctx, client, raw, scholarlyUA(), 1<<20)
+	raw := r.withContact("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(id)+"&format=json&tool=harvester-mcp", "email")
+	body, status, _, err := getBody(ctx, client, raw, r.scholarlyUA(), 1<<20)
 	if err != nil {
 		return "", err
 	}

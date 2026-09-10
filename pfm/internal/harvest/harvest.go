@@ -359,7 +359,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			}
 		}
 	}
-	// Real-browser rung (opt-in, HARVESTER_BROWSER=1): Patchright + system
+	// Real-browser rung (opt-in, fetch.browser): Patchright + system
 	// Chrome. Passes passive bot walls — including the Cloudflare MANAGED
 	// challenge tier — that no HTTP-client trick can, because it holds a real
 	// browser surface. It never solves anything interactive. Sits after
@@ -370,7 +370,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	browserUnavailable := ""
 	browserPolicyRefused := false
 	converterOutage := false
-	if h.env.browser && !isPrivateURL(source) && guess != "pdf" {
+	if h.settings.browser && !isPrivateURL(source) && guess != "pdf" {
 		rungs = append(rungs, "browser")
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
@@ -494,7 +494,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		case ocrRan:
 			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. Use `search` to find an alternative copy.", source)
 		default:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set HARVESTER_PDF_OCR=1 to OCR it. Use `search` to find an alternative copy.", source)
+			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. Use `search` to find an alternative copy.", source)
 		}
 	}
 	// A dead-ended challenge must say what the real-browser rung did — the
@@ -509,14 +509,14 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// completed attempt is never silent.
 	if guess != "pdf" && (lastChallenge || browserRan || browserPolicyRefused) {
 		switch {
-		case !h.env.browser:
-			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set HARVESTER_BROWSER=1 to enable it."
+		case !h.settings.browser:
+			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set fetch.browser=true in harvester.config.json to enable it."
 		case browserPolicyRefused:
 			message += " The real-browser rung did not run because this server's SSRF guard refused the address (private or internal network). That is policy working as designed, not an outage."
 		case converterOutage:
 			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: retry, or use `search` to find an alternative copy."
 		case browserUnavailable != "":
-			message += fmt.Sprintf(" The real-browser rung (HARVESTER_BROWSER=1) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.", browserUnavailable)
+			message += fmt.Sprintf(" The real-browser rung (fetch.browser) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.", browserUnavailable)
 		case browserEmptyRender:
 			message += " The real-browser rung DID run and returned an EMPTY page — a completed attempt with nothing usable, not an outage."
 		case browserRan:

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"strings"
 
 	pfmconfig "hostops/pfm/internal/config"
@@ -55,11 +59,29 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 		flags.Usage()
 		return 2
 	}
+	harvesterPath := pfmconfig.HarvesterPath(runtime.Config.Path)
+	if !*force {
+		// Refuse before writing either file, so init never leaves half a pair.
+		for _, path := range []string{runtime.Config.Path, harvesterPath} {
+			if _, err := os.Stat(path); err == nil {
+				fmt.Fprintf(stderr, "pfm config init: %s already exists; use --force to overwrite\n", path)
+				return 1
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(stderr, "pfm config init: inspect %s: %v\n", path, err)
+				return 1
+			}
+		}
+	}
 	if err := pfmconfig.WriteDefault(runtime.Config.Path, runtime.Paths.Home, runtime.Paths.Roots[pfmengine.Claude], *force); err != nil {
 		fmt.Fprintf(stderr, "pfm config init: %v\n", err)
 		return 1
 	}
+	if err := pfmconfig.WriteDefaultHarvester(harvesterPath, *force); err != nil {
+		fmt.Fprintf(stderr, "pfm config init: %v\n", err)
+		return 1
+	}
 	fmt.Fprintf(stdout, "config initialized: %s\n", runtime.Config.Path)
+	fmt.Fprintf(stdout, "harvester config initialized: %s\n", harvesterPath)
 	fmt.Fprintln(stdout, "field documentation:")
 	fmt.Fprintln(stdout, "  accounts: configured Claude account roster, configDir, and emoji badge")
 	fmt.Fprintln(stdout, "  claude.permissionMode: bypass or prompted; account values override this default")
@@ -68,8 +90,17 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  tmux.titles.enabled: whether pfm owns the outer terminal's title (set-titles on + pfm's set-titles-string); false leaves whatever the host set before tmux started")
 	fmt.Fprintln(stdout, "  nameSync.interval: how often the window-name backstop runs (Go duration, minimum 1m); rendered into the launchd StartInterval and the systemd OnUnitInactiveSec at install time")
 	fmt.Fprintln(stdout, "  theme: embedded palette name (default or tokyo-night)")
-	fmt.Fprintln(stdout, "  mcp: enabled servers and loopback HTTP port")
+	fmt.Fprintln(stdout, "  mcp: enabled servers and the loopback HTTP port (chat + harvester, no auth)")
 	fmt.Fprintln(stdout, "  ask: default one-shot engine, model, and effort")
+	fmt.Fprintln(stdout, "harvester config fields (every Harvester setting lives here; keep it chmod 600 once it holds a key):")
+	fmt.Fprintln(stdout, "  enabled: serve the harvester MCP")
+	fmt.Fprintln(stdout, "  external: the authenticated second port — enabled, host, port, publicURL, auth.passphrase / auth.staticToken, stateDir")
+	fmt.Fprintln(stdout, "  search: enabled, searxngURL (its origin is trusted — loopback/LAN is fine), braveApiKey")
+	fmt.Fprintln(stdout, "  scholarly: contactEmail (enables Unpaywall), googleBooksApiKey, coreApiKey, semanticScholarApiKey")
+	fmt.Fprintln(stdout, "  fetch: browser (the opt-in real-browser rung), userAgent, proxyURL")
+	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
+	fmt.Fprintln(stdout, "  cache: dir (default ~/.professor/.cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)")
+	fmt.Fprintln(stdout, "  output: maxInlineChars")
 	return 0
 }
 
@@ -99,8 +130,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	fmt.Fprintf(stdout, "config codex.binary=%s (%s)\n", config.Codex.Binary, config.Source("codex.binary"))
 	fmt.Fprintf(stdout, "config mcp.http.port=%d (%s)\n", config.MCP.HTTP.Port, config.Source("mcp.http.port"))
 	for _, name := range pfmconfig.RegisteredMCPServers() {
-		key := "mcp.servers." + name + ".enabled"
-		fmt.Fprintf(stdout, "config %s=%t (%s)\n", key, config.MCPServers[name].Enabled, config.Source(key))
+		fmt.Fprintf(stdout, "config %s=%t (%s)\n", mcpServerKey(name), config.MCPServers[name].Enabled, config.MCPServerSource(name))
 	}
 	fmt.Fprintf(stdout, "config ask.engine=%s (%s)\n", config.Ask.Engine, config.Source("ask.engine"))
 	for _, id := range pfmengine.All() {
@@ -108,5 +138,38 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		prefs := config.Ask.PrefsFor(id)
 		fmt.Fprintf(stdout, "config ask.%s.model=%s (%s)\n", name, prefs.Model, config.Source("ask."+name+".model"))
 		fmt.Fprintf(stdout, "config ask.%s.effort=%s (%s)\n", name, prefs.Effort, config.Source("ask."+name+".effort"))
+	}
+	printResolvedHarvesterConfig(stdout, config)
+}
+
+// printResolvedHarvesterConfig renders harvester.config.json key by key with
+// its source; every secret is redacted.
+func printResolvedHarvesterConfig(stdout io.Writer, config pfmconfig.Config) {
+	fmt.Fprintf(stdout, "config harvester path=%s exists=%t\n", config.Harvester.Path, config.Harvester.Exists)
+	content, err := pfmconfig.MarshalHarvester(config.Harvester, true)
+	if err != nil {
+		fmt.Fprintf(stdout, "config harvester error=encode: %v\n", err)
+		return
+	}
+	var tree map[string]any
+	if err := json.Unmarshal(content, &tree); err != nil {
+		fmt.Fprintf(stdout, "config harvester error=decode: %v\n", err)
+		return
+	}
+	values := map[string]string{}
+	flattenHarvesterConfig("harvester", tree, values)
+	for _, key := range pfmconfig.HarvesterSourceKeys() {
+		fmt.Fprintf(stdout, "config %s=%s (%s)\n", key, values[key], config.Source(key))
+	}
+}
+
+func flattenHarvesterConfig(prefix string, node map[string]any, into map[string]string) {
+	for key, value := range node {
+		path := prefix + "." + key
+		if child, ok := value.(map[string]any); ok {
+			flattenHarvesterConfig(path, child, into)
+			continue
+		}
+		into[path] = fmt.Sprint(value)
 	}
 }

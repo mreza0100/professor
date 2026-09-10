@@ -10,7 +10,7 @@ import (
 )
 
 func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
-	t.Setenv("HARVESTER_BROWSER", "") // the golden "clean" output must not depend on the ambient opt-in gate (review-2 S3)
+	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	home := t.TempDir()
 	canonicalDir := filepath.Join(home, ".local", "bin")
 	hostShimDir := filepath.Join(t.TempDir(), "bin")
@@ -176,5 +176,15 @@ func TestCrumbHealthMissingDirectoryIsEmpty(t *testing.T) {
 	}
 	if entries != 0 || invalid != 0 {
 		t.Fatalf("crumbHealth missing directory entries=%d invalid=%d, want 0/0", entries, invalid)
+	}
+}
+
+// clearRetiredHarvesterEnv blanks every variable doctor reports as a retired
+// harvester setting, so a developer shell that still exports one cannot turn
+// a golden "clean" doctor run into a warning.
+func clearRetiredHarvesterEnv(t *testing.T) {
+	t.Helper()
+	for _, retired := range retiredHarvesterEnv {
+		t.Setenv(retired.name, "")
 	}
 }
