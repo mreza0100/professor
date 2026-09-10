@@ -642,7 +642,7 @@ func setEnvironment(environment []string, id pfmengine.ID, configDir string, exp
 	if configDir != "" && name != "" {
 		filtered = append(filtered, name+"="+configDir)
 	}
-	*target = filtered
+	*target = append(filtered, pfmengine.MustLookup(id).LaunchEnv...)
 }
 
 type boundedBuffer struct {

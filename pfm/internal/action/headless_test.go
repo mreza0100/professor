@@ -37,6 +37,7 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 		" -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" +
 		" -u CODEX_THREAD_ID" +
 		" CLAUDE_CONFIG_DIR='/home/tester/.cc/2' FORCE_PROMPT_CACHING_5M=1" +
+		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
 		" claude '--name' '_KILL worker 3' 'audit the firewall rules'" +
 		" --allow-dangerously-skip-permissions --dangerously-skip-permissions"
 	if plan.Run != want {
@@ -59,10 +60,13 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 	if strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR=/home") {
 		t.Fatalf("account 1 must keep the default config dir: %s", plan.Run)
 	}
-	if !strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=1 claude ") {
+	// Match the assignments themselves, never "…=1 claude": launch-env words
+	// sit between the cache assignment and the binary, so an adjacency check
+	// would pass vacuously with both cache modes set.
+	if !strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=1 ") {
 		t.Fatalf("1h cache not armed: %s", plan.Run)
 	}
-	if strings.Contains(plan.Run, "FORCE_PROMPT_CACHING_5M=1 claude") {
+	if strings.Contains(plan.Run, "FORCE_PROMPT_CACHING_5M=1") {
 		t.Fatalf("both cache modes set: %s", plan.Run)
 	}
 }

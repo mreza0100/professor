@@ -130,6 +130,13 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	if spawn.leanEnvironment(prefs) {
 		command.WriteString(" CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
+	for _, assignment := range pfmengine.MustLookup(pfmengine.Claude).LaunchEnv {
+		name, value, _ := strings.Cut(assignment, "=")
+		command.WriteByte(' ')
+		command.WriteString(name)
+		command.WriteByte('=')
+		command.WriteString(Quote(value))
+	}
 	command.WriteByte(' ')
 	value, quote := spawn.binaryWord(prefs)
 	command.WriteString(binaryWord(value, pfmengine.MustLookup(pfmengine.Claude).Binary, quote))
@@ -195,7 +202,7 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 	if spawn.leanEnvironment(prefs) {
 		result = append(result, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
-	return result
+	return append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
 }
 
 // argv is the executable's argument list — the unquoted twin of the tail

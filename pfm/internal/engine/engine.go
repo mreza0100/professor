@@ -38,6 +38,9 @@ type Descriptor struct {
 	// engine's config dir; "" when the engine has none.
 	SessionEnv string
 	HomeEnv    string
+	// LaunchEnv holds the NAME=value assignments every launch of this engine
+	// carries, whichever door starts it (action.ClaudeSpawn, headless/run).
+	LaunchEnv []string
 	// RootEnv is the PFM_* variable a test jail sets to relocate this engine's
 	// session store; DefaultRoots computes the production roots from $HOME.
 	RootEnv      string

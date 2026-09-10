@@ -9,6 +9,12 @@ func init() {
 		SocketPrefix: "cc-",
 		SessionEnv:   "CLAUDE_CODE_SESSION_ID",
 		HomeEnv:      "CLAUDE_CONFIG_DIR",
+		// Claude Code caps WebSearch at 200 calls per session; past it every
+		// search returns a refusal and a research chat stops mid-task. The
+		// CLI accepts any digits-only integer >= 1 with no ceiling, and a
+		// malformed value silently reverts to 200 — so this is the largest
+		// integer JavaScript holds exactly, spelled as plain digits.
+		LaunchEnv:    []string{"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991"},
 		RootEnv:      "PFM_CLAUDE_ROOTS",
 		DefaultRoots: claudeDefaultRoots,
 	})
