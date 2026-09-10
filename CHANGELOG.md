@@ -41,6 +41,8 @@ Bullets MUST follow this shape:
 
 ## Releases
 
+- [v0.74.0](releases/v0.74.0.md) — Harvester config file, two-port MCP daemon, self-hosted SearXNG fixed (#21), `chat_load` retired.
+
 - [v0.73.1](releases/v0.73.1.md) — Correct headless cancellation verification after process exit.
 
 - [v0.73.0](releases/v0.73.0.md) — Shared headless execution, macOS credential recovery, and fleet diagnostics.
