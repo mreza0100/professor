@@ -225,7 +225,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	selectedCodex := waitForUpdatePickerScreen(t, secondSocket, environment, func(screen string) bool {
-		return strings.Contains(screen, "▐ Codex ▌")
+		return strings.Contains(screen, "◖ Codex ◗")
 	})
 	if !strings.Contains(selectedCodex, "[ Claude ]") || !strings.Contains(selectedCodex, "[ OpenCode ]") {
 		t.Fatalf("engine carousel after Right is incomplete:\n%s", selectedCodex)
