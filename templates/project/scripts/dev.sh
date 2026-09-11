@@ -113,6 +113,28 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; }
 header(){ echo -e "\n${BOLD}=== $* ===${NC}"; }
 
+# Match severity fields and standalone failures, not words inside INFO payloads.
+log_errors() {
+  awk '
+    {
+      line = $0
+      gsub(/\033\[[0-9;]*m/, "", line)
+      lower = tolower(line)
+      if (lower ~ /"level"[[:space:]]*:/) {
+        if (lower ~ /"level"[[:space:]]*:[[:space:]]*("(error|fatal)"|50|60)([,}[:space:]])/) print
+        next
+      }
+      if (match(line, /(^|[][[:space:]])(ERROR|FATAL|ERR!|INFO|DEBUG|TRACE|WARN|WARNING)([][[:space:]:]|$)/) ||
+          match(line, /\[(error|fatal|info|debug|trace|warn|warning)[[:space:]]*\]/)) {
+        severity = tolower(substr(line, RSTART, RLENGTH))
+        if (severity ~ /(error|fatal|err!)/) print
+        next
+      }
+      if (line ~ /^(Traceback \(most recent call last\):|([[:alnum:]_.]*(Error|Exception))(:|$)|ECONNREFUSED|EADDRINUSE|Cannot find module)/) print
+    }
+  ' "$1"
+}
+
 # ─── Helpers ──────────────────────────────────────────────────────
 
 ensure_dirs() {
@@ -702,7 +724,9 @@ cmd_up() {
     local logfile="$DEV_DIR/$log_name2"
     if [ -f "$logfile" ]; then
       local svc_errors
-      svc_errors=$(grep -a -iE '(ERR|Error|FATAL|Exception|Traceback|ECONNREFUSED|EADDRINUSE|ModuleNotFoundError|Cannot find module)' "$logfile" 2>/dev/null | grep -v "^Binary file" | grep -viE '(WARN.*swallowing|Warning:|DeprecationWarning|ExperimentalWarning)' | head -3 || true)
+      if ! svc_errors=$(log_errors "$logfile"); then
+        svc_errors="Log scan failed: $logfile"
+      fi
       if [ -n "$svc_errors" ]; then
         errors="${errors}\n  ${key2}: $(echo "$svc_errors" | head -1)"
       fi
@@ -1033,12 +1057,15 @@ cmd_log() {
     logfile="$(log_file "$svc")"
     label="$(log_label "$svc")"
     if [ -f "$logfile" ]; then
-      local count
-      count=$(grep -ciE '(ERR|Error|FATAL|Exception|Traceback)' "$logfile" 2>/dev/null || true)
-      count=${count:-0}
+      local count matched
+      if ! matched=$(log_errors "$logfile"); then
+        echo "  $label: log scan failed ($logfile)"
+        return 1
+      fi
+      count=$(printf '%s\n' "$matched" | awk 'NF { n++ } END { print n+0 }')
       if [ "$count" -gt 0 ]; then
         local first_err
-        first_err=$(grep -iE '(ERR|Error|FATAL|Exception|Traceback)' "$logfile" 2>/dev/null | head -1)
+        first_err=${matched%%$'\n'*}
         echo "  $label: $count error(s) — $first_err"
       else
         echo "  $label: no errors"
