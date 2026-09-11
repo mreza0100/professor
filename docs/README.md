@@ -111,7 +111,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `engines/deep-rr/`; `architecture-design` ships in-tree under `templates/global/skills/architecture-design/`; `legal` is bundled under `templates/project/skills/`.
 
-**Host tooling (opt-in):** statusline, the `pfm install --vscode` terminal profile, a Linux/macOS multi-account `/reload` (per-chat billing switch across subscriptions), and the launcher-agnostic chat fleet (`pfm` picker, `/clear` auto-kill, `pfm reap` orphan sweeper).
+**Host tooling (opt-in):** statusline, the `pfm install --vscode` Professor VS Code extension (Professor's assistant in VS Code, its terminal made default), a Linux/macOS multi-account `/reload` (per-chat billing switch across subscriptions), and the launcher-agnostic chat fleet (`pfm` picker, `/clear` auto-kill, `pfm reap` orphan sweeper).
 
 **Tier B — opt-in domain archetypes:**
 

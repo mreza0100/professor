@@ -197,8 +197,9 @@ timed out · 6 message not delivered`.
   transcript index; `config` validates the machine config; `codex build|check` is the single
   writer of the Codex mirror; `statusline` renders identity, session and spend. Host install also
   reconciles global Claude commands into marker-owned Codex prompt/skill mirrors, preserving every
-  unmarked conflict and foreign file. `pfm install --vscode` additionally installs a reversible
-  `PFM` VS Code terminal profile so each new integrated terminal opens at the fleet picker.
+  unmarked conflict and foreign file. `pfm install --vscode` additionally installs the Professor
+  VS Code extension — Professor's assistant in VS Code — and makes its terminal the default, so
+  each new integrated terminal opens at the fleet picker.
 
 **Requirements** (from `pfm doctor`'s own registry, not prose): Linux or macOS, `amd64` or
 `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, and

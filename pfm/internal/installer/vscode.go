@@ -17,6 +17,21 @@ const (
 	vscodeOwnershipName    = "vscode-ownership.json"
 	vscodeOwnershipVersion = 1
 	vscodeProfileName      = "PFM"
+	// vscodeDefaultProfileName is the default-profile VALUE pfm owns: the
+	// Professor extension's contributed terminal profile (its title in
+	// assets/vscode/professor/package.json). vscodeProfileName ("PFM") stays
+	// the KEY of the settings profile pfm writes as a fallback, not the
+	// default value — an installed Professor extension is what a new
+	// integrated terminal actually opens into.
+	vscodeDefaultProfileName = "Professor"
+	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
+	// product's extensions directory, and the extension id VS Code records
+	// for it.
+	vscodeExtensionLinkName = "professor"
+	// vscodeExtensionSource is the managed-asset subpath the generic asset
+	// walk (assets.go assetFiles) stages the Professor extension under,
+	// relative to managedRoot.
+	vscodeExtensionSource = "vscode/professor"
 )
 
 var errMalformedVSCodeSettings = errors.New("malformed VS Code settings")
@@ -24,6 +39,11 @@ var errMalformedVSCodeSettings = errors.New("malformed VS Code settings")
 type vscodeOwnershipDocument struct {
 	Version int                     `json:"version"`
 	Files   []vscodeOwnershipRecord `json:"files"`
+	// Extensions records the extension link paths pfm made — recorded
+	// independently of Files because a link survives on a product that never
+	// had a settings.json touched (a plain ~/.vscode-server with no Machine
+	// settings yet, for instance).
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type vscodeOwnershipRecord struct {
@@ -52,14 +72,14 @@ type vscodeOwnershipRecord struct {
 
 func (installer *engine) wireVSCode() error {
 	ownershipPath := filepath.Join(installer.managedRoot, vscodeOwnershipName)
-	ownership, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
+	ownership, extensions, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read VS Code ownership %s: %w", ownershipPath, err)
 	}
 	if installer.options.Mode == ModeUninstall {
-		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership)
+		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership, extensions)
 	}
-	if !installer.options.VSCode && len(ownership) == 0 {
+	if !installer.options.VSCode && len(ownership) == 0 && len(extensions) == 0 {
 		return nil
 	}
 
@@ -105,21 +125,99 @@ func (installer *engine) wireVSCode() error {
 			continue
 		}
 		if err := installer.change("merge VS Code PFM terminal profile "+path, func() error {
-			mode := fs.FileMode(0o600)
-			if info, statErr := os.Stat(path); statErr == nil {
-				mode = info.Mode().Perm()
-				if err := copyBackup(path, availableBackup(path, installer.stamp)); err != nil {
-					return err
-				}
-			} else if !errors.Is(statErr, fs.ErrNotExist) {
-				return statErr
-			}
-			return atomicWrite(path, updated, mode)
+			return installer.writeVSCodeSettings(path, updated)
 		}); err != nil {
 			return err
 		}
 	}
-	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership)
+	extensions, err = installer.linkVSCodeExtension(extensions)
+	if err != nil {
+		return err
+	}
+	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions)
+}
+
+// vscodeExtensionLinks enumerates the extension-link targets pfm can wire on
+// this host: <product root>/extensions/professor for every VS Code product
+// root that actually EXISTS under the home directory, plus the portable
+// install's data directory — VSCODE_PORTABLE names that directory itself
+// (VS Code's bootstrap-node getPortableDataPath), so its extensions/ sits
+// directly beneath it. A product a user never installed gets no link — pfm
+// never creates the product's own directory tree, only extends one that is
+// already there.
+func (installer *engine) vscodeExtensionLinks() []string {
+	roots := installer.options.vscodeExtensionRoots
+	if roots == nil {
+		home := installer.options.Home
+		roots = []string{
+			filepath.Join(home, ".vscode"),
+			filepath.Join(home, ".vscode-insiders"),
+			filepath.Join(home, ".vscode-oss"),
+			filepath.Join(home, ".vscode-server"),
+			filepath.Join(home, ".vscode-server-insiders"),
+		}
+		if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
+			roots = append(roots, portable)
+		}
+	}
+	var found []string
+	for _, root := range roots {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			found = append(found, filepath.Join(root, "extensions", vscodeExtensionLinkName))
+		}
+	}
+	return cleanUniquePaths(found)
+}
+
+// linkVSCodeExtension reconciles the set of extension links pfm owns:
+// previously recorded targets plus every currently discoverable product
+// root. It runs only on a VS Code-managed install (the flag, or a non-empty
+// ledger), and discovery is unconditional there because the default pfm
+// writes names the extension's profile: a ledger written before the
+// extension shipped holds an owned "PFM" default that this same run upgrades
+// to "Professor", and that default must not outlive a missing extension. A
+// recorded target whose product was uninstalled (its root directory is gone)
+// is dropped by name rather than recreating a directory tree nothing else
+// uses; every other target gets its extensions/ directory created if needed
+// and the link itself made idempotent through ensureLink. It returns the
+// kept targets, sorted, for the ownership ledger.
+func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error) {
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	targets := make(map[string]bool, len(recorded))
+	for _, target := range recorded {
+		targets[target] = true
+	}
+	for _, target := range installer.vscodeExtensionLinks() {
+		targets[target] = true
+	}
+	ordered := make([]string, 0, len(targets))
+	for target := range targets {
+		ordered = append(ordered, target)
+	}
+	sort.Strings(ordered)
+
+	var kept []string
+	for _, target := range ordered {
+		extensionsDir := filepath.Dir(target)
+		root := filepath.Dir(extensionsDir)
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			installer.skip(target + " VS Code product " + root + " no longer exists; dropped extension link")
+			continue
+		}
+		if info, err := os.Stat(extensionsDir); err != nil || !info.IsDir() {
+			if err := installer.change("create "+extensionsDir, func() error {
+				return os.MkdirAll(extensionsDir, 0o755)
+			}); err != nil {
+				return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+			}
+		}
+		if _, err := installer.ensureLink(source, target); err != nil {
+			return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+		}
+		kept = append(kept, target)
+	}
+	sort.Strings(kept)
+	return kept, nil
 }
 
 func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnershipRecord, alreadyOwned bool) ([]byte, vscodeOwnershipRecord, bool, error) {
@@ -174,13 +272,15 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	}
 
 	existingDefault, hasDefault := document[defaultKey]
-	if alreadyOwned && record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
-		// Selecting another default terminal is an intentional operator override.
+	if alreadyOwned && record.DefaultOwned && (!hasDefault || (existingDefault != vscodeDefaultProfileName && existingDefault != vscodeProfileName)) {
+		// An owned default still holding the legacy "PFM" value is an upgrade
+		// pfm makes itself, not an operator override — only a THIRD value
+		// (something the operator picked after installation) relinquishes.
 		record.DefaultOwned = false
 		record.HadDefault = false
 		record.PreviousDefault = nil
 	}
-	if installer.options.VSCode && !record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
+	if installer.options.VSCode && !record.DefaultOwned && (!hasDefault || existingDefault != vscodeDefaultProfileName) {
 		record.DefaultOwned = true
 		record.HadDefault = hasDefault
 		if hasDefault {
@@ -251,8 +351,8 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 		}
 		changed = true
 	}
-	if record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
-		updated, err = setJSONCProperty(updated, 0, defaultKey, []byte(`"`+vscodeProfileName+`"`))
+	if record.DefaultOwned && (!hasDefault || existingDefault != vscodeDefaultProfileName) {
+		updated, err = setJSONCProperty(updated, 0, defaultKey, []byte(`"`+vscodeDefaultProfileName+`"`))
 		if err != nil {
 			return nil, record, false, err
 		}
@@ -279,7 +379,7 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	return updated, record, changed, nil
 }
 
-func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord) error {
+func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
 	ordered := make([]string, 0, len(ownership))
 	for settings := range ownership {
 		ordered = append(ordered, settings)
@@ -303,7 +403,7 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 		profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 		updated := append([]byte(nil), raw...)
 		changed := false
-		if record.DefaultOwned && document[defaultKey] == vscodeProfileName {
+		if record.DefaultOwned && (document[defaultKey] == vscodeDefaultProfileName || document[defaultKey] == vscodeProfileName) {
 			if record.HadDefault {
 				updated, err = setJSONCProperty(updated, 0, defaultKey, record.PreviousDefault)
 			} else {
@@ -376,14 +476,7 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 				if removeEmptyFile {
 					return os.Remove(settings)
 				}
-				info, err := os.Stat(settings)
-				if err != nil {
-					return err
-				}
-				if err := copyBackup(settings, availableBackup(settings, installer.stamp)); err != nil {
-					return err
-				}
-				return atomicWrite(settings, updated, info.Mode().Perm())
+				return installer.writeVSCodeSettings(settings, updated)
 			}); err != nil {
 				return err
 			}
@@ -397,11 +490,48 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 			delete(ownership, settings)
 		}
 	}
-	return installer.writeVSCodeOwnership(path, existing, ownership)
+
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	orderedExtensions := append([]string(nil), extensions...)
+	sort.Strings(orderedExtensions)
+	for _, target := range orderedExtensions {
+		if current, linked := resolvedLink(target); linked && current == filepath.Clean(source) {
+			if err := installer.unlinkOne(target); err != nil {
+				return err
+			}
+			continue
+		}
+		installer.skip(target + " no longer points at pfm's Professor extension; left in place")
+	}
+
+	return installer.writeVSCodeOwnership(path, existing, ownership, nil)
 }
 
-func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord) error {
-	if len(ownership) == 0 {
+// writeVSCodeSettings backs up and atomically rewrites a VS Code settings file
+// THROUGH any symlink, as writeMCPFile does for a linked MCP registry. Dotfile
+// managers link settings.json into a repository; renaming over the link would
+// sever it, leaving VS Code on a detached copy the managed file never sees. A
+// file that does not exist yet is created at path with owner-only access.
+func (installer *engine) writeVSCodeSettings(path string, content []byte) error {
+	physical, mode := path, fs.FileMode(0o600)
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		mode = info.Mode().Perm()
+		if physical, err = filepath.EvalSymlinks(path); err != nil {
+			return fmt.Errorf("resolve VS Code settings %s: %w", path, err)
+		}
+		if err := copyBackup(physical, availableBackup(physical, installer.stamp)); err != nil {
+			return err
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	return atomicWrite(physical, content, mode)
+}
+
+func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
+	if len(ownership) == 0 && len(extensions) == 0 {
 		if len(existing) == 0 {
 			return nil
 		}
@@ -412,6 +542,10 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 		document.Files = append(document.Files, record)
 	}
 	sort.Slice(document.Files, func(i, j int) bool { return document.Files[i].Path < document.Files[j].Path })
+	if len(extensions) != 0 {
+		document.Extensions = append([]string(nil), extensions...)
+		sort.Strings(document.Extensions)
+	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err
@@ -424,32 +558,44 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 	return installer.change("write "+path, func() error { return atomicWrite(path, encoded, 0o600) })
 }
 
-func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []byte, error) {
+func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []string, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]vscodeOwnershipRecord{}, nil, nil
+		return map[string]vscodeOwnershipRecord{}, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var document vscodeOwnershipDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if document.Version != vscodeOwnershipVersion {
-		return nil, nil, fmt.Errorf("unsupported version %d", document.Version)
+		return nil, nil, nil, fmt.Errorf("unsupported version %d", document.Version)
 	}
 	records := make(map[string]vscodeOwnershipRecord, len(document.Files))
 	for _, record := range document.Files {
 		if !filepath.IsAbs(record.Path) || (record.Platform != "linux" && record.Platform != "osx") {
-			return nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
+			return nil, nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
 		}
 		if _, duplicate := records[record.Path]; duplicate {
-			return nil, nil, fmt.Errorf("duplicate record %s", record.Path)
+			return nil, nil, nil, fmt.Errorf("duplicate record %s", record.Path)
 		}
 		records[record.Path] = record
 	}
-	return records, raw, nil
+	extensions := make([]string, 0, len(document.Extensions))
+	seenExtensions := make(map[string]bool, len(document.Extensions))
+	for _, extension := range document.Extensions {
+		if !filepath.IsAbs(extension) {
+			return nil, nil, nil, fmt.Errorf("invalid extension link path %q", extension)
+		}
+		if seenExtensions[extension] {
+			return nil, nil, nil, fmt.Errorf("duplicate extension link %s", extension)
+		}
+		seenExtensions[extension] = true
+		extensions = append(extensions, extension)
+	}
+	return records, extensions, raw, nil
 }
 
 func (installer *engine) vscodePlatform() (string, error) {
@@ -497,7 +643,9 @@ func (installer *engine) vscodeSettingsPaths() []string {
 		}
 	}
 	if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
-		candidates = append(candidates, filepath.Join(portable, "data", "user-data", "User", "settings.json"))
+		// VSCODE_PORTABLE is the portable data directory itself, not the
+		// install folder holding it (see vscodeExtensionLinks).
+		candidates = append(candidates, filepath.Join(portable, "user-data", "User", "settings.json"))
 	}
 	var found []string
 	for _, candidate := range candidates {

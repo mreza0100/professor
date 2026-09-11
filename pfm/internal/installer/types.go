@@ -94,15 +94,22 @@ type Options struct {
 	// managers cannot find two different polls. Zero means the shipped
 	// default (config.DefaultNameSyncInterval).
 	NameSyncInterval time.Duration
-	// VSCode explicitly opts the first install into managing a PFM terminal
-	// profile. Once written, the ownership ledger keeps later ordinary installs
-	// and updates reconciled without requiring the flag again.
+	// VSCode explicitly opts the first install into installing the Professor
+	// VS Code extension (Professor's assistant in VS Code) and making its
+	// contributed terminal profile the platform default. Once written, the
+	// ownership ledger keeps later ordinary installs and updates reconciled
+	// without requiring the flag again.
 	VSCode bool
 
 	// Test seams for platform/path discovery. Production callers leave these
 	// empty so the installer discovers the current host's VS Code settings.
 	vscodePlatform      string
 	vscodeSettingsPaths []string
+	// vscodeExtensionRoots overrides the VS Code product roots the installer
+	// checks for an extensions/ directory to link into. Nil means discover
+	// the real ~/.vscode* family under Options.Home; tests set it so they
+	// never touch a real home.
+	vscodeExtensionRoots []string
 
 	// ProvisionHarvest makes install/uninstall own the pinned conversion
 	// environment. The command sets this for real user actions; existing

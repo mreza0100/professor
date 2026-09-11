@@ -1,0 +1,39 @@
+{
+  "name": "professor",
+  "displayName": "Professor",
+  "description": "Professor's assistant inside VS Code: opens the pfm chat fleet in terminals that carry each chat's live name and land you where you asked.",
+  "version": "0.1.0",
+  "publisher": "professor",
+  "engines": { "vscode": "^1.90.0" },
+  "extensionKind": ["workspace", "ui"],
+  "main": "./extension.js",
+  "activationEvents": ["onTerminalProfile:professor.terminal"],
+  "contributes": {
+    "terminal": {
+      "profiles": [
+        { "id": "professor.terminal", "title": "Professor", "icon": "mortar-board" }
+      ]
+    },
+    "commands": [
+      { "command": "professor.newChatTerminal", "title": "Professor: New Chat Terminal", "icon": "$(mortar-board)" }
+    ],
+    "configuration": {
+      "title": "Professor",
+      "properties": {
+        "professor.terminal.shellPath": { "type": "string", "default": "/bin/zsh", "description": "Shell a Professor terminal starts." },
+        "professor.terminal.shellArgs": { "type": "array", "default": ["-l"], "description": "Arguments for that shell." },
+        "professor.terminal.env": { "type": "object", "default": { "PFM_AUTO_OPEN": "pfm" }, "description": "Environment for a Professor terminal; PFM_AUTO_OPEN opens the pfm picker once the shell is up." },
+        "professor.terminal.icons": {
+          "type": "array",
+          "default": ["rocket", "zap", "flame", "beaker", "heart", "star-full", "telescope", "radio-tower", "bug", "sparkle", "globe", "lightbulb", "megaphone", "pulse", "home"],
+          "description": "Codicons a new Professor terminal cycles through, so each tab reads apart at a glance."
+        },
+        "professor.terminal.colors": {
+          "type": "array",
+          "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
+          "description": "Theme colours cycled on an independent counter beside the icons."
+        }
+      }
+    }
+  }
+}
