@@ -80,9 +80,14 @@ func Environment() SelfEnvironment {
 	}
 }
 
-// Kill records a permanent kill and optionally starts the detached exit
-// finisher. The kill lifts only on an explicit unkill, so no prompt baseline
-// is recorded.
+// Kill records a permanent kill and starts the detached exit finisher
+// whenever the target resolves to a live tmux pane — hiding a live chat
+// always ends it, because a hidden row left running is a chat nobody can see
+// but that still holds its pane, its socket, and its viewport tab. Exit is
+// the explicit form of the same choreography for a target this call cannot
+// see is live on its own (a resolved socket/pane the caller already vouches
+// for): it still errors when no live address resolves at all. The kill lifts
+// only on an explicit unkill, so no prompt baseline is recorded.
 func (manager *Manager) Kill(
 	ctx context.Context,
 	request Request,
@@ -114,6 +119,7 @@ func (manager *Manager) Kill(
 	if request.Exit && (target.SocketPath == "" || target.PaneID == "") {
 		return Target{}, errors.New("--exit requires a live --self tmux pane")
 	}
+	live := target.SocketPath != "" && target.PaneID != ""
 
 	if err := manager.database.Kill(ctx, store.Killed{
 		ID:       target.ID,
@@ -123,7 +129,7 @@ func (manager *Manager) Kill(
 		return Target{}, err
 	}
 
-	if request.Exit {
+	if request.Exit || live {
 		if err := manager.spawner.Spawn(ctx, ExitArgs{
 			Engine:     target.Engine,
 			ID:         target.ID,

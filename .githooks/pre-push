@@ -26,6 +26,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
+  # main is release-only: it moves when the develop → main release PR merges
+  # (gitter Phase RELEASE), never by a direct push. GitHub's ruleset refuses
+  # this too; failing here is faster and names the road to take.
+  if [[ "$remote_ref" == refs/heads/main ]]; then
+    echo "PUSH BLOCKED: refs/heads/main is release-only — push develop and merge the release PR (gh pr merge), never push main directly" >&2
+    exit 1
+  fi
+
   # Release protocol wants annotated tags — warn (never block) on lightweight v* tags.
   if [[ "$remote_ref" == refs/tags/v* ]] && [[ "$(git cat-file -t "$local_sha")" == "commit" ]]; then
     echo "WARNING: ${remote_ref#refs/tags/} is a LIGHTWEIGHT tag — protocol wants annotated (git tag -a)" >&2

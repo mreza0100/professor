@@ -3,12 +3,12 @@ name: reload
 description: 'USER-ONLY — the user types /reload; never run this without the user''s permission. {{RELOAD_USAGE}}'
 ---
 
-# `/reload [--account N] [--1h on|off] [--fresh [--hide]] [--then "<prompt>"]` — reboot this chat in place
+# `/reload [--account N] [--model M] [--effort E] [--1h on|off] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
 
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
 ```
-~/.local/bin/pfm chat reload [--account N] [--1h on|off] [--then "<prompt>"]
+~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--1h on|off] [--then "<prompt>"]
 ```
 
 **Every setting has a flag. There are no positional arguments.** Whatever words the request
@@ -20,8 +20,10 @@ used, map them to a flag first:
 | "cache on", "1h cache", "long cache" | `--1h on` |
 | "account 2", "switch seats", "other account" | `--account 2` |
 | "then continue with X" | `--then "X"` |
-| "fresh", "new conversation", "start over here" | `--fresh` |
-| "fresh and hide the old one", "replace this chat" | `--fresh --hide` |
+| "on opus", "switch to sonnet", "reload as <model>" | `--model <model>` |
+| "high effort", "think harder", "low effort" | `--effort high` / `--effort low` |
+| "fresh", "new conversation", "start over here" | `--new` |
+| "fresh and hide the old one", "replace this chat" | `--new --hide` |
 | nothing in particular | no flags at all |
 
 `pfm chat reload cache off` is not a call — `cache` is not an argument, and the command will
@@ -56,14 +58,23 @@ be forced, never assumed). With no `--account` the chat KEEPS its current accoun
 is the pure "restart this chat on the 5m cache" move. Without `--1h`, an account reload preserves
 the chat's existing cache mode (a flagless elder counts as 1h, the default it actually runs).
 
-## Fresh conversation — `/reload --fresh [--hide]`
+## Fresh conversation — `/reload --new [--hide]`
 
-`--fresh` reboots into a NEW session id in the same pane, account, and cwd — the old conversation
+`--new` reboots into a NEW session id in the same pane, account, and cwd — the old conversation
 is untouched and stays resumable from the picker. Add `--hide` and the conversation left behind is
 hidden from the picker instead (a permanent kill recorded once the reboot completes — never before,
 so a reload that fails leaves the live chat listed; `pfm chat unkill <id>` brings it back).
-`--hide` needs `--fresh`: a reload that resumes the same conversation cannot hide it. Pairs with
+`--hide` needs `--new`: a reload that resumes the same conversation cannot hide it. Pairs with
 `--then`: reboot fresh, hide the chat being replaced, hand the reborn chat its first prompt.
+
+## Model and effort — `/reload --model M --effort E`
+
+Both pin what the REBORN pane is born with; neither changes the conversation. `--model` takes the
+engine's own model name. `--effort` takes one of `low`, `medium`, `high`, `xhigh`, `max` on Claude,
+or `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` on Codex — an unknown value is
+refused by name with the accepted set, never silently dropped. Omit either and the seat keeps what
+it is running now. The same two flags spell the same thing on `pfm chat new`, so a seat's tier is
+requested identically whether it is being born or rebooted.
 
 ## Reloading onto another account (limit rescue)
 

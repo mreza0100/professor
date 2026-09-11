@@ -518,15 +518,12 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	engineInput := strings.TrimSpace(*requestedEngine)
 	if engineInput == "" {
-		switch {
-		case os.Getenv(resolve.ClaudeSessionEnv) != "":
-			engineInput = string(pfmengine.Claude)
-		case os.Getenv(resolve.CodexThreadEnv) != "":
-			engineInput = string(pfmengine.Codex)
-		default:
+		caller, ok := callerEngine(os.Getenv)
+		if !ok {
 			fmt.Fprintln(stderr, "pfm chat branch: no ambient session id; pass --engine and --session-id")
 			return 1
 		}
+		engineInput = string(caller)
 	}
 	engine, parseErr := pfmengine.Parse(engineInput)
 	if parseErr != nil || (engine != pfmengine.Claude && engine != pfmengine.Codex) {

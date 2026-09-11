@@ -52,8 +52,7 @@ print -r -- "foreign-function=$(typeset -f ccache >/dev/null 2>&1 && print yes |
 print -r -- "foreign-alias=$([[ ${aliases[ccustom]-} == true ]] && print yes || print no)"
 print -r -- "precmd=${(j:,:)precmd_functions}"
 `
-	command := exec.Command(zsh, "-c", script)
-	command.Env = append(os.Environ(), "HOME="+home, "PATH="+fakeBin+":/usr/bin:/bin")
+	command := jailedZshCommand(zsh, script, home, "PATH="+fakeBin+":/usr/bin:/bin")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("source shim twice: %v: %s", err, output)

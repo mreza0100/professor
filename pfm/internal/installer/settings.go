@@ -26,6 +26,8 @@ func updateSettings(
 	exploreDenyCommand := commandByName(expected, "explore-deny")
 	epicInjectCommand := commandByName(expected, "epic-inject")
 	reloadInterceptCommand := commandByName(expected, "reload-intercept")
+	exitInterceptCommand := commandByName(expected, "exit-intercept")
+	exitCloseCommand := commandByName(expected, "exit-close")
 	compactNudgeCommand := commandByName(expected, "compact-nudge")
 	launcherRepairCommand := commandByName(expected, "launcher-repair")
 
@@ -110,7 +112,8 @@ func updateSettings(
 				changed = true
 				continue
 			}
-			if !uninstall && (command == usageCommand || command == epicInjectCommand || command == reloadInterceptCommand) {
+			if !uninstall && (command == usageCommand || command == epicInjectCommand ||
+				command == reloadInterceptCommand || command == exitInterceptCommand) {
 				if seenUserPromptCommands[command] {
 					changed = true
 					continue
@@ -188,6 +191,14 @@ func updateSettings(
 		}
 		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), reloadInterceptCommand, "") {
 			appendHookWithMatcher(document, "UserPromptSubmit", "", reloadInterceptCommand)
+			changed = true
+		}
+		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), exitInterceptCommand, "") {
+			appendHookWithMatcher(document, "UserPromptSubmit", "", exitInterceptCommand)
+			changed = true
+		}
+		if !hasHookCommandWithMatcher(hookEntries(document, "SessionEnd", true), exitCloseCommand, "") {
+			appendHookWithMatcher(document, "SessionEnd", "", exitCloseCommand)
 			changed = true
 		}
 		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), compactNudgeCommand, "") {

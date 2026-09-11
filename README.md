@@ -175,8 +175,8 @@ timed out · 6 message not delivered`.
 - **Reload without losing the conversation.** `pfm chat reload` reboots a running chat in place
   onto another account — same pane, same history, new billing identity. With `--then`, a chat the
   user sends to another account hands itself the baton unattended. Typed by a human,
-  `/reload …` runs through a hook without spending a model turn; `--fresh` starts a new
-  conversation in the same pane, `--fresh --hide` also hides the one left behind, and the
+  `/reload …` runs through a hook without spending a model turn; `--new` starts a new
+  conversation in the same pane, `--new --hide` also hides the one left behind, and the
   `/handoff` skill uses that pair to carry a full context across and retire the chat it came from.
 - **Repository memory is manually available, automatically paused.** `pfm dream` retains its
   development commands (`night`, `apply`, `inspect`, `morning`, `migrate-anchors`, `restamp`, and

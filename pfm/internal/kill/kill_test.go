@@ -331,10 +331,17 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 		t.Fatalf("Codex target = %#v", target)
 	}
 	assertKilled(t, database, codexID, pfmengine.Codex, now.Unix())
-	if len(spawner.args) != 1 ||
-		spawner.args[0].ID != codexID ||
-		spawner.args[0].PaneID != "%8" ||
-		spawner.args[0].SocketName != "cx-200-1-1" {
+	// Hiding a LIVE chat also ends it (§ manager.Kill), so the FIRST Kill call
+	// above — self, no --exit, but a live TMUX pane — spawns the finisher too;
+	// only the SECOND call's --exit is the caller's own explicit vouch for the
+	// same choreography.
+	if len(spawner.args) != 2 ||
+		spawner.args[0].ID != claudeID ||
+		spawner.args[0].PaneID != "%3" ||
+		spawner.args[0].SocketName != "cc-100-1-1" ||
+		spawner.args[1].ID != codexID ||
+		spawner.args[1].PaneID != "%8" ||
+		spawner.args[1].SocketName != "cx-200-1-1" {
 		t.Fatalf("spawned args = %#v", spawner.args)
 	}
 

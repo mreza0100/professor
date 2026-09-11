@@ -465,7 +465,7 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fresh || tmux.literal != "/exit" {
+	if result.New || tmux.literal != "/exit" {
 		t.Fatalf("result=%+v literal=%q", result, tmux.literal)
 	}
 	for _, want := range []string{

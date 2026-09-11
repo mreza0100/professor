@@ -13,7 +13,7 @@ import (
 
 // THE BUG. A resumed Codex lineage member's rollout file lands on disk the
 // moment `codex resume` starts it, but the CLI's own kill path deliberately
-// never runs the indexer first (pipeline.go's resolveRowEngine comment: "a
+// never runs the indexer first (pipeline.go's resolveRowTarget comment: "a
 // caller resolving one id for a kill has no business reconciling the whole
 // filesystem index"). --self identifies the live pane by the rollout file
 // its FD holds (identifyCodexSelf), extracts an id from the FILENAME alone

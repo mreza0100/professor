@@ -1,6 +1,6 @@
 # Isolated Dev Foundation — worktree + container for pfm development
 
-**Status:** APPROVED 2026-08-20 — rulings: (a) markdown-only waves stay on `main`, code changes only in `.worktrees/`; (b) the mirror runs when a fenced wave fully closes — QA pass, orchestrator review with issues fixed, stable — then gitter merges and the host build runs; (c) one image for dev+e2e, files edited on the HOST worktree, the container mounts it for build/test only, and `infra/` at root holds the compose so the setup replicates every time.
+**Status:** APPROVED 2026-08-20 — rulings: (a) markdown-only waves stay on `develop` (`main` is release-only, moved by the release PR), code changes only in `.worktrees/`; (b) the mirror runs when a fenced wave fully closes — QA pass, orchestrator review with issues fixed, stable — then gitter merges and the host build runs; (c) one image for dev+e2e, files edited on the HOST worktree, the container mounts it for build/test only, and `infra/` at root holds the compose so the setup replicates every time.
 
 ## Problem
 
@@ -25,7 +25,7 @@ A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.24, and pinned Node 
 
 ### 3. The mirror — landing on live is explicit and last
 
-gitter merges worktree → main only after in-fence verification (project gates + walker). The live install (`go build -o ~/.local/bin/pfm` + `pfm install --yes` on the host) is a separate, user-gated mirror step — never a side effect of a task finishing. "Ship = installed" is redefined: ship = installed **in the container**; the host install is the mirror.
+gitter merges worktree → develop only after in-fence verification (project gates + walker). The live install (`go build -o ~/.local/bin/pfm` + `pfm install --yes` on the host) is a separate, user-gated mirror step — never a side effect of a task finishing. "Ship = installed" is redefined: ship = installed **in the container**; the host install is the mirror.
 
 ## Mechanics
 

@@ -21,15 +21,16 @@ var reloadInterceptRun = runChatReloadWithRuntime
 // Bash — running it here, before the model ever sees the prompt, saves the
 // whole turn the model would otherwise spend re-typing the identical call.
 //
-// Claude Code's UserPromptSubmit contract: exit 0 lets the prompt through
-// (stdout is added as context); exit 2 BLOCKS the prompt, erases it, and
-// shows stderr to the human. A matched "/reload …" prompt always exits 2 —
-// the point is that it never reaches the model, whether the reload it ran
-// succeeded or failed; the human reads the front's own result on stderr
-// instead. Codex has no UserPromptSubmit hook, so a Codex seat's `/reload`
-// still goes through the model and the command body — this hook is a
-// Claude-only shortcut, not the only path.
-func runReloadIntercept(stdin io.Reader, stderr io.Writer, runtime commandRuntime) int {
+// Claude Code's UserPromptSubmit contract: a plain exit 0 lets the prompt
+// through (stdout is added as context); exit 2 BLOCKS it and paints the full
+// "operation blocked by hook … Original prompt" banner with stderr; exit 0
+// with the quiet JSON block (quietPromptBlock) blocks it with a bare notice
+// and no echo. A matched "/reload …" prompt never reaches the model either
+// way: a scheduled reboot is swallowed quietly, a failed one keeps the loud
+// exit-2 banner carrying the front's own text. Codex has no UserPromptSubmit
+// hook, so a Codex seat's `/reload` still goes through the model and the
+// command body — this hook is a Claude-only shortcut, not the only path.
+func runReloadIntercept(stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	var payload struct {
 		Prompt string `json:"prompt"`
 	}
@@ -47,12 +48,15 @@ func runReloadIntercept(stdin io.Reader, stderr io.Writer, runtime commandRuntim
 		fmt.Fprintf(stderr, "reload: %v\n", err)
 		return 2
 	}
-	// The same buffer serves as both stdout and stderr so the front's success
-	// line ("reload scheduled in place (log …)") and any validation error it
-	// writes to stderr land in ONE combined transcript, in the order the
-	// front itself produced them.
+	// One buffer for both streams so a failing front's text lands in the
+	// order the front produced it; a success is swallowed quietly (its
+	// "reload scheduled in place (log …)" line stays in the log it names).
 	var captured bytes.Buffer
-	reloadInterceptRun(words, &captured, &captured, runtime)
+	if reloadInterceptRun(words, &captured, &captured, runtime) == 0 {
+		// The reboot is scheduled: the pane is about to be replaced, and a
+		// banner nobody asked for would be the last thing it shows.
+		return blockPromptQuietly(stdout)
+	}
 	fmt.Fprintf(stderr, "reload: %s", captured.String())
 	return 2
 }

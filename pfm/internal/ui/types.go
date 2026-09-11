@@ -136,9 +136,13 @@ type KillChange struct {
 	ID     string
 	Engine pfmengine.ID
 	Killed bool
-	// Socket and Live are retained in the receipt for compatibility and
-	// diagnostics; hiding never ends the server. Name identifies the receipt.
+	// Socket and PaneID are the row's live tmux address, when it has one.
+	// Hiding a live chat ALSO ends it — kill.Manager runs the same exit
+	// choreography ⌃X and `pfm chat kill` share — so the applier forwards
+	// both straight through as the kill request's live address. Live mirrors
+	// Socket for the receipt; Name identifies it.
 	Socket string
+	PaneID string
 	Live   bool
 	Name   string
 }

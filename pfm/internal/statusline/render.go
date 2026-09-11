@@ -358,8 +358,11 @@ func makeBar(percent, width int) string {
 	if filled < 0 {
 		filled = 0
 	}
-	return percentColor(percent) + strings.Repeat("▓", filled) + dim +
-		strings.Repeat("░", width-filled) + reset
+	// ▰▱ (U+25B0/U+25B1) on purpose — block elements ▓░ are WebGL custom
+	// glyphs in VS Code's terminal and render stale under repaint; the
+	// pfm-statusline patcher's GAUGE regex matches these runs.
+	return percentColor(percent) + strings.Repeat("▰", filled) + dim +
+		strings.Repeat("▱", width-filled) + reset
 }
 
 func formatTokens(tokens int64) string {

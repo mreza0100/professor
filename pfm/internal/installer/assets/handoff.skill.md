@@ -1,13 +1,12 @@
 ---
 name: handoff
-description: 'USER-ONLY — the user types /handoff [message]; never run this without the user''s permission. Hands this chat''s whole working context to a FRESH chat in the same pane and hides this one.'
+description: 'USER-ONLY — the user types /handoff [message]; never run this without the user''s permission. Hands this chat''s whole working context to a NEW chat: by default reboots this pane into it and hides this conversation; --branch instead writes the handoff and starts a separate, detached chat while this conversation stays completely untouched.'
 ---
 
-# `/handoff` — hand this chat's context to a fresh chat in the same pane, then hide this one
+# `/handoff [--branch]` — hand this chat's context to a new chat
 
-Run these THREE steps, in order, as your LAST action — the chat is about to exit and, once the
-fresh one owns the pane, this conversation is hidden from the picker (`pfm chat unkill <id>`
-brings it back):
+Write the handoff file first — this step is IDENTICAL in both modes. Then either reboot this pane
+into the new chat (default) or spawn a separate detached one and leave this pane alone (`--branch`).
 
 1. **Write the handoff file.** `mkdir -p ~/.local/share/pfm/handoff` first, then write
    `~/.local/share/pfm/handoff/<YYYYMMDD-HHMMSS>-<cwd basename>.md` with these sections, in this
@@ -23,17 +22,34 @@ brings it back):
    - **Rules learned** — constraints discovered this session.
    - **Owed to the user** — every item the final report must contain.
 
-   The fresh chat has NO access to this conversation. Write what it needs to continue without
+   The new chat has NO access to this conversation. Write what it needs to continue without
    asking: complete sentences, the user's own words wherever wording matters, never a summary of
    a summary.
 
-2. **Reboot fresh and hide this chat, once, via Bash:**
+2. **Without `--branch` — reboot into the new chat and hide this one, once, via Bash:**
    ```
-   ~/.local/bin/pfm chat reload --fresh --hide --then "Read <path> in FULL before anything else, then continue from its § Next steps. <the user's /handoff message, if any>"
+   ~/.local/bin/pfm chat reload --new --hide --then "Read <path> in FULL before anything else, then continue from its § Next steps. <the user's /handoff message, if any>"
    ```
    `--hide` is what hides the conversation being handed off — the command records it only after
    the reboot completes, so a failed reload leaves this chat listed and live. Keep any
-   `--account N` / `--1h` the user asked for. Never pass `--sock`.
+   `--account N` / `--1h` / `--model` / `--effort` the user asked for. Never pass `--sock`.
 
-3. Reply ONE short line — the handoff path — and END THE TURN. In-flight sub-agents die with the
-   reboot, so land or checkpoint them in the file FIRST.
+   **With `--branch` — leave this pane and conversation completely untouched.** No reload, no
+   hide. Instead start a SEPARATE, detached chat seeded with the handoff, once, via Bash:
+   ```
+   ~/.local/bin/pfm chat new --name "<short task name>" --cwd "<the current project dir>" "Read <path> in FULL before anything else, then continue from its § Next steps. <the user's /handoff message, if any>"
+   ```
+   Deliberately NO `--attach` — the seat is born detached and the human opens it themselves from
+   the picker; that is the whole point of `--branch`. Never `--hide`, never `--sock`. The
+   successor is born on THIS chat's engine — `chat new` defaults to the calling chat's engine;
+   pass `--engine` only when the user asks for the other one. Keep any
+   `--account N` / `--1h` / `--model` / `--effort` the user asked for — `chat new` accepts all of
+   those.
+
+3. **Without `--branch`** — reply ONE short line, the handoff path, and END THE TURN. In-flight
+   sub-agents die with the reboot, so land or checkpoint them in the file FIRST — this warning
+   applies only here; nothing reboots under `--branch`.
+
+   **With `--branch`** — reply with BOTH the handoff file path AND the new chat's name, so the
+   human knows what to open. Do not end the turn early and do not treat this chat as finished:
+   nothing rebooted, nothing was hidden, and this conversation keeps going exactly as before.

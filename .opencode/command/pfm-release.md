@@ -15,14 +15,14 @@ description: "Version, tag, and publish this repo — regenerating the portable 
 
 1. **Publication authority.** This command pushes. It runs only on an explicit in-turn request to release/publish. No authority → stop here and say so.
 2. `gh auth status` — must be the repo owner.
-3. `git status` — the working tree must be clean or hold only this release's edits. Bail on unrelated dirty state; never sweep it in.
+3. `git status` — on branch `develop`, working tree clean or holding only this release's edits. Bail on another branch or unrelated dirty state; never sweep it in.
 4. `git fetch --tags origin` — the version Step 4 computes must be greater than every published tag, or the tag push collides. Report the current newest tag.
 
 ## Steps
 
 1. **Validate args** — bump type + summary required, bail if missing. `patch` = bug fixes / doc tweaks · `minor` = new archetype, command, or step · `major` = breaking change or migration.
 
-2. `git pull --ff-only origin main` — STOP if it fails.
+2. `git pull --ff-only origin develop` — STOP if it fails. Then `git fetch origin main` and confirm `git merge-base --is-ancestor origin/main develop` — a commit on `main` that `develop` lacks means the last release never fast-forwarded `develop` back; STOP and report it.
 
 2b. **Ledger sweep — always runs.** `scripts/refresh-scope.sh ledgers . {--from root, if given} {each --ledger root}` enumerates every reachable `.professor/release.md`: each named root plus the sub-projects its own manifest names by role. Report the `swept=… pending=… bullets=… empty=… absent=… unreadable=…` line verbatim — it is the proof of how many ledgers were OPENED, and a sweep of zero must never read like a sweep that found nothing. `LEDGER-UNREADABLE` exits 4 and STOPS the release: a ledger that could not be read is a failed look, not an empty one. Every `LEDGER-PENDING` bullet joins this release; the union is what Step 5 consumes and Step 9 clears.
 
@@ -50,13 +50,13 @@ description: "Version, tag, and publish this repo — regenerating the portable 
 
    b. `/git commit` — name the exact paths and message `release: v{NEW_VERSION} — {summary}` with a `Source: {sha}` trailer (the live source SHA when Step 3 ran; omit the trailer when it did not) and `Co-Authored-By: Professor <noreply@anthropic.com>`.
 
-   c. `/git tag v{NEW_VERSION}` — create an annotated tag after re-checking that `VERSION`, `CHANGELOG.md`, and `releases/v{NEW_VERSION}.md` agree.
+   c. `/git push origin develop`, carrying the user's explicit publish request as its authority. Relay the pre-push hook's output verbatim. STOP if it fails; NEVER force-push. `main` is never a push target — the hook and GitHub's ruleset both refuse it.
 
-   d. `/git push origin main --follow-tags`, carrying the user's explicit publish request as its authority. Relay the pre-push hook's output verbatim. STOP if it fails; NEVER force-push.
+   d. `/git release v{NEW_VERSION}` — gitter Phase RELEASE: opens the `develop → main` PR (`gh pr create`, body = `releases/v{NEW_VERSION}.md`), waits for the required checks (`gh pr checks --watch`; red = STOP, never an override), merges it (`gh pr merge --merge`), creates the annotated tag on the resulting `main` commit after re-checking that `VERSION`, `CHANGELOG.md`, and `releases/v{NEW_VERSION}.md` agree, pushes the tag, then fast-forwards `develop` onto `main` and pushes it so the branches end identical. STOP at the first failed step and report which.
 
 9. **Clear EVERY ledger Step 2b reported as PENDING** — each one's entries shipped in this release; empty each pending list, keep each header. A ledger left unclear re-ships its bullets in the next release; clearing one this release never opened would delete work that never shipped, so clear exactly the paths the sweep printed.
 
-10. **Report** tag URL, commit SHA, source SHA (or "no refresh"), and the changelog bullets, ending with:
+10. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), and the changelog bullets, ending with:
     `Blueprint released: v{NEW_VERSION}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW_VERSION}`
 
 ## Hard rules

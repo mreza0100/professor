@@ -83,6 +83,10 @@ type ClaudeSpawn struct {
 	Cache1H bool
 	// Model, when set, appends `--model <Model>` after Args.
 	Model string
+	// Effort, when set, appends `--effort <Effort>` after Model. The caller
+	// validates it against ClaudeEffort's roster before setting it — this
+	// door only carries the value, exactly as it only carries Model.
+	Effort string
 	// Args are the caller's own argv words, shell-quoted one by one in
 	// ShellCommand and passed through verbatim by Command.
 	Args []string
@@ -152,6 +156,10 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 		command.WriteString(" --model ")
 		command.WriteString(Quote(spawn.Model))
 	}
+	if spawn.Effort != "" {
+		command.WriteString(" --effort ")
+		command.WriteString(Quote(spawn.Effort))
+	}
 	if file := spawn.promptFile(prefs); file != "" {
 		command.WriteString(" --system-prompt-file ")
 		command.WriteString(Quote(file))
@@ -218,6 +226,9 @@ func (spawn ClaudeSpawn) argv(prefs pfmconfig.ClaudePrefs) []string {
 	if spawn.Model != "" {
 		argv = append(argv, "--model", spawn.Model)
 	}
+	if spawn.Effort != "" {
+		argv = append(argv, "--effort", spawn.Effort)
+	}
 	if file := spawn.promptFile(prefs); file != "" {
 		argv = append(argv, "--system-prompt-file", file)
 	}
@@ -235,7 +246,7 @@ func (spawn ClaudeSpawn) validate() error {
 		// spawn was unclassified.
 		return fmt.Errorf("claude spawn: unknown purpose %s", spawn.Purpose)
 	}
-	values := append([]string{spawn.Home, spawn.Model, spawn.binary}, spawn.Args...)
+	values := append([]string{spawn.Home, spawn.Model, spawn.Effort, spawn.binary}, spawn.Args...)
 	if hasNUL(values...) {
 		return errors.New("claude spawn values cannot contain NUL")
 	}

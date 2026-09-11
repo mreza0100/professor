@@ -103,8 +103,8 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 			t.Fatalf("%s %s matcher count=%d, want 1\n%s", hook.event, hook.command, got, updated)
 		}
 	}
-	if len(owned) != 7 {
-		t.Fatalf("owned hooks=%d, want 7: %#v", len(owned), owned)
+	if want := len(claudeHookTemplates(home)); len(owned) != want {
+		t.Fatalf("owned hooks=%d, want %d: %#v", len(owned), want, owned)
 	}
 
 	withManual := append([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Agent|Task","hooks":[{"type":"command","command":"operator-keep"}]}]}}`), '\n')
@@ -358,8 +358,8 @@ func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T)
 	if changed {
 		t.Fatalf("an already fully-wired settings.json was unexpectedly rewritten")
 	}
-	if len(owned) != 7 {
-		t.Fatalf("owned hooks=%d, want 7 — every already-present expected hook must be claimed: %#v", len(owned), owned)
+	if want := len(claudeHookTemplates(home)); len(owned) != want {
+		t.Fatalf("owned hooks=%d, want %d — every already-present expected hook must be claimed: %#v", len(owned), want, owned)
 	}
 	for key, count := range owned {
 		if count != 1 {
@@ -443,6 +443,8 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " usage-hook"},
 		{Event: "SessionStart", Matcher: "", Command: prefix + " internal launcher-repair"},
 		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal clear-kill"},
+		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal exit-intercept"},
+		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal exit-close"},
 	}
 	if len(owned) != len(expectedKeys) {
 		t.Fatalf("owned hooks=%d, want %d — every already-present expected hook must be claimed even with foreign hooks in the document: %#v", len(owned), len(expectedKeys), owned)
