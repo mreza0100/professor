@@ -613,25 +613,91 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"s
 	}
 }
 
+// armedDeadlineContext is a context.Context whose Err() reports
+// context.DeadlineExceeded only once arm() is called. It lets a test decide
+// the exact instant a "timeout" fires instead of racing a fixed wall-clock
+// duration against a child process's fork + pid-file write, while still
+// exercising the same ctx.Done()-driven process-group kill path a real
+// request.Timeout deadline would.
+type armedDeadlineContext struct {
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newArmedDeadlineContext() *armedDeadlineContext {
+	return &armedDeadlineContext{done: make(chan struct{})}
+}
+
+func (c *armedDeadlineContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *armedDeadlineContext) Done() <-chan struct{}       { return c.done }
+func (c *armedDeadlineContext) Value(any) any               { return nil }
+func (c *armedDeadlineContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *armedDeadlineContext) arm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err == nil {
+		c.err = context.DeadlineExceeded
+		close(c.done)
+	}
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("file %s did not appear within %s", path, timeout)
+}
+
 func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
 	binary := writeEngineStub(t, `(sleep 30) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
 sleep 30`)
-	request := Request{Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello", Timeout: 150 * time.Millisecond, Env: testEnv(capture)}
-	started := time.Now()
-	result, err := Run(context.Background(), request)
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("timeout err = %v, result=%#v", err, result)
+	request := Request{Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello", Env: testEnv(capture)}
+	ctx := newArmedDeadlineContext()
+	type outcome struct {
+		result Result
+		err    error
 	}
-	if !result.TimedOut {
+	done := make(chan outcome, 1)
+	started := time.Now()
+	go func() {
+		result, err := Run(ctx, request)
+		done <- outcome{result, err}
+	}()
+
+	pidPath := filepath.Join(capture, "child-pid")
+	waitForFile(t, pidPath, 3*time.Second)
+	ctx.arm()
+
+	var out outcome
+	select {
+	case out = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run() did not return after the deadline was armed")
+	}
+	if out.err == nil || !errors.Is(out.err, context.DeadlineExceeded) {
+		t.Fatalf("timeout err = %v, result=%#v", out.err, out.result)
+	}
+	if !out.result.TimedOut {
 		t.Fatal("timeout result did not mark timeout")
 	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("timeout waited for descendant pipe holder: %s", elapsed)
 	}
-	pidText := strings.TrimSpace(string(mustRead(t, filepath.Join(capture, "child-pid"))))
+	pidText := strings.TrimSpace(string(mustRead(t, pidPath)))
 	var pid int
 	if _, scanErr := fmt.Sscanf(pidText, "%d", &pid); scanErr != nil {
 		t.Fatalf("child pid %q: %v", pidText, scanErr)
