@@ -393,3 +393,19 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `debug-discipline.md`, `build-reference.md`).
 
 - Local: `.codex/skills/deep-rr` untracked (`git rm --cached`) and ignored in `.gitignore` beside the `.claude/skills/` rule it mirrors. It was a tracked symlink into `.claude/skills/deep-rr`, a tree `.gitignore` has always ignored by design (source-fetched skills are never vendored — each carries its own upstream LICENSE the leak gate refuses), so the link resolved in this working copy and in no clone. `compileRepoSkills` (`pfm/internal/codexgen/compiler.go`) recreates it from whatever `.claude/skills/` holds on every `pfm codex build`, so nothing needs it in the index; the repo's own `.gitignore` comment already stated the law — "skill symlinks stay untracked like `.codex/skills/`" — while the index contradicted it. It had broken three gates in three different voices; the new tracked-symlink reconcile in `check-codex-markers.mjs` (release queue) names the next one on sight. Verified: the gate reported `UNTRACKED-TARGET .codex/skills/deep-rr` before the untrack and `1 tracked symlink(s) resolve to tracked targets` after — the survivor being `engines/wave-walker/engine/dist/active-workflow.js -> workflow.js`, whose target IS tracked.
+
+- **KEEP-LOCAL: output styles are retired, and their absence is asserted rather than assumed (user-ordered).**
+  No output-style file, directory, or `outputStyle` settings key exists anywhere in the tree, and every Claude launch
+  now pins `--settings {"outputStyle":"default"}`, so a style file that reappeared would be INERT — nothing would
+  fail and no persona would change, leaving a file everyone believes is doing something. The four surviving dead
+  references are gone: `build-opencode.mjs` no longer claims a "persona-adoption pointers stripped" transform it
+  never implemented (grep-verified: the comment was the only occurrence, there was no code) nor lists output-styles
+  among what it does not cover; `check-self-hosted-manifest.sh` drops the `output_styles` category whose want-list
+  and got-list were both permanently empty — a comparison that printed the same word healthy or broken — and gains
+  an absence gate in its place (tracked `.claude/output-styles/`, the directory on disk, the manifest key, and an
+  `outputStyle` key in any of the three settings files each fail by name); `docs/commands/pfm/references/refresh.md`
+  retargets the Analysis Protocol row from the vanished "Professor persona output style" to the fleet prompt
+  (`templates/prompts/professor.md`), matching `docs/BLUEPRINT.md`'s canonical statement; the manifest drops
+  `installed.output_styles`. Verified by negative test: the gate names the directory, and names the manifest key,
+  and goes quiet again once each is removed. `templates/**` carried no output-style reference to begin with, so
+  nothing ships — hence local.

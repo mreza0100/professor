@@ -94,7 +94,6 @@
       "wave:walker",
       "wave:walker-invariants"
     ],
-    "output_styles": [],
     "scripts": [
       "build-opencode.mjs",
       "codex-sync.sh",
@@ -129,7 +128,7 @@
     ".claude/commands/wave/refine.md": "8b01092906b0a3ff14a1b9477c2cb4529ea82691a09ca7ff44fc0035a8af1f08",
     ".claude/commands/wave/walker-invariants.md": "ea1e592e0ef454b8f178b26bec006fa306428625109757de826a510c5ce3ea18",
     ".claude/commands/wave/walker.md": "cc1713bcce44d830fbba6374218943969faa06532e687323fd08b9a7b4836ccf",
-    ".claude/scripts/build-opencode.mjs": "bf733565c5b02127fb361bcfcd938b35b34c36b107f09419e9bc0eec92a6db09",
+    ".claude/scripts/build-opencode.mjs": "3c7aa5ed4a16413c7f826c15632b0d28e85a98226036d1ccdb50908aa521838a",
     ".claude/scripts/codex-sync.sh": "a9179abfe7b73717b550e54387e76bc316de4de0acaa2b8a01c6db26faaadbe3",
     ".claude/scripts/dev.sh": "c55d1346dd6071f58884409ceb990d7f45b4422f47a1720a338584b32318f037",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
@@ -176,7 +175,7 @@
     "AGENTS.md": "d90a9abae1037403104f25857b34cd8478041e00c1a7eb4cc047bbc156e1b0b2",
     "CLAUDE.md": "ee824293b72519975256122d4700924dbb2540287a36678e1596685c596cb93d",
     "docs/commands/pfm/references/audit-scopes.md": "8634be6c91bfcdcb3ec7609afea5470e92a24918045806f5c5e48a9ab038f4c1",
-    "docs/commands/pfm/references/refresh.md": "0fc21ca1f250c5fdd962863754e34a0e6d1f675f3a58e100091a4f6b953ce340",
+    "docs/commands/pfm/references/refresh.md": "e1f69139ebadf56cbad78d14cef77c521e459a93f88f83dc799cf5af881b7f55",
     "pfm/AGENTS.md": "13bf36f680a691950abd0f2ff6f0c37d8832b6d9b8e0f7e7c2a387ce88c23d01",
     "pfm/CLAUDE.md": "bebc0be4ee0a2934bfb7c1f06bae2e508daf6209085550847c9fdc405ac1a906"
   }

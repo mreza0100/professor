@@ -30,8 +30,7 @@
 //                              description. Currency is not validity.
 //
 // Transforms are pure string operations:
-//   verbatim copy + persona-adoption pointers stripped (output-styles are
-//     Claude-harness-only) + nested command names flattened to the flat form
+//   verbatim copy + nested command names flattened to the flat form
 //     OpenCode's loader requires (/wave:orchestrator → /wave-orchestrator;
 //     already-flat names pass through untouched). No model-alias swap: § Model
 //     Selection tier words bind every harness; no OpenCode model roster is
@@ -432,7 +431,7 @@ for (const d of managedDirs) {
 // ---------- report -----------------------------------------------------------
 
 for (const n of notes) console.log(`note: ${n}`);
-const counts = `${outputs.size} outputs (${agentSources.length} agents, repo+global commands, skill symlinks, opencode.jsonc) — coverage: repo commands+skills+agents, $HOME commands, repo .mcp.json; NOT covered: output-styles, hooks (Claude-harness-only), $HOME-level MCP registries, $HOME skills (OpenCode auto-loads them)`;
+const counts = `${outputs.size} outputs (${agentSources.length} agents, repo+global commands, skill symlinks, opencode.jsonc) — coverage: repo commands+skills+agents, $HOME commands, repo .mcp.json; NOT covered: hooks (Claude-harness-only), $HOME-level MCP registries, $HOME skills (OpenCode auto-loads them)`;
 if (problems.length) {
   for (const p of problems) console.error(p);
   console.error(`${MODE === 'generate' ? 'GENERATE INCOMPLETE' : MODE.toUpperCase() + ' FAIL'} — ${problems.length} problem(s); ${counts}`);

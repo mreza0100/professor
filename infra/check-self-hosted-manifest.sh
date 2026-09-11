@@ -94,12 +94,9 @@ elif ! diff -u "$TMP/want-files" "$TMP/got-files"; then
 fi
 
 # Descriptive installed arrays are a contract too: hashes alone cannot expose
-# a retired command or output-style still advertised as installed.
-for category in agents commands scripts output_styles; do
-  case "$category" in
-    output_styles) source_dir="output-styles" ;;
-    *) source_dir="$category" ;;
-  esac
+# a retired command still advertised as installed.
+for category in agents commands scripts; do
+  source_dir="$category"
   repo_git ls-files ".claude/$source_dir" | while IFS= read -r path; do
     # A path tracked but absent from disk is a deletion awaiting its commit —
     # it is NOT installed, so it must not be demanded of the manifest. The
@@ -121,6 +118,27 @@ for category in agents commands scripts output_styles; do
 if ! diff -u <(jq -S '.source_fetched' "$ROOT/templates/project/skills/sources.json") <(jq -S '.installed.skills_source_fetched' "$MANIFEST"); then
   fail "installed.skills_source_fetched does not match project source registry"
 fi
+
+# Output styles are retired, and their absence is ASSERTED rather than assumed:
+# every Claude launch now pins `--settings {"outputStyle":"default"}`, so a style
+# file that reappeared would be INERT rather than wrong. Nothing would fail, no
+# persona would change, and the only symptom would be a file everyone believes
+# is doing something. A gate that looks is the only way that surfaces.
+if repo_git ls-files | grep -q '^\.claude/output-styles/'; then
+  fail "tracked .claude/output-styles/ exists — output styles are retired and every launch pins outputStyle=default, so anything there is inert"
+fi
+if [[ -d "$ROOT/.claude/output-styles" ]]; then
+  fail "$ROOT/.claude/output-styles exists on disk — output styles are retired; remove it"
+fi
+if jq -e '(.installed // {}) | has("output_styles")' "$MANIFEST" >/dev/null; then
+  fail "manifest advertises installed.output_styles — output styles are retired; drop the key"
+fi
+for settings in "$ROOT/.claude/settings.json" "$ROOT/templates/project/settings.json" "$ROOT/templates/project/settings-global.json"; do
+  [[ -f "$settings" ]] || continue
+  if jq -e 'has("outputStyle")' "$settings" >/dev/null 2>&1; then
+    fail "$settings sets outputStyle — output styles are retired and every launch pins default"
+  fi
+done
 
 digest() {
   if command -v sha256sum >/dev/null 2>&1; then
