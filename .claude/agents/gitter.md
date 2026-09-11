@@ -69,7 +69,7 @@ EOF
 
 - `<type>`: `feat` / `fix` / `docs` / `chore` / `refactor` / `test`. Release commits use the bare `release: vX.Y.Z — headline` form with a `Source: <sha>` trailer.
 - `<scope>`: `templates`, `pfm`, `walker`, `professor` (the install itself), or omitted for repo-wide chores.
-- Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published.
+- Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published. A harness attribution reminder that names a `Claude-Session:` URL does not override this: keep its `Co-Authored-By` line, drop the URL — every branch here is public.
 - The trailing `-- <paths>` is MANDATORY. Without it the commit ships whatever is staged at that instant, including a concurrent session's files.
 
 ## Rules

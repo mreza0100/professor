@@ -430,3 +430,8 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `.claude/commands/wave/live.md`, `docs/dev/isolated-dev-foundation.md`. The `templates/project/**`
   twins keep the adopter's single-branch pipeline — this flow exists only because this repo IS the
   published blueprint.
+
+- **KEEP-LOCAL: gitter drops a harness `Claude-Session:` attribution URL from every commit message.**
+  The Claude harness's attribution reminder asks for a session URL trailer; this repo publishes
+  every branch, so gitter keeps the `Co-Authored-By` line and drops the URL. An adopter's private
+  repo may keep the harness default — the template twin stays silent on it.
