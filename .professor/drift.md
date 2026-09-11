@@ -409,3 +409,12 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `installed.output_styles`. Verified by negative test: the gate names the directory, and names the manifest key,
   and goes quiet again once each is removed. `templates/**` carried no output-style reference to begin with, so
   nothing ships — hence local.
+
+- **KEEP-LOCAL: `build-opencode.mjs` reports a dangling command source instead of dying on it.** A retired global
+  command leaves a symlink in `$HOME/.claude/commands/` whose blueprint target is deleted (`/rnd` after its
+  global -> project move); `readFileSync` threw ENOENT out of `compileCommands` and killed the whole compile, so ONE
+  stale link cost every other command its output and the failure read as a crash rather than as the single missing
+  source it was. A dangling source is now collected and always stated: `generate` names it and finishes, `check` and
+  `doctor` refuse. Verified both ways on the live `/rnd` links — `generate` completed 28 outputs with a `note:` line,
+  `doctor` returned DOCTOR FAIL naming the source. Repo-local: `templates/project/scripts/` ships `build-codex.mjs`,
+  never this compiler.

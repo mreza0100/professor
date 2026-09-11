@@ -153,6 +153,9 @@ const yamlQuote = (s) => JSON.stringify(String(s));
 // outputs: absolute path → { content } | { link: target }
 const outputs = new Map();
 const notes = [];
+// Source links whose target is gone. Collected during compile, reported below:
+// a source that cannot be READ is a named gap, never a silently missing output.
+const danglingSources = [];
 
 // Projects = top-level dirs carrying a CLAUDE.md (dynamic; .worktrees etc. have none).
 // templates/ is excluded: its CLAUDE.md is the adopter TEMPLATE (placeholder text),
@@ -212,6 +215,14 @@ function compileCommands(srcRoot, srcLabel, emit) {
   for (const entry of walkMd(srcRoot)) {
     const file = entry.skillDir ? join(entry.dir, "SKILL.md") : entry.file;
     const rel = relative(srcRoot, entry.skillDir ? entry.dir : file);
+    if (!existsSync(file)) {
+      // A command link pointing at a deleted blueprint file (a retired global
+      // command). readFileSync would throw ENOENT and abort the whole compile,
+      // so ONE stale link takes every other command's output down with it —
+      // and the failure reads as a crash, not as the one missing source it is.
+      danglingSources.push(`${srcLabel}/${rel}`);
+      continue;
+    }
     const flat = flatName(rel);
     const { body, fields } = parseFm(read(file));
     emit({
@@ -362,6 +373,16 @@ const claimable = (p) => {
 };
 
 const problems = [];
+
+// A dangling source is a coverage gap either way, and it is always stated.
+// `generate` states it and keeps going, so one stale link cannot cost every
+// other command its output; `check`/`doctor` refuse, because the mirror is not
+// current while a source it should have compiled is unreadable.
+for (const src of danglingSources) {
+  const line = `DANGLING ${src} — source link target is gone; nothing compiled from it (\`pfm install\` prunes an orphaned global-command link)`;
+  if (MODE === 'generate') notes.push(line);
+  else problems.push(line);
+}
 let wrote = 0, unchanged = 0, deleted = 0;
 
 for (const [dst, out] of [...outputs.entries()].sort()) {
