@@ -127,6 +127,9 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 	}
 	t.Setenv("CODEX_HOME", filepath.Join(root, ".codex-2"))
 	t.Setenv("CODEX_THREAD_ID", "thread-2")
+	// The seat is Codex-only: an inherited Claude session id from the shell
+	// this suite runs in would make the hook take the Claude path.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeConfig)
 	var stdout, stderr bytes.Buffer
 	if code := runUsageHookWithRuntime(nil, &stdout, &stderr, commandRuntime{}); code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {

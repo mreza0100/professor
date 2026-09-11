@@ -450,3 +450,170 @@ func itoa(value int) string {
 	}
 	return string(digits)
 }
+
+// TestEvaluateAgesTheCacheByFetchedAtNotFileMtime pins the 2026-09-11 bug: a
+// writer that records only a backoff rewrites the file — bumping its mtime —
+// while carrying the previous payload's fetched_at forward. Aging the cache by
+// mtime revived an eight-hour-old payload as "fresh" and warned from it. The
+// record's own fetched_at is the only honest age; an active backoff still
+// suppresses the hook's own request.
+func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
+	for _, testcase := range []struct {
+		name     string
+		backoff  bool
+		wantHits int
+	}{
+		{name: "refetches once no backoff is active", wantHits: 1},
+		{name: "recorded backoff still suppresses the request", backoff: true},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			root := t.TempDir()
+			configDir := filepath.Join(root, ".cc", "2")
+			if err := os.MkdirAll(configDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().Truncate(time.Second)
+			fetchedAt := now.Add(-2 * time.Hour)
+			cacheDir := filepath.Join(root, "cache")
+			cachePath := CachePath(cacheDir, 2)
+			record := CacheRecord{
+				Usage: Usage{
+					FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)},
+					SevenDay: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(5 * 24 * time.Hour).Format(time.RFC3339)},
+				},
+				ConfigDir: configDir, FetchedAt: &fetchedAt,
+			}
+			if testcase.backoff {
+				record.Backoff = &CacheBackoff{Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: now}
+			}
+			// WriteCacheRecord leaves mtime at "now" — exactly the state a
+			// backoff-only write produces.
+			if err := WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(cachePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if age := time.Since(info.ModTime()); age > time.Minute {
+				t.Fatalf("fixture mtime age=%s, want a just-written file", age)
+			}
+			hits := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				hits++
+				writer.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer server.Close()
+			message, err := Evaluate(context.Background(), Options{
+				Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+				AccountDirs: map[string]int{configDir: 2}, CacheDir: cacheDir,
+				Warn: 80, Critical: 95, TTL: 10 * time.Minute,
+				Client: server.Client(), Endpoint: server.URL, Log: io.Discard,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if message != "" {
+				t.Fatalf("two-hour-old payload warned as fresh: %q", message)
+			}
+			if hits != testcase.wantHits {
+				t.Fatalf("provider requests=%d, want %d", hits, testcase.wantHits)
+			}
+		})
+	}
+}
+
+// TestEvaluateIgnoresWindowsPastTheirReset applies fableWindow's rule to the
+// 5h and 7d windows: a cached reading whose resets_at has already passed
+// describes quota that has since rolled over and must never raise the warning.
+func TestEvaluateIgnoresWindowsPastTheirReset(t *testing.T) {
+	for _, testcase := range []struct {
+		name         string
+		fiveResetsAt time.Duration
+		wantWarning  bool
+	}{
+		{name: "passed reset stays silent", fiveResetsAt: -time.Minute},
+		{name: "live reset still warns", fiveResetsAt: time.Hour, wantWarning: true},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			root := t.TempDir()
+			configDir := filepath.Join(root, ".cc", "3")
+			if err := os.MkdirAll(configDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().Truncate(time.Second)
+			cacheDir := filepath.Join(root, "cache")
+			if err := WriteCacheRecord(CachePath(cacheDir, 3), CacheRecord{
+				Usage: Usage{
+					FiveHour: Window{Utilization: usageFloatPtr(98), ResetsAt: now.Add(testcase.fiveResetsAt).Format(time.RFC3339)},
+					SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+				},
+				ConfigDir: configDir, FetchedAt: &now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			message, err := Evaluate(context.Background(), Options{
+				Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+				AccountDirs: map[string]int{configDir: 3}, CacheDir: cacheDir,
+				Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if warned := strings.Contains(message, "USAGE LIMIT IMMINENT"); warned != testcase.wantWarning {
+				t.Fatalf("warning=%v want %v: message=%q", warned, testcase.wantWarning, message)
+			}
+		})
+	}
+}
+
+// TestWarnLineSaysResetPassedInsteadOfAStalePercentage covers the warn line
+// itself: when one window is expired and a LIVE one raises the warning, the
+// expired clause must not advertise its rolled-over percentage or a reset
+// moment already in the past — it reads "5h — (reset passed)".
+func TestWarnLineSaysResetPassedInsteadOfAStalePercentage(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".cc", "8")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Truncate(time.Second)
+	cacheDir := filepath.Join(root, "cache")
+	passed := now.Add(-90 * time.Minute)
+	if err := WriteCacheRecord(CachePath(cacheDir, 8), CacheRecord{
+		Usage: Usage{
+			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
+			SevenDay: Window{Utilization: usageFloatPtr(88), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+		},
+		ConfigDir: configDir, FetchedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := Evaluate(context.Background(), Options{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		AccountDirs: map[string]int{configDir: 8}, CacheDir: cacheDir,
+		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message, "5h — (reset passed)") {
+		t.Fatalf("expired 5h clause did not say the reset passed: %q", message)
+	}
+	if strings.Contains(message, "5h 0%") || strings.Contains(message, "5h 97%") ||
+		strings.Contains(message, "resets "+passed.Format("15:04")) {
+		t.Fatalf("expired 5h clause kept a stale number or a past reset time: %q", message)
+	}
+	if !strings.Contains(message, "7d 88% (resets ") {
+		t.Fatalf("live 7d clause lost its percentage and reset: %q", message)
+	}
+}

@@ -60,11 +60,19 @@ type Container struct {
 }
 
 type Window struct {
-	Name      string
+	Name string
+	// UsedPct is the window's utilization, or UnknownUsedPct when there is no
+	// trustworthy reading to show.
 	UsedPct   float64
 	ResetAt   time.Time
 	ResetNote string
 }
+
+// UnknownUsedPct marks a window with no current reading — today only a window
+// whose resets_at has already passed, whose cached number describes quota that
+// has since rolled over. Renderers show an em dash and no bar for it instead of
+// a fabricated 0%.
+const UnknownUsedPct = -1
 
 type AccountLimits struct {
 	Account int

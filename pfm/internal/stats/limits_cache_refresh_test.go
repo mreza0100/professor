@@ -26,7 +26,9 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				home := t.TempDir()
 				t.Setenv(paths.EnvHome, home)
 				now := time.Unix(1_800_000_000, 0)
-				confirmed := now.Add(-4 * time.Second)
+				// Just short of the live TTL, so the first Sample must read
+				// through the shared cache and the second, past it, refetches.
+				confirmed := now.Add(4*time.Second - LiveLimitsTTL)
 				if scenario == "future" {
 					confirmed = now.Add(time.Minute)
 				}
@@ -73,7 +75,7 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 					if hits.Load() != 0 || len(warnings) != 0 || limits[0].Windows[0].UsedPct != 54 {
 						t.Fatalf("fresh shared cache: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
 					}
-					now = now.Add(2 * time.Second)
+					now = now.Add(6 * time.Second)
 					limits, warnings = sampler.Sample(context.Background())
 				}
 				if hits.Load() != 1 || len(warnings) != 0 || len(limits[0].Windows) == 0 || limits[0].Windows[0].UsedPct != 46 {

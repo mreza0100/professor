@@ -101,10 +101,13 @@ const defaultLimitsTTL = 3 * time.Minute
 
 // LiveLimitsTTL is the picker cadence for provider-backed limits. The legacy
 // default remains deliberately longer because the prompt hook shares the
-// on-disk cache but does not use this sampler's live cadence. Claude keeps
-// this tight cadence because its fetch is the disk-cache-backed HTTP path
-// (fetchClaudeCached) — cheap at 5s.
-const LiveLimitsTTL = 5 * time.Second
+// on-disk cache but does not use this sampler's live cadence. Claude's fetch
+// is the disk-cache-backed HTTP path (fetchClaudeCached), which is cheap for
+// this box but NOT for the provider's rate limiter: at 5s both accounts were
+// 429'd (2026-09-11 — a 429 nine seconds after a successful fetch, escalating
+// to a server-sent 1h Retry-After). 60s keeps the tab live without spending
+// the account's request budget on an idle screen.
+const LiveLimitsTTL = 60 * time.Second
 
 // CodexLiveLimitsTTL is Codex's picker cadence for provider-backed limits.
 // Unlike Claude, a Codex fetch execs `codex app-server` and drives a JSON-RPC
@@ -765,8 +768,17 @@ func staleStatus(err error) string {
 	return "refresh failed; showing cached limits"
 }
 
+// reusableClaudeUsage reports whether a cached payload still describes windows
+// that exist now. A payload whose every window has passed its reset carries no
+// current quota at all, so the cache-fresh short-circuit must not serve it —
+// an active Backoff still wins, a 429 is never bypassed by this.
 func reusableClaudeUsage(usage usagehook.Usage, now time.Time) bool {
-	return len(usageWindows(usage, now)) > 0
+	for _, window := range usageWindows(usage, now) {
+		if window.ResetNote != expiredResetNote {
+			return true
+		}
+	}
+	return false
 }
 
 func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) error {
@@ -853,11 +865,32 @@ func usageWindows(usage usagehook.Usage, now time.Time) []Window {
 			continue
 		}
 		resetAt, resetNote := parseReset(source.ResetsAt)
+		usedPct := *source.Utilization
+		if resetPassed(resetAt, now) {
+			// The reading belongs to a window that has already rolled over;
+			// show the row so the account keeps its shape, but no bar and no
+			// number until a refetch lands. UnknownUsedPct is what says "no
+			// number" — a literal 0 would render as a truthful-looking
+			// "0% used".
+			usedPct, resetAt, resetNote = UnknownUsedPct, time.Time{}, expiredResetNote
+		}
 		windows = append(windows, Window{
-			Name: entry.Label, UsedPct: *source.Utilization, ResetAt: resetAt, ResetNote: resetNote,
+			Name: entry.Label, UsedPct: usedPct, ResetAt: resetAt, ResetNote: resetNote,
 		})
 	}
 	return windows
+}
+
+// expiredResetNote is the Limits tab's word for a window whose resets_at has
+// already passed — the same rule usagehook's fableWindow applies to the Fable
+// window, stated once here for 5h and 7d.
+const expiredResetNote = "reset passed · awaiting refetch"
+
+// resetPassed reports whether a parsed reset moment is in the past. A window
+// with no parsable reset (zero time) is not expired — it is merely unknown,
+// and parseReset already says so.
+func resetPassed(resetAt, now time.Time) bool {
+	return !resetAt.IsZero() && !resetAt.After(now)
 }
 
 func parseReset(value string) (time.Time, string) {

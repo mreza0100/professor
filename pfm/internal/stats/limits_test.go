@@ -1003,19 +1003,19 @@ func TestLimitsSamplerLiveTTLDoesNotExtendProviderConfirmationAge(t *testing.T) 
 	close(release)
 	waitForCachedWindow(t, sampler, 4, 10)
 
-	clock.Store(start.Add(4 * time.Second).UnixNano())
+	clock.Store(start.Add(LiveLimitsTTL - time.Second).UnixNano())
 	limits, _ := sampler.SampleLive(context.Background())
 	if got := calls.Load(); got != 1 || len(limits[0].Windows) != 2 {
-		t.Fatalf("fresh 4s read-through calls=%d limits=%#v, want cache without refresh", got, limits)
+		t.Fatalf("read-through inside the TTL calls=%d limits=%#v, want cache without refresh", got, limits)
 	}
 
-	clock.Store(start.Add(6 * time.Second).UnixNano())
+	clock.Store(start.Add(LiveLimitsTTL + time.Second).UnixNano())
 	limits, _ = sampler.SampleLive(context.Background())
 	if len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Windows[0].UsedPct != 10 {
 		t.Fatalf("stale live card=%#v, want last-good windows during refresh", limits)
 	}
 	if got := waitForLimitSignal(t, started); got != 2 {
-		t.Fatalf("expired refresh call=%d, want second provider call after 5s TTL", got)
+		t.Fatalf("expired refresh call=%d, want second provider call after the live TTL", got)
 	}
 	waitForCachedWindow(t, sampler, 4, 20)
 }
@@ -1154,11 +1154,11 @@ func TestLimitsSamplerLiveReturnsIndependentCachedValues(t *testing.T) {
 // 2026-09-08: Codex's own fetch execs `codex app-server` and drives a
 // JSON-RPC handshake over it (internal/statusline/process.go) — roughly 5
 // CPU-seconds at ~50% of a core per call — while Claude's fetch is the
-// disk-cache-backed HTTP path. Sharing LiveLimitsTTL (5s) between them
+// disk-cache-backed HTTP path. Sharing LiveLimitsTTL between them
 // respawned the Codex process about every 10s forever on an idle Limits tab
 // (devbox measurement). Claude must keep refreshing at its own 5s cadence
 // the whole time; Codex must not be re-invoked again until CodexLiveLimitsTTL
-// (90s) has actually elapsed.
+// has actually elapsed.
 func TestLimitsSamplerLiveHonorsSeparateCodexTTL(t *testing.T) {
 	var clock atomic.Int64
 	start := time.Unix(1_800_000_000, 0)
@@ -1200,14 +1200,16 @@ func TestLimitsSamplerLiveHonorsSeparateCodexTTL(t *testing.T) {
 		t.Fatalf("t=0: codex calls=%d, want 1", got)
 	}
 
-	// The picker's own result poll runs every LiveLimitsTTL (5s) while the
-	// Limits tab is being watched; step past it (6s, matching
-	// TestLimitsSamplerLiveKeepsRefreshingAcrossHours' margin) fourteen
-	// times — 84s total, still short of CodexLiveLimitsTTL (90s). Claude
-	// must refetch on every single step; Codex must not refetch on any of
-	// them.
+	// The picker polls its own results while the Limits tab is watched; step
+	// just past LiveLimitsTTL each time, for every whole step that still fits
+	// inside CodexLiveLimitsTTL. Claude must refetch on every single step;
+	// Codex must not refetch on any of them.
 	const step = LiveLimitsTTL + time.Second
-	for tick := 1; tick <= 14; tick++ {
+	ticks := int((CodexLiveLimitsTTL - time.Second) / step)
+	if ticks < 1 {
+		t.Fatalf("CodexLiveLimitsTTL=%s no longer spans a Claude poll of %s", CodexLiveLimitsTTL, step)
+	}
+	for tick := 1; tick <= ticks; tick++ {
 		clock.Store(start.Add(time.Duration(tick) * step).UnixNano())
 		sampler.SampleLive(ctx)
 		waitForCachedWindow(t, sampler, 51, float64((tick+1)%100))
@@ -1242,14 +1244,16 @@ func TestLimitsSamplerLiveKeepsRefreshingAcrossHours(t *testing.T) {
 	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
 		return liveClaudeUsage(sampler.Now(), float64(calls.Add(1)%100)), nil
 	}
-	// Model two hours of uninterrupted six-second refresh cycles. The real
-	// UI's two-second result poll checks the five-second TTL at this cadence.
-	for tick := 0; tick <= 1200; tick++ {
-		clock.Store(start.Add(time.Duration(tick) * 6 * time.Second).UnixNano())
+	// Model two hours of uninterrupted refresh cycles, one per expiry of the
+	// live TTL — the cadence at which the UI's own result poll actually
+	// reaches the provider.
+	const cycle = LiveLimitsTTL + time.Second
+	for tick := 0; tick <= int(2*time.Hour/cycle); tick++ {
+		clock.Store(start.Add(time.Duration(tick) * cycle).UnixNano())
 		sampler.SampleLive(ctx)
 		waitForCachedWindow(t, sampler, 23, float64((tick+1)%100))
 		if got := calls.Load(); got != int32(tick+1) {
-			t.Fatalf("six-second cycle %d: provider calls=%d, want %d", tick, got, tick+1)
+			t.Fatalf("refresh cycle %d: provider calls=%d, want %d", tick, got, tick+1)
 		}
 	}
 }
@@ -1747,5 +1751,104 @@ func TestLimitsSamplerTellsASignedOutAccountToLogIn(t *testing.T) {
 	}
 	if strings.Contains(limits[0].Status, "no such file or directory") {
 		t.Fatalf("status=%q, must not blame a missing file on a keychain host", limits[0].Status)
+	}
+}
+
+// TestUsageWindowsBlanksPassedResetsAndStopsCacheReuse pins the 2026-09-11
+// rule for cached quota: a window whose resets_at has already passed describes
+// a window that no longer exists. The row survives so the card keeps its
+// shape, but it carries no bar and no number — and a payload made entirely of
+// such windows is no longer reusable, so the cache-fresh short-circuit must
+// not serve it.
+func TestUsageWindowsBlanksPassedResetsAndStopsCacheReuse(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	past, future := 96.0, 40.0
+	mixed := usagehook.Usage{
+		FiveHour: usagehook.Window{Utilization: &past, ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
+		SevenDay: usagehook.Window{Utilization: &future, ResetsAt: now.Add(48 * time.Hour).Format(time.RFC3339)},
+	}
+	windows := usageWindows(mixed, now)
+	if len(windows) != 2 {
+		t.Fatalf("windows=%#v, want both rows kept", windows)
+	}
+	if windows[0].Name != "5h" || windows[0].UsedPct != UnknownUsedPct ||
+		windows[0].ResetNote != "reset passed · awaiting refetch" || !windows[0].ResetAt.IsZero() {
+		t.Fatalf("expired 5h window=%#v", windows[0])
+	}
+	if windows[1].Name != "7d" || windows[1].UsedPct != 40 || windows[1].ResetNote != "" {
+		t.Fatalf("live 7d window=%#v", windows[1])
+	}
+	if !reusableClaudeUsage(mixed, now) {
+		t.Fatal("payload with one live window was treated as unusable")
+	}
+
+	expired := usagehook.Usage{
+		FiveHour: usagehook.Window{Utilization: &past, ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
+		SevenDay: usagehook.Window{Utilization: &past, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
+	}
+	if reusableClaudeUsage(expired, now) {
+		t.Fatal("payload whose every window had passed its reset was still reusable")
+	}
+}
+
+// TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff is the same
+// rule at the sampler seam: a shared-cache record written seconds ago is still
+// worthless if every window in it has rolled over, so Sample must go to the
+// provider — except while a recorded 429 is in force, which this must never
+// bypass.
+func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T) {
+	for _, backoff := range []bool{false, true} {
+		name := "expired-windows"
+		if backoff {
+			name = "expired-windows-under-backoff"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			now := time.Unix(1_800_000_000, 0)
+			account := LimitAccount{ID: 24, Engine: pfmengine.Claude, Label: "fixture account", ConfigDir: filepath.Join(home, "claude")}
+			writeFixtureCredentials(t, account.ConfigDir)
+			// Fetched one second ago — well inside the live TTL — but every
+			// window in it reset before now.
+			fetchedAt := now.Add(-time.Second)
+			stale := 96.0
+			record := usagehook.CacheRecord{
+				Usage: usagehook.Usage{
+					FiveHour: usagehook.Window{Utilization: &stale, ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
+					SevenDay: usagehook.Window{Utilization: &stale, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
+				},
+				ConfigDir: account.ConfigDir, FetchedAt: &fetchedAt,
+			}
+			if backoff {
+				record.Backoff = &usagehook.CacheBackoff{
+					Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: fetchedAt,
+				}
+			}
+			if err := usagehook.WriteCacheRecord(usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID), record); err != nil {
+				t.Fatal(err)
+			}
+			var hits atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, usageJSONBody(46, 46, now))
+			}))
+			defer server.Close()
+			sampler := NewLimitsSampler([]LimitAccount{account})
+			sampler.TTL = LiveLimitsTTL
+			sampler.Now = func() time.Time { return now }
+			sampler.Endpoint = server.URL
+			sampler.Client = server.Client()
+			limits, _ := sampler.Sample(context.Background())
+			if backoff {
+				if hits.Load() != 0 {
+					t.Fatalf("recorded 429 was bypassed: hits=%d limits=%#v", hits.Load(), limits)
+				}
+				return
+			}
+			if hits.Load() != 1 || len(limits[0].Windows) == 0 || limits[0].Windows[0].UsedPct != 46 {
+				t.Fatalf("expired cache was served instead of refetched: hits=%d limits=%#v", hits.Load(), limits)
+			}
+		})
 	}
 }

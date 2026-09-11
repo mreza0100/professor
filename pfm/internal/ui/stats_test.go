@@ -844,3 +844,42 @@ func ansiForeground(hex string) string {
 	}
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", red, green, blue)
 }
+
+// TestLimitsTabRendersPassedResetNoteInsteadOfStaleBar is the render half of
+// the 2026-09-11 expiry rule: stats.usageWindows hands the tab a row with no
+// percentage and the "reset passed" note, and the card must say so rather than
+// draw a bar for a window that has already rolled over.
+func TestLimitsTabRendersPassedResetNoteInsteadOfStaleBar(t *testing.T) {
+	model := NewModel(fixtureSnapshot(120))
+	model.tab = TabLimits
+	now := time.Unix(0, model.nowNS)
+	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{{
+		Account: 1, Emoji: "🥇", Engine: pfmengine.Claude,
+		Windows: []pfmstats.Window{
+			{Name: "5h", UsedPct: pfmstats.UnknownUsedPct, ResetNote: "reset passed · awaiting refetch"},
+			{Name: "7d", UsedPct: 61, ResetAt: now.Add(3 * 24 * time.Hour)},
+		},
+	}}}
+	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
+	if !strings.Contains(plain, "↻ reset passed · awaiting refetch") {
+		t.Fatalf("expired 5h row lost its note:\n%s", plain)
+	}
+	// An em dash and no bar — never "0% used", which reads as a real,
+	// freshly-reset measurement, and never a drawn bar.
+	if !strings.Contains(plain, "—") || strings.Contains(plain, "0% used") {
+		t.Fatalf("expired 5h row did not render an em dash without a number:\n%s", plain)
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "5h") && (strings.Contains(line, "▕") || strings.Contains(line, "░")) {
+			t.Fatalf("expired 5h row still drew a bar: %q", line)
+		}
+	}
+	for _, unwanted := range []string{"96%", "FULL"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expired window still rendered a stale reading %q:\n%s", unwanted, plain)
+		}
+	}
+	if !strings.Contains(plain, "61%") {
+		t.Fatalf("live 7d row was dropped with the expired one:\n%s", plain)
+	}
+}

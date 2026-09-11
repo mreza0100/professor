@@ -607,7 +607,15 @@ func renderLimitWindowMode(now time.Time, window pfmstats.Window, innerWidth int
 	name := fmt.Sprintf("%-*s", nameWidth, clipRunes(cleanField(window.Name), nameWidth))
 	bar := limitBar(window.UsedPct, barWidth)
 	percent := fmt.Sprintf("%.0f%% used", window.UsedPct)
-	if remaining {
+	switch {
+	case window.UsedPct < 0:
+		// pfmstats.UnknownUsedPct — no trustworthy reading (an expired window
+		// awaiting its refetch). Blank the bar's columns so the rows stay
+		// aligned and print an em dash where the number would be; the reset
+		// note carries the explanation.
+		bar = strings.Repeat(" ", lipgloss.Width(bar))
+		percent = "—"
+	case remaining:
 		left := 100 - math.Max(0, math.Min(100, window.UsedPct))
 		bar = renderLimitBar(left, window.UsedPct, barWidth, false)
 		percent = fmt.Sprintf("%.0f%% left", left)
