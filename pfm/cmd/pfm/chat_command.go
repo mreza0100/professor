@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/kill"
@@ -482,6 +483,9 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 }
 
 func renameChatWindow(ctx context.Context, socket, target, name string) error {
+	// Every window-name writer clips through WindowNameFor, or the writers
+	// rename the window back and forth (see its doc).
+	name = gather.WindowNameFor(name)
 	socketPath, err := chatSocketPath(socket)
 	if err != nil {
 		return err

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "hostops/pfm/internal/config"
 )
 
 // The shim is the third place the title options are applied, and it must obey
@@ -54,18 +56,36 @@ func runCxServerWithFakePfm(t *testing.T, pfmScript string) (calls string, stder
 	return string(body), errorOutput.String()
 }
 
-const titlesLineProtocol = `#!/bin/sh
-case "$1:$2" in
-  internal:tmux-titles) printf '%s\n' 'set-titles on' 'set-titles-string ⬢ #{window_name} · #{pane_title}' ;;
-  *) exit 0 ;;
-esac
-`
+// titlesLineProtocol builds the fake `pfm internal tmux-titles` script from
+// the SAME constant the real binary prints (pfmconfig.TmuxTitlesString),
+// never a copied literal — a hand-copied spelling here is exactly how this
+// test would stop noticing a future drift between the shim and the constant.
+// The value is embedded inside a single-quoted printf argument, so a
+// constant that ever grew a single quote would break the fixture's own
+// quoting rather than the shim under test; guard that assumption outright
+// instead of producing a confusing shell syntax error.
+func titlesLineProtocol(t *testing.T) string {
+	t.Helper()
+	if strings.ContainsRune(pfmconfig.TmuxTitlesString, '\'') {
+		t.Fatalf(
+			"pfmconfig.TmuxTitlesString contains a single quote, which breaks "+
+				"this fixture's single-quoted embedding: %q",
+			pfmconfig.TmuxTitlesString,
+		)
+	}
+	return "#!/bin/sh\n" +
+		"case \"$1:$2\" in\n" +
+		"  internal:tmux-titles) printf '%s\\n' 'set-titles on' 'set-titles-string " +
+		pfmconfig.TmuxTitlesString + "' ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
+}
 
 func TestShimAppliesTheTitleOptionsPfmPrints(t *testing.T) {
-	calls, _ := runCxServerWithFakePfm(t, titlesLineProtocol)
+	calls, _ := runCxServerWithFakePfm(t, titlesLineProtocol(t))
 	for _, want := range []string{
 		"-L probe-shim-sock set -g set-titles on",
-		"-L probe-shim-sock set -g set-titles-string ⬢ #{window_name} · #{pane_title}",
+		"-L probe-shim-sock set -g set-titles-string " + pfmconfig.TmuxTitlesString,
 		"-L probe-shim-sock setw -g automatic-rename off",
 	} {
 		if !strings.Contains(calls, want) {
