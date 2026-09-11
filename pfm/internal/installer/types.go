@@ -76,8 +76,12 @@ type Options struct {
 	// Empty preserves an existing marker when install is invoked elsewhere.
 	SourceRepo string
 	Now        func() time.Time
-	Stdout     io.Writer
-	Runner     CommandRunner
+	// Sleep paces the installer's own waits — today the poll that lets a
+	// launchd teardown finish before the job is bootstrapped again. Tests
+	// supply a no-op so a bounded wait costs them nothing.
+	Sleep  func(time.Duration)
+	Stdout io.Writer
+	Runner CommandRunner
 
 	MCPEnabled    map[string]bool
 	MCPPort       int
@@ -165,6 +169,9 @@ func normalize(options Options) (Options, error) {
 	}
 	if options.Now == nil {
 		options.Now = time.Now
+	}
+	if options.Sleep == nil {
+		options.Sleep = time.Sleep
 	}
 	if options.Stdout == nil {
 		options.Stdout = io.Discard

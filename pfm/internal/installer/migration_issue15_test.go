@@ -8,27 +8,62 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-type bootstrapFailureRunner struct{ calls []string }
+// bootstrapFailureRunner models launchd's real shape: `print` answers for a
+// loaded label and stops answering once the job has been booted out, and
+// `bootstrap` fails the way it does when it cannot take the label back.
+type bootstrapFailureRunner struct {
+	calls     []string
+	bootedOut bool
+}
 
 func (r *bootstrapFailureRunner) Run(_ context.Context, name string, args ...string) error {
 	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
-	if len(args) > 0 && args[0] == "bootstrap" {
+	if len(args) == 0 {
+		return nil
+	}
+	switch args[0] {
+	case "bootout":
+		r.bootedOut = true
+		return nil
+	case "print":
+		if r.bootedOut {
+			return errors.New("could not find service")
+		}
+		return nil
+	case "bootstrap":
 		return errors.New("bootstrap exit status 5")
 	}
 	return nil
 }
 
-func TestLaunchAgentBootstrapFailureStopsInstall(t *testing.T) {
+// A bootstrap that fails AFTER the running job was stopped has left the host
+// with the service DOWN. That must not read like a plain "not loaded": it is
+// the one outcome where the installer made things worse, and the operator
+// needs the command that puts it back.
+func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) {
 	runner := &bootstrapFailureRunner{}
-	installer := engine{options: Options{Runner: runner, Stdout: io.Discard}, apply: true}
-	err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel)
+	installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
+	err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, true)
 	if err == nil || !strings.Contains(err.Error(), "bootstrap") {
 		t.Fatalf("bootstrap failure=%v, want actionable error", err)
 	}
-	if len(runner.calls) != 2 || !strings.Contains(runner.calls[0], "bootout") {
-		t.Fatalf("calls=%q", runner.calls)
+	if !strings.Contains(err.Error(), "DOWN") || !strings.Contains(err.Error(), "launchctl bootstrap gui/") {
+		t.Fatalf("error must say the service is down and how to restart it, got %v", err)
+	}
+	var sawBootout, sawBootstrap bool
+	for _, call := range runner.calls {
+		if strings.Contains(call, "bootout") {
+			sawBootout = true
+		}
+		if strings.Contains(call, "bootstrap") {
+			sawBootstrap = true
+		}
+	}
+	if !sawBootout || !sawBootstrap {
+		t.Fatalf("calls=%q, want both a bootout and a bootstrap", runner.calls)
 	}
 }
 

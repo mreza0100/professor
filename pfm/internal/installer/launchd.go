@@ -9,6 +9,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+)
+
+// launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
+// that rides out a teardown still in flight — ~2s total, bounded so a genuinely
+// unloadable job reports instead of hanging the install.
+const (
+	launchdBootstrapAttempts      = 20
+	launchdBootstrapRetryInterval = 100 * time.Millisecond
 )
 
 // launchdLabel is the job's name, and the handle launchctl addresses it by.
@@ -60,6 +69,7 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 	}
 	installer.say("  %s", nameSyncScheduleSummary(installer.options))
 
+	plistChanged := false
 	if sameFile(path, wanted, 0o644) {
 		installer.ok(path)
 	} else {
@@ -74,12 +84,13 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
+		plistChanged = true
 	}
 	if !installer.apply {
 		installer.say("")
 		return nil
 	}
-	return installer.reloadLaunchAgent(ctx, path)
+	return installer.reloadLaunchAgent(ctx, path, plistChanged)
 }
 
 func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
@@ -101,6 +112,7 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 		return fmt.Errorf("read embedded MCP launch agent: %w", err)
 	}
 	wanted := []byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home))
+	plistChanged := false
 	if !sameFile(path, wanted, 0o644) {
 		if err := installer.change("write "+path, func() error {
 			if _, statErr := os.Lstat(path); statErr == nil {
@@ -112,28 +124,55 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
+		plistChanged = true
 	} else {
 		installer.ok(path)
 	}
 	if !installer.apply {
 		return nil
 	}
-	return installer.reloadLaunchAgentWithLabel(ctx, path, mcpLaunchdLabel)
+	return installer.reloadLaunchAgentWithLabel(ctx, path, mcpLaunchdLabel, plistChanged)
 }
 
 // reloadLaunchAgent re-registers the job so an edited plist takes effect.
-//
-// bootout before bootstrap is deliberate and its failure is ignored: launchd
-// rejects bootstrapping a label it already knows, and on a first install there
-// is nothing to boot out. Only the bootstrap verdict is reported.
-func (installer *engine) reloadLaunchAgent(ctx context.Context, path string) error {
-	return installer.reloadLaunchAgentWithLabel(ctx, path, launchdLabel)
+func (installer *engine) reloadLaunchAgent(ctx context.Context, path string, plistChanged bool) error {
+	return installer.reloadLaunchAgentWithLabel(ctx, path, launchdLabel, plistChanged)
 }
 
-func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, label string) error {
+// reloadLaunchAgentWithLabel re-registers a job ONLY when re-registering can
+// change something.
+//
+// bootout STOPS the running job. A loaded service whose plist did not move
+// gains nothing from a reload and loses every client it was serving, so an
+// ordinary install leaves it alone — the difference between an install that
+// reconciles files and one that restarts the user's daemons as a side effect.
+//
+// When the plist DID move, the job is stopped and re-registered, with the
+// bootstrap retried while launchd finishes the teardown (bootstrapWithRetry).
+// A bootstrap that fails after the job was stopped says so in its own words:
+// that is the one outcome where the installer left the host worse than it
+// found it, and it must never read like a plain "not loaded".
+func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, label string, plistChanged bool) error {
 	domain := "gui/" + strconv.Itoa(os.Getuid())
-	_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+label)
-	if err := installer.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, path); err != nil {
+	loaded := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label) == nil
+	if loaded && !plistChanged {
+		installer.ok("launchctl " + label + " already loaded, plist unchanged — left running")
+		installer.say("")
+		return nil
+	}
+	if loaded {
+		// Best effort: a job already gone reports failure here for exactly the
+		// state we want, so its exit status decides nothing. The bootstrap
+		// retry below is what actually establishes the outcome.
+		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+label)
+	}
+	if err := installer.bootstrapWithRetry(ctx, domain, path, label); err != nil {
+		if loaded {
+			return fmt.Errorf(
+				"launchctl bootstrap %s failed AFTER its running job was stopped to load the new plist; the agent file is installed and the service is now DOWN — restart it with `launchctl bootstrap %s %s`: %w",
+				label, domain, path, err,
+			)
+		}
 		return fmt.Errorf("launchctl bootstrap %s failed; agent file is installed but service is not loaded: %w", label, err)
 	}
 	if err := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label); err != nil {
@@ -142,6 +181,39 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 	installer.ok("launchctl bootstrap " + label)
 	installer.say("")
 	return nil
+}
+
+// pause waits, through the Options seam when one was supplied. Options is
+// documented as directly constructible, so a nil Sleep is a legitimate caller
+// state rather than a bug — it falls back rather than panicking.
+func (installer *engine) pause(d time.Duration) {
+	if installer.options.Sleep != nil {
+		installer.options.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// bootstrapWithRetry re-registers the job, retrying while launchd finishes a
+// teardown that bootout only REQUESTED.
+//
+// `launchctl bootout` returns as soon as the request is accepted, not when the
+// label is gone, so an immediate bootstrap can fail with EIO against a label
+// still on its way out. That is the failure that left a stopped daemon with
+// nothing to restart it. Retrying the bootstrap closes the window without
+// asking anyone to predict how long a teardown takes, and it costs a healthy
+// host nothing: the first attempt succeeds and no wait is ever taken.
+func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, label string) error {
+	var err error
+	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
+		if attempt > 0 {
+			installer.pause(launchdBootstrapRetryInterval)
+		}
+		if err = installer.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // unwireLaunchAgent removes the agent and unloads it.
