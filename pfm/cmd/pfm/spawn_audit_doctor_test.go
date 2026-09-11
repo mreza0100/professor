@@ -25,7 +25,8 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 		{
 			name: "professor prompt file in argv",
 			observation: spawnObservation{
-				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
+				Argv: []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
+					"--settings", `{"outputStyle":"default"}`},
 				Environ:     map[string]string{},
 				StartedUnix: layer + 60,
 			},
@@ -35,12 +36,82 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 		{
 			name: "lean arm in the environment",
 			observation: spawnObservation{
-				Argv:        []string{"claude"},
+				Argv:        []string{"claude", "--settings", `{"outputStyle":"default"}`},
 				Environ:     map[string]string{"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": "1"},
 				StartedUnix: layer + 60,
 			},
 			want:       spawnInjected,
 			wantReason: "lean prompt armed",
+		},
+		{
+			// The staged prompt without the settings flag double-applies a
+			// persona — Claude Code's own output style still runs on top of
+			// it — so this is its own violation, distinct from injecting
+			// nothing at all.
+			name: "professor prompt file without the settings flag",
+			observation: spawnObservation{
+				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
+				Environ:     map[string]string{},
+				StartedUnix: layer + 60,
+			},
+			want:       spawnViolation,
+			wantReason: "missing --settings",
+		},
+		{
+			// Same missing-settings argv, but this seat was born well BEFORE
+			// the prompt layer was staged: it carries the argv of the pfm
+			// that launched it and predates the --settings flag exactly as it
+			// predates the prompt itself. A reload fixes it, not a bug hunt —
+			// this is the exact defect the fix closes (it used to return
+			// VIOLATION unconditionally here regardless of age).
+			name: "professor prompt file without the settings flag, seat older than the layer",
+			observation: spawnObservation{
+				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
+				Environ:     map[string]string{},
+				StartedUnix: layer - 3600,
+			},
+			want:       spawnPredatesLayer,
+			wantReason: "reload to carry it",
+		},
+		{
+			// Missing settings AND no usable age signal (StartedUnix unknown):
+			// an unreadable age must never read as "old and therefore
+			// forgiven" — it must still be a violation.
+			name: "professor prompt file without the settings flag, unknown start time",
+			observation: spawnObservation{
+				Argv:    []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
+				Environ: map[string]string{},
+			},
+			want:       spawnViolation,
+			wantReason: "missing --settings",
+		},
+		{
+			// A correctly-flagged seat (prompt file AND --settings) is never
+			// downgraded by age: even one born well before the layer stamp
+			// still classifies as INJECTED, never predates-layer or a
+			// violation.
+			name: "professor prompt file with the settings flag, seat older than the layer",
+			observation: spawnObservation{
+				Argv: []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
+					"--settings", `{"outputStyle":"default"}`},
+				Environ:     map[string]string{},
+				StartedUnix: layer - 3600,
+			},
+			want:       spawnInjected,
+			wantReason: "--system-prompt-file",
+		},
+		{
+			// Missing settings, a real (old) start time, but the layer stamp
+			// itself is unavailable on this host (0): an unusable stamp must
+			// also never read as "old and therefore forgiven".
+			name: "professor prompt file without the settings flag, no layer stamp available",
+			observation: spawnObservation{
+				Argv:        []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md"},
+				Environ:     map[string]string{},
+				StartedUnix: layer - 3600,
+			},
+			want:       spawnViolation,
+			wantReason: "missing --settings",
 		},
 		{
 			name: "flagless chat older than the layer",
@@ -98,7 +169,8 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			stamp := layer
-			if testCase.name == "no layer stamp leaves the argv verdict standing" {
+			if testCase.name == "no layer stamp leaves the argv verdict standing" ||
+				testCase.name == "professor prompt file without the settings flag, no layer stamp available" {
 				stamp = 0
 			}
 			verdict, reason := classifySpawn(testCase.observation, stamp)

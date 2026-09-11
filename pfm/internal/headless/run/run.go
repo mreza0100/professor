@@ -610,6 +610,17 @@ func arguments(request Request) ([]string, error) {
 		return nil, fmt.Errorf("engine %s does not support headless runs", request.Engine)
 	}
 	args = append(args, request.Args...)
+	// LaunchArgs carries the argv words every launch of this engine must
+	// carry — for Claude, --settings {"outputStyle":"default"}. A headless run
+	// is a door of its own (it never renders through action.ClaudeSpawn), so
+	// it disables Claude Code's own output style too, the same as every other
+	// Claude launch. Read off the descriptor the way setEnvironment reads
+	// LaunchEnv, never gated on one engine id: an engine that gains LaunchArgs
+	// later must reach this door without editing it. The switch above has
+	// already refused every unregistered engine. These trail the caller's own
+	// Args so a caller-supplied --output-format (harvest's ask adapter passes
+	// its own) stays adjacent to the flags that came with it.
+	args = append(args, pfmengine.MustLookup(request.Engine).LaunchArgs...)
 	return args, nil
 }
 

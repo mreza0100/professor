@@ -144,6 +144,10 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
+	for _, argument := range pfmengine.MustLookup(pfmengine.Claude).LaunchArgs {
+		command.WriteByte(' ')
+		command.WriteString(Quote(argument))
+	}
 	if spawn.Model != "" {
 		command.WriteString(" --model ")
 		command.WriteString(Quote(spawn.Model))
@@ -208,8 +212,9 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 // argv is the executable's argument list — the unquoted twin of the tail
 // ShellCommand builds, in the same order.
 func (spawn ClaudeSpawn) argv(prefs pfmconfig.ClaudePrefs) []string {
-	argv := make([]string, 0, len(spawn.Args)+6)
+	argv := make([]string, 0, len(spawn.Args)+8)
 	argv = append(argv, spawn.Args...)
+	argv = append(argv, pfmengine.MustLookup(pfmengine.Claude).LaunchArgs...)
 	if spawn.Model != "" {
 		argv = append(argv, "--model", spawn.Model)
 	}

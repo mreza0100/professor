@@ -11,6 +11,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 func TestQuoteRoundTripsHostileWords(t *testing.T) {
@@ -71,12 +72,14 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	if !strings.HasPrefix(plan.Run, wantPrefix) {
 		t.Fatalf("resume run = %q, want prefix %q", plan.Run, wantPrefix)
 	}
-	// A resumed chat keeps full autonomy, on every account.
+	// A resumed chat keeps full autonomy, on every account, and always
+	// disables Claude Code's own output style so the staged prompt is the
+	// only persona layer.
 	if !strings.Contains(
 		plan.Run,
-		"claude '--resume' "+Quote(id)+" "+autonomyFlags,
+		"claude '--resume' "+Quote(id)+" '--settings' "+Quote(pfmengine.OutputStyleDefaultSettings)+" "+autonomyFlags,
 	) {
-		t.Fatalf("resume run missed the autonomy flags: %q", plan.Run)
+		t.Fatalf("resume run missed the settings flag or autonomy flags: %q", plan.Run)
 	}
 	for _, name := range []string{
 		"CLAUDE_CODE_SESSION_ID",
@@ -116,6 +119,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	for _, want := range []string{
 		"CLAUDE_CONFIG_DIR='/home/test/.cc/2'",
 		"FORCE_PROMPT_CACHING_5M=1",
+		"'--settings' " + Quote(pfmengine.OutputStyleDefaultSettings),
 		autonomyFlags,
 	} {
 		if !strings.Contains(plan.Run, want) {
@@ -326,7 +330,7 @@ exit 2
 		t.Fatal(err)
 	}
 	want := strings.Join([]string{
-		"argv=--resume " + id + " " + autonomyFlags,
+		"argv=--resume " + id + " --settings " + pfmengine.OutputStyleDefaultSettings + " " + autonomyFlags,
 		"sid=unset",
 		"code=unset",
 		"cfg=/home/test/.cc/2",

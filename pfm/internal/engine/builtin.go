@@ -2,6 +2,12 @@ package engine
 
 import "path/filepath"
 
+// OutputStyleDefaultSettings is the --settings payload every Claude launch
+// carries to disable Claude Code's own output style. Claude Code has no
+// "none" style; the built-in "default" style appends nothing, so naming it
+// is the off switch — see Claude's LaunchArgs below for why.
+const OutputStyleDefaultSettings = `{"outputStyle":"default"}`
+
 func init() {
 	Register(Descriptor{
 		ID: Claude, Name: "Claude Code", Short: "Claude", LongName: "claude",
@@ -14,7 +20,16 @@ func init() {
 		// CLI accepts any digits-only integer >= 1 with no ceiling, and a
 		// malformed value silently reverts to 200 — so this is the largest
 		// integer JavaScript holds exactly, spelled as plain digits.
-		LaunchEnv:    []string{"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991"},
+		LaunchEnv: []string{"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991"},
+		// pfm stages its own system prompt (--system-prompt-file); Claude
+		// Code's own output style (a project or user "outputStyle" setting,
+		// e.g. a checked-in .claude/settings.json) would otherwise apply a
+		// second persona on top of it. Claude Code has no "none" style —
+		// the built-in "default" style appends nothing, so naming it via
+		// --settings is the off switch. --settings on the command line
+		// outranks project and user settings files, so this wins regardless
+		// of what a project or account has configured.
+		LaunchArgs:   []string{"--settings", OutputStyleDefaultSettings},
 		RootEnv:      "PFM_CLAUDE_ROOTS",
 		DefaultRoots: claudeDefaultRoots,
 	})

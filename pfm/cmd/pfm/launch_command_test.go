@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
@@ -199,7 +201,7 @@ exit 3
 	}
 	for _, want := range []string{
 		"tmux=" + socket,
-		"argv=--resume fixture-id --dangerously-skip-permissions",
+		"argv=--resume fixture-id --dangerously-skip-permissions --settings " + pfmengine.OutputStyleDefaultSettings,
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=1", "sid=unset", "child=unset", "endpoint=unset",
 	} {

@@ -57,20 +57,46 @@ type spawnObservation struct {
 // outcomes are indistinguishable without it: "old chat" and "broken spawn
 // site" look identical in argv.
 func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVerdict, string) {
+	promptReason := ""
 	for _, argument := range observation.Argv {
 		if argument == "--system-prompt-file" ||
 			strings.HasPrefix(argument, "--system-prompt-file=") {
-			return spawnInjected, "argv carries --system-prompt-file"
+			promptReason = "argv carries --system-prompt-file"
+			break
 		}
 	}
-	if observation.Environ["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] == "1" {
-		return spawnInjected, "lean prompt armed in the process environment"
+	if promptReason == "" && observation.Environ["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] == "1" {
+		promptReason = "lean prompt armed in the process environment"
 	}
-	if observation.StartedUnix > 0 && layerStampUnix > 0 &&
-		observation.StartedUnix < layerStampUnix {
+	if promptReason != "" {
+		// The staged prompt is meant to be the ONLY persona layer. A launch
+		// carrying it without also disabling Claude Code's own output style
+		// still double-applies a persona — the exact defect this flag exists
+		// to close — so it is reported as its own outcome, distinct from a
+		// spawn site that injected nothing at all.
+		if !argvCarriesOutputStyleDefault(observation.Argv) {
+			// ...but only a seat born AFTER the layer was staged can be
+			// blamed on a spawn site. An older chat carries the argv of the
+			// pfm that launched it, and predates this flag exactly as a
+			// flagless chat predates the prompt itself — a reload is the fix,
+			// not a bug hunt. Skipping this check would accuse every live
+			// seat on the host the moment the flag ships.
+			if age, older := predatesLayer(observation, layerStampUnix); older {
+				return spawnPredatesLayer, fmt.Sprintf(
+					"%s but argv is missing --settings %s, and the process started %s before the prompt layer was staged — reload to carry it",
+					promptReason, pfmengine.OutputStyleDefaultSettings, age,
+				)
+			}
+			return spawnViolation, fmt.Sprintf(
+				"%s but argv is missing --settings %s — Claude Code's own output style can still double-apply on top of it",
+				promptReason, pfmengine.OutputStyleDefaultSettings,
+			)
+		}
+		return spawnInjected, promptReason
+	}
+	if age, older := predatesLayer(observation, layerStampUnix); older {
 		return spawnPredatesLayer, fmt.Sprintf(
-			"process started %s before the prompt layer was staged",
-			time.Duration(layerStampUnix-observation.StartedUnix)*time.Second,
+			"process started %s before the prompt layer was staged", age,
 		)
 	}
 	for _, argument := range observation.Argv {
@@ -89,6 +115,37 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 		)
 	}
 	return spawnViolation, "fresh launch with no prompt material — some spawn site bypassed the door"
+}
+
+// predatesLayer reports how long before the staged prompt layer this process
+// was born, and whether the age signal decided anything at all. A missing
+// birth time or a missing stamp (either one 0) leaves age unusable: the
+// caller must then fall through to a signal it can actually read, never treat
+// an unreadable age as "not old".
+func predatesLayer(observation spawnObservation, layerStampUnix int64) (time.Duration, bool) {
+	if observation.StartedUnix <= 0 || layerStampUnix <= 0 ||
+		observation.StartedUnix >= layerStampUnix {
+		return 0, false
+	}
+	return time.Duration(layerStampUnix-observation.StartedUnix) * time.Second, true
+}
+
+// argvCarriesOutputStyleDefault reports whether argv disables Claude Code's
+// own output style the way every fleet spawn door does: `--settings
+// {"outputStyle":"default"}`, as one word pair or as `--settings=<json>`.
+func argvCarriesOutputStyleDefault(argv []string) bool {
+	for index, argument := range argv {
+		if argument == "--settings" {
+			if index+1 < len(argv) && argv[index+1] == pfmengine.OutputStyleDefaultSettings {
+				return true
+			}
+			continue
+		}
+		if value, found := strings.CutPrefix(argument, "--settings="); found && value == pfmengine.OutputStyleDefaultSettings {
+			return true
+		}
+	}
+	return false
 }
 
 // printSpawnAuditDoctor audits every live Claude chat against the configured

@@ -39,6 +39,7 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 		" CLAUDE_CONFIG_DIR='/home/tester/.cc/2' FORCE_PROMPT_CACHING_5M=1" +
 		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
 		" claude '--name' '_KILL worker 3' 'audit the firewall rules'" +
+		" '--settings' " + Quote(pfmengine.OutputStyleDefaultSettings) +
 		" --allow-dangerously-skip-permissions --dangerously-skip-permissions"
 	if plan.Run != want {
 		t.Fatalf("run command\n got: %s\nwant: %s", plan.Run, want)
