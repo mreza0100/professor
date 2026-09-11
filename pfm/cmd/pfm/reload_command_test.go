@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/reload"
 	"hostops/pfm/internal/resolve"
 )
@@ -46,6 +47,85 @@ func TestReloadUsageIsCanonicalAndSwapIsNotMentioned(t *testing.T) {
 func TestReloadAcceptsBareSameAccountRequest(t *testing.T) {
 	if err := validateReloadArgs(nil); err != nil {
 		t.Fatalf("bare reload rejected: %v", err)
+	}
+}
+
+// TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami is the fix for
+// the detached-worker bug: the scheduler in runChatReloadWithRuntime resolves
+// the caller's pane once, while it still has ancestry or $TMUX to walk, and
+// hands it to the worker via --pane. The worker must select THAT pane out of
+// a multi-pane server directly — never fall through to resolve.NewWhoami,
+// which a Setsid-detached, reparented worker cannot answer (no $TMUX, no
+// tmux ancestor). TMUX/TMUX_PANE are cleared here so a wrongly-taken Whoami
+// fallback would fail loudly instead of quietly picking up the test binary's
+// own environment.
+func TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	panes := []reload.Pane{
+		{ID: "%1", PID: 11, CurrentPath: "/one"},
+		{ID: "%2", PID: 22, CurrentPath: "/two"},
+		{ID: "%3", PID: 33, CurrentPath: "/three"},
+	}
+	var stderr bytes.Buffer
+	socket, pane, state, code := reloadTarget(
+		context.Background(), "/jail/tmux/cc-multi", "%2",
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+	)
+	if code != 0 || socket != "/jail/tmux/cc-multi" || pane != "%2" || state.PID != 22 {
+		t.Fatalf(
+			"reload target=(%q,%q,%+v,%d), want the requested pane among the multi-pane server; stderr=%q",
+			socket, pane, state, code, stderr.String(),
+		)
+	}
+}
+
+// TestReloadTargetWithPaneRejectsAPaneThatIsNotLive covers the flip side: a
+// --pane the resolved server no longer carries (the seat closed between the
+// scheduler's own resolution and the worker running) is a named error, not a
+// silent fall-back to "pick something".
+func TestReloadTargetWithPaneRejectsAPaneThatIsNotLive(t *testing.T) {
+	panes := []reload.Pane{{ID: "%1", PID: 11, CurrentPath: "/one"}}
+	var stderr bytes.Buffer
+	_, _, _, code := reloadTarget(
+		context.Background(), "/jail/tmux/cc-gone", "%9",
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+	)
+	if code == 0 || !strings.Contains(stderr.String(), "pane %9 is not live on /jail/tmux/cc-gone") {
+		t.Fatalf("reload target with a dead pane code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+// TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule pins the existing
+// contract for the CALLER-facing form of --sock (no --pane, e.g. `pfm chat
+// reload --sock X` typed by a human, or the top-level scheduler call before
+// it has resolved a pane of its own): a multi-pane server is still ambiguous
+// and still refused, exactly as before --pane existed.
+func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
+	panes := []reload.Pane{
+		{ID: "%1", PID: 11, CurrentPath: "/one"},
+		{ID: "%2", PID: 22, CurrentPath: "/two"},
+	}
+	var stderr bytes.Buffer
+	_, _, _, code := reloadTarget(
+		context.Background(), "/jail/tmux/cc-multi", "",
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+	)
+	if code == 0 || !strings.Contains(stderr.String(), "multiple panes") {
+		t.Fatalf("reload target with --sock only and multiple panes code=%d stderr=%q, want the multi-pane refusal", code, stderr.String())
+	}
+
+	single := []reload.Pane{{ID: "%7", PID: 77, CurrentPath: "/solo"}}
+	stderr.Reset()
+	socket, pane, state, code := reloadTarget(
+		context.Background(), "/jail/tmux/cc-solo", "",
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: single}, &stderr,
+	)
+	if code != 0 || socket != "/jail/tmux/cc-solo" || pane != "%7" || state.PID != 77 {
+		t.Fatalf(
+			"reload target with --sock only and one pane=(%q,%q,%+v,%d), want it auto-selected; stderr=%q",
+			socket, pane, state, code, stderr.String(),
+		)
 	}
 }
 

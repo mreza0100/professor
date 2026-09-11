@@ -163,6 +163,70 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	}
 }
 
+// TestChatReloadHandsTheWorkerAnExplicitSockAndPane is the regression for the
+// detached-worker identity bug: a caller with NO --sock of its own is found
+// through ambient tmux identity ($TMUX / $TMUX_PANE, exactly like a real chat
+// running inside tmux). The scheduler must hand the worker that resolved
+// (socket, pane) explicitly via --sock/--pane — a Setsid-detached worker,
+// reparented off any tmux ancestor, has neither $TMUX nor a process chain
+// left to re-derive it from (this is the couldn't-identify-this-chat bug a
+// bg-spare-served chat hit in production).
+func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, `{
+  "version": 1,
+  "accounts": [
+    {"id": 1, "configDir": "`+filepath.Join(root, "account-1")+`"},
+    {"id": 2, "configDir": "`+filepath.Join(root, "account-2")+`"}
+  ]
+}`)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	socket := probeReloadSocket(t, "ambient")
+	server := exec.Command(
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
+		"sleep 120",
+	)
+	server.Env = append(server.Environ(), "TMUX=")
+	if output, err := server.CombinedOutput(); err != nil {
+		t.Fatalf("start probe socket: %v: %s", err, output)
+	}
+	cleanupProbeReloadSocket(t, socket)
+	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatalf("read probe pane: %v", err)
+	}
+	pane := strings.TrimSpace(string(paneOutput))
+
+	// The calling chat is identified AMBIENTLY here, exactly as a real caller
+	// inside tmux is: $TMUX names the socket, $TMUX_PANE names the pane, and
+	// no --sock is typed on the command line.
+	t.Setenv("TMUX", socket+",1,0")
+	t.Setenv("TMUX_PANE", pane)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "")
+
+	old := startReloadWorker
+	t.Cleanup(func() { startReloadWorker = old })
+	var workerArgs []string
+	startReloadWorker = func(command *exec.Cmd) error {
+		workerArgs = append([]string(nil), command.Args...)
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", configPath, "chat", "reload", "2", "--1h", "on"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("schedule rc=%d stderr=%q", code, stderr.String())
+	}
+	joined := strings.Join(workerArgs, "\x00")
+	if !strings.Contains(joined, "\x00--sock\x00"+socket+"\x00") {
+		t.Fatalf("worker argv missing the resolved --sock %s: %q", socket, workerArgs)
+	}
+	if !strings.HasSuffix(joined, "\x00--pane\x00"+pane) {
+		t.Fatalf("worker argv missing the resolved --pane %s: %q", pane, workerArgs)
+	}
+}
+
 // reloadPromptFixture is a raw-tty pane the worker can actually /exit and
 // respawn: it echoes every typed byte itself (like injectCLIUI in
 // inject_cli_jail_test.go) so capture-pane sees a live "❯ …" composer line,

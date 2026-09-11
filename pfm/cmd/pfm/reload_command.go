@@ -123,8 +123,14 @@ func runChatReloadWithRuntime(
 	}
 	resolved := runtime.Paths
 	tmux := reloadCommandTmux{}
-	socketPath, _, _, code := reloadTarget(
-		context.Background(), reloadSocketArgument(args), resolved, runtime, tmux, stderr,
+	callerSock := reloadSocketArgument(args)
+	// The scheduler resolves the target ONCE, here, while it still has a live
+	// tmux ancestor (or $TMUX) to walk. The worker below runs Setsid-detached
+	// with no such ancestor — reparented to init, invisible to
+	// resolve.NewWhoami's process walk — so the answer this call already has
+	// must be handed to the worker explicitly, never re-derived.
+	socketPath, pane, _, code := reloadTarget(
+		context.Background(), callerSock, "", resolved, runtime, tmux, stderr,
 	)
 	if code != 0 {
 		return code
@@ -159,6 +165,17 @@ func runChatReloadWithRuntime(
 	}()
 	workerArgs := []string{"--config", runtime.Config.Path, "internal", "reload-run"}
 	workerArgs = append(workerArgs, args...)
+	if callerSock == "" {
+		// The caller identified itself ambiently (no --sock of its own); hand
+		// the worker the absolute socket this scheduler just resolved, so the
+		// detached worker never has to re-run identity resolution to find it.
+		workerArgs = append(workerArgs, "--sock", socketPath)
+	}
+	// --pane always travels with the worker, whether or not the caller passed
+	// --sock: a caller-supplied --sock alone can still name a multi-pane
+	// server, and only THIS scheduler — with its live ancestry or $TMUX — knew
+	// which of those panes was actually asking.
+	workerArgs = append(workerArgs, "--pane", pane)
 	command := exec.Command(os.Args[0], workerArgs...)
 	command.Stdin = null
 	command.Stdout = log
@@ -190,7 +207,7 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
 	}
-	var account, cacheOverride, sock, then string
+	var account, cacheOverride, sock, requestedPane, then string
 	fresh := false
 	hide := false
 	for index := 0; index < len(args); index++ {
@@ -213,6 +230,17 @@ func runChatReloadWorkerWithRuntime(
 			}
 			index++
 			sock = args[index]
+		case "--pane":
+			// Internal: only the scheduler in runChatReloadWithRuntime ever
+			// appends this. It is not in reload.Usage and never documented to
+			// an operator — see reloadTarget for why the worker cannot afford
+			// to re-derive it.
+			if index+1 >= len(args) {
+				fmt.Fprintln(stderr, "pfm chat reload: --pane needs a pane id")
+				return 2
+			}
+			index++
+			requestedPane = args[index]
 		case "--1h":
 			if index+1 >= len(args) || (args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
 				fmt.Fprintln(stderr, "pfm chat reload: --1h needs on|off")
@@ -249,7 +277,7 @@ func runChatReloadWorkerWithRuntime(
 	}
 	resolved := runtime.Paths
 	tmux := reloadCommandTmux{}
-	socketPath, pane, paneState, code := reloadTarget(context.Background(), sock, resolved, runtime, tmux, stderr)
+	socketPath, pane, paneState, code := reloadTarget(context.Background(), sock, requestedPane, resolved, runtime, tmux, stderr)
 	if code != 0 {
 		return code
 	}
@@ -394,7 +422,12 @@ func validateReloadArgs(args []string) error {
 				return errors.New("hide specified twice")
 			}
 			hide = true
-		case "--then", "--sock":
+		case "--then", "--sock", "--pane":
+			// --pane is worker-only plumbing (see reloadTarget): accepted here
+			// because this same validator runs on the worker's expanded argv,
+			// but it is deliberately absent from reload.Usage and
+			// reloadArgumentHint — no caller-facing doc ever tells a human or
+			// a model to pass it.
 			if index+1 >= len(args) {
 				return fmt.Errorf("%s needs a value", args[index])
 			}
@@ -485,7 +518,7 @@ func reloadRequestedAccount(args []string) int {
 		switch args[index] {
 		case "--fresh", "--hide":
 			continue
-		case "--then", "--sock", "--1h":
+		case "--then", "--sock", "--pane", "--1h":
 			index++
 			continue
 		case "--account":
@@ -518,7 +551,16 @@ func reloadDurationEnv(name string, fallbackMS int) time.Duration {
 	return time.Duration(fallbackMS) * time.Millisecond
 }
 
-func reloadTarget(ctx context.Context, sock string, resolved paths.Values, runtime commandRuntime, tmux reload.Tmux, stderr io.Writer) (string, string, reload.Pane, int) {
+// reloadTarget resolves the (socket, pane) a reload acts on. pane is the
+// worker-only escape hatch: when the scheduler in runChatReloadWithRuntime
+// already knows which pane called it, it hands that pane straight to the
+// detached worker via --pane, and this function selects that exact pane out
+// of ListPanes instead of falling back to the "exactly one pane" rule below.
+// pane is always "" for the scheduler's own call (it has nothing to hand
+// itself) and for the ambient-identity branch beneath this one, which never
+// takes --pane at all — only an explicit --sock server can carry more than
+// one live pane.
+func reloadTarget(ctx context.Context, sock, pane string, resolved paths.Values, runtime commandRuntime, tmux reload.Tmux, stderr io.Writer) (string, string, reload.Pane, int) {
 	if sock != "" {
 		path := sock
 		if !filepath.IsAbs(path) {
@@ -531,6 +573,15 @@ func reloadTarget(ctx context.Context, sock string, resolved paths.Values, runti
 		}
 		if len(panes) == 0 {
 			fmt.Fprintf(stderr, "pfm chat reload: no live panes on %s\n", sock)
+			return "", "", reload.Pane{}, 1
+		}
+		if pane != "" {
+			for _, item := range panes {
+				if item.ID == pane {
+					return path, pane, item, 0
+				}
+			}
+			fmt.Fprintf(stderr, "pfm chat reload: pane %s is not live on %s\n", pane, sock)
 			return "", "", reload.Pane{}, 1
 		}
 		if len(panes) != 1 {
