@@ -254,6 +254,24 @@ func TestResolveWithoutAccountUsesExplicitEngineHome(t *testing.T) {
 	}
 }
 
+// nativeStreamBudget bounds how long a test waits for the native runner's
+// first streamed line, derived from the test's own deadline rather than a
+// flat literal: a fixed short window turned ordinary fork/exec scheduling
+// delay under a loaded suite into a failure that named nothing about
+// streaming itself. A genuine streaming regression still never fires the
+// signal being waited on, so no budget here lets that regression pass by
+// accident — it only decides how long the failure takes to name itself.
+func nativeStreamBudget(t *testing.T) time.Duration {
+	t.Helper()
+	budget := 30 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		if remaining := time.Until(deadline) - time.Second; remaining < budget {
+			budget = remaining
+		}
+	}
+	return budget
+}
+
 func TestRunNativeStreamsStdinAndPreservesUnknownArgs(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
@@ -281,7 +299,7 @@ printf 'second\n'`)
 	}()
 	select {
 	case <-writer.first:
-	case <-time.After(2 * time.Second):
+	case <-time.After(nativeStreamBudget(t)):
 		t.Fatal("native output did not stream before process completion")
 	}
 	select {
@@ -476,7 +494,7 @@ printf '%s\n' '{"result":"sealed"}'`)
 		t.Fatalf("answer = %q", result.Answer)
 	}
 	pwd := strings.TrimSpace(string(mustRead(t, filepath.Join(capture, "pwd"))))
-	if filepath.Clean(pwd) == filepath.Clean(requestedCWD) || !strings.HasPrefix(filepath.Clean(pwd), filepath.Clean(base)+string(os.PathSeparator)) {
+	if filepath.Clean(pwd) == filepath.Clean(requestedCWD) || !insideTempBase(t, pwd, base) {
 		t.Fatalf("sealed cwd = %q, want a temporary child of %q", pwd, base)
 	}
 	if _, err := os.Stat(pwd); !errors.Is(err, os.ErrNotExist) {
@@ -588,7 +606,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"s
 		t.Fatalf("sealed opt-in Codex run failed: %v", err)
 	}
 	pwd := strings.TrimSpace(string(mustRead(t, filepath.Join(capture, "pwd"))))
-	if !strings.HasPrefix(filepath.Clean(pwd), filepath.Clean(base)+string(os.PathSeparator)) {
+	if !insideTempBase(t, pwd, base) {
 		t.Fatalf("sealed Codex cwd = %q, want child of %q", pwd, base)
 	}
 	if _, err := os.Stat(pwd); !errors.Is(err, os.ErrNotExist) {
@@ -647,16 +665,24 @@ func (c *armedDeadlineContext) arm() {
 	}
 }
 
+// waitForFile waits for path to exist AND be non-empty. Existence alone is
+// not enough: the shell redirection that creates it (`echo "$!" > path`)
+// opens/truncates the file before the write lands, so a poll that only
+// checks os.Stat can observe the file mid-creation — empty — and hand the
+// caller zero bytes to parse. That race was this helper's whole bug: under
+// load the open/write gap widens and TestRunTimeoutKillsProcessGroup read an
+// empty child-pid file ("child pid \"\": EOF") for a reason that has nothing
+// to do with the timeout/kill behavior under test.
 func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("file %s did not appear within %s", path, timeout)
+	t.Fatalf("file %s did not appear with content within %s", path, timeout)
 }
 
 func TestRunTimeoutKillsProcessGroup(t *testing.T) {
@@ -791,4 +817,29 @@ func indexOf(values []string, wanted string) int {
 		}
 	}
 	return -1
+}
+
+// insideTempBase reports whether a captured working directory lies under base.
+//
+// The child reports its cwd PHYSICALLY: on macOS /var is a symlink to
+// /private/var, so a scratch dir Go created under a /var/folders/… temp base
+// comes back spelled /private/var/folders/…. Comparing the two spellings
+// directly fails for a reason that has nothing to do with sealing — the very
+// behavior under test — so base is resolved through the same symlinks before
+// the prefix test. It is base that gets resolved and not the cwd because the
+// scratch dir is already gone by the time this runs; that removal is the next
+// assertion at every call site.
+func insideTempBase(t *testing.T, pwd, base string) bool {
+	t.Helper()
+	candidates := []string{filepath.Clean(base)}
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		candidates = append(candidates, filepath.Clean(resolved))
+	}
+	cleaned := filepath.Clean(pwd)
+	for _, candidate := range candidates {
+		if strings.HasPrefix(cleaned, candidate+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
 }

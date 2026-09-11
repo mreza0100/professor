@@ -162,10 +162,11 @@ exit 2`)
 			}
 			defer cancel()
 
+			probeTimeout := selfDoctorProbeTimeout(t)
 			resultCh := make(chan Result, 1)
 			go func() {
 				resultCh <- Probe(parent, []Entry{entry}, ProbeOptions{
-					GOOS: "linux", Timeout: 2 * time.Second, SelfDoctorTimeout: 2 * time.Second,
+					GOOS: "linux", Timeout: probeTimeout, SelfDoctorTimeout: probeTimeout,
 				})[0]
 			}()
 			waitForProbePhaseMarker(t, marker)
@@ -224,9 +225,53 @@ func (ctx *deferredDeadlineContext) expire() {
 	close(ctx.done)
 }
 
+// selfDoctorProbeTimeout is the per-call bound this test hands to Probe()
+// for its version probe and each self-doctor stage (--help, then --summary).
+// It used to be a flat 2s literal, and that is exactly what broke: --help
+// gates --summary in probeSelfDoctor, so a --help probe that outran only its
+// own 2s bound on a loaded box (the trivial fixture never even scheduled in
+// time) made probeSelfDoctor return "broken" WITHOUT ever attempting
+// --summary — so the summary phase marker this test waits for was never
+// written, no matter how long the wait after it was made. The bound is
+// derived from the test's own deadline rather than another guessed literal,
+// capped to a quarter of what remains so the deliberately-hung phase this
+// test drives still leaves room to be cancelled and observed afterward.
+func selfDoctorProbeTimeout(t *testing.T) time.Duration {
+	t.Helper()
+	budget := DefaultSelfDoctorTimeout
+	if deadline, ok := t.Deadline(); ok {
+		if remaining := time.Until(deadline) / 4; remaining < budget {
+			budget = remaining
+		}
+	}
+	return budget
+}
+
+// probePhaseMarkerFallbackBudget is the wait used only when the test binary
+// carries no deadline at all (e.g. `-timeout 0`), where there is no ceiling
+// to respect and the wait needs a floor rather than a guess.
+const probePhaseMarkerFallbackBudget = 5 * time.Minute
+
 func waitForProbePhaseMarker(t *testing.T, marker string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// The budget is derived from the test binary's own deadline, not from a
+	// fixed constant: a hardcoded ceiling (60s, tried here before) is exactly
+	// the "generous-looking" number that machine load blows through — the
+	// marker is written by a /bin/sh stub that must first be forked and
+	// scheduled, and under a loaded box running the whole suite in parallel
+	// that scheduling alone was observed to exceed 60s. Spending everything
+	// up to the deadline costs nothing: a genuine hang never writes the
+	// marker AT ALL, so no budget lets this pass by accident — it only
+	// decides how long the failure takes to name itself, and failing here
+	// beats being killed by a whole-binary timeout panic that names nothing
+	// about which wait never finished.
+	budget := probePhaseMarkerFallbackBudget
+	if testDeadline, ok := t.Deadline(); ok {
+		if remaining := time.Until(testDeadline) - time.Second; remaining < budget {
+			budget = remaining
+		}
+	}
+	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(marker); err == nil {
 			return
@@ -235,7 +280,7 @@ func waitForProbePhaseMarker(t *testing.T, marker string) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("probe phase marker %q was not created within 5s", marker)
+	t.Fatalf("probe phase marker %q was not created within %s", marker, budget)
 }
 
 func TestProbePlatformAndHarvestFiltering(t *testing.T) {

@@ -65,13 +65,27 @@ func TestCommandSpawnerUsesNohupWhenSetsidIsAbsent(t *testing.T) {
 	if elapsed >= 900*time.Millisecond {
 		t.Fatalf("Spawn took %v — it must Start()+Release() the nohup helper, not wait on it", elapsed)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	// The fixture's own "sleep 1" already spends a second of this wait, so a
+	// flat 3s budget leaves only ~2s of margin for the finisher to actually
+	// be forked and scheduled — under a loaded suite running every package's
+	// processes at once, that margin was observed to run out. The budget is
+	// derived from the test's own deadline instead of a bigger guessed
+	// literal: a real bug here (the parent context DID kill the finisher)
+	// still never creates donePath, so no budget lets that regression pass
+	// by accident — it only decides how long the failure takes to name itself.
+	budget := 30 * time.Second
+	if testDeadline, ok := t.Deadline(); ok {
+		if remaining := time.Until(testDeadline) - time.Second; remaining < budget {
+			budget = remaining
+		}
+	}
+	deadline := time.Now().Add(budget)
 	for {
 		if _, err := os.Stat(donePath); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("nohup finisher never completed — a cancelled parent context killed it")
+			t.Fatalf("nohup finisher never completed within %s — a cancelled parent context killed it", budget)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
