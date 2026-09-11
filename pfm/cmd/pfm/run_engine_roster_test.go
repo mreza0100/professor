@@ -6,9 +6,25 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/resolve"
 )
 
+// clearCallerEngineEnv isolates a test's empty-engine resolution from this
+// shell's own ambient session env: resolveRunEngineAccount now consults
+// callerEngine(os.Getenv) before falling to the config default, so a
+// developer running `go test` from inside a live Claude Code or Codex chat
+// would otherwise pick up CLAUDE_CODE_SESSION_ID/CODEX_THREAD_ID and route
+// away from the config default these tests pin (pfm/CLAUDE.md § Testing
+// Rules: a test depending on the developer's environment is an isolation
+// defect).
+func clearCallerEngineEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(resolve.ClaudeSessionEnv, "")
+	t.Setenv(resolve.CodexThreadEnv, "")
+}
+
 func TestResolveRunEngineAccountUsesTheChosenRoster(t *testing.T) {
+	clearCallerEngineEnv(t)
 	machine := pfmconfig.Config{
 		Version:       pfmconfig.Version,
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 3, Home: "/codex/3"}, {ID: 8, Home: "/codex/8"}},
@@ -30,6 +46,7 @@ func TestResolveRunEngineAccountUsesTheChosenRoster(t *testing.T) {
 }
 
 func TestResolveRunEngineAccountValidatesOpencodeRoster(t *testing.T) {
+	clearCallerEngineEnv(t)
 	machine := pfmconfig.Config{
 		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 5, Home: "/opencode"}},
 		Ask:              pfmconfig.AskConfig{Engine: pfmengine.Opencode},

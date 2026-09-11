@@ -43,7 +43,7 @@ func runRun(
 		stderr,
 	)
 	name := flags.String("name", "", "chat name (a _KILL… name stays out of the list)")
-	engine := flags.String("engine", "", "engine: cc|claude or cx|codex (default: config)")
+	engine := flags.String("engine", "", "engine: cc|claude or cx|codex (default: the calling chat's engine, else config)")
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")
 	cache1H := flags.Bool("1h", false, "arm 1h prompt caching")
@@ -240,6 +240,9 @@ func resolveRunEngineAccount(
 ) (pfmengine.ID, int, error) {
 	engineInput := requestedEngine
 	if strings.TrimSpace(engineInput) == "" {
+		if caller, ok := callerEngine(os.Getenv); ok {
+			return resolveRunEngineIDAccount(caller, requestedAccount, machine, primaryClaude)
+		}
 		defaultEngine, err := machine.DefaultEngine()
 		if err != nil {
 			return "", 0, err
