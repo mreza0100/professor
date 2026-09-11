@@ -13,6 +13,7 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
@@ -409,7 +410,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	t.Setenv("PFM_RELOAD_POLL_MS", "20")
 	t.Setenv("PFM_RELOAD_EXIT_TRIES", "50")
 
-	runtime, err := loadCommandRuntime(configPath)
+	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +486,7 @@ func TestReloadTargetIdentityNeverFallsBackToTheCallerSession(t *testing.T) {
 	}
 	_, _, err := resolveReloadSession(
 		resolved,
-		pfmconfig.Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], firstRoot(resolved.Roots[pfmengine.Codex])),
+		pfmconfig.Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex)),
 		"/tmp/tmux-1000/probe-pfm-reload-target",
 		"%7",
 		false,
@@ -504,11 +505,11 @@ func TestExplicitCodexReloadUsesPaneBindingWithoutBreadcrumb(t *testing.T) {
 	machine := pfmconfig.Defaults(
 		resolved.Home,
 		resolved.Roots[pfmengine.Claude],
-		firstRoot(resolved.Roots[pfmengine.Codex]),
+		resolved.FirstRoot(pfmengine.Codex),
 	)
 	machine.CodexAccounts = []pfmconfig.CodexAccount{{
 		ID:   1,
-		Home: firstRoot(resolved.Roots[pfmengine.Codex]),
+		Home: resolved.FirstRoot(pfmengine.Codex),
 	}}
 	const (
 		socket = "cx-probe-reload-bound"
@@ -516,7 +517,7 @@ func TestExplicitCodexReloadUsesPaneBindingWithoutBreadcrumb(t *testing.T) {
 		wantID = "22222222-2222-4222-8222-222222222222"
 	)
 	rollout := filepath.Join(
-		firstRoot(resolved.Roots[pfmengine.Codex]),
+		resolved.FirstRoot(pfmengine.Codex),
 		"sessions",
 		"rollout-2026-08-24T00-00-00-"+wantID+".jsonl",
 	)
@@ -530,7 +531,7 @@ func TestExplicitCodexReloadUsesPaneBindingWithoutBreadcrumb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := kill.New(database, killDependencies(commandRuntime{
+	manager, err := kill.New(database, fleet.KillDependencies(commandRuntime{
 		Config: machine,
 		Paths:  resolved,
 	}))

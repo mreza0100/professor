@@ -33,7 +33,7 @@ UNIT    := pfm-mcp.service
 VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: help build fmt fmt-check vet test iso gate install host-install rollback \
+.PHONY: help build fmt fmt-check vet arch test iso gate install host-install rollback \
         mcp-restart mcp-status stale kill-stale sweep-stale clean
 
 help: ## List every target
@@ -63,6 +63,9 @@ fmt-check: ## Fail if anything is unformatted, naming the files
 vet: ## go vet the whole module
 	go vet ./...
 
+arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new twins (baselines in .arch/)
+	bash scripts/arch-check.sh
+
 # ----------------------------------------------------------------- gate ----
 # Both delegate. dev.sh is the single definition of this project's gate.
 
@@ -72,7 +75,7 @@ test: ## Host test suite (delegates to dev.sh)
 iso: ## Containerised test suite (delegates to dev.sh iso)
 	bash $(DEV) iso test pfm
 
-gate: fmt-check vet test iso ## Everything a change must pass before it merges
+gate: fmt-check vet arch test iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"
 
 # -------------------------------------------------------------- install ----

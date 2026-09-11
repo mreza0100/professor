@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/kill"
@@ -69,7 +70,7 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 			}
 			var stderr bytes.Buffer
 			reconcile := func() {
-				reconcileCodexPanes(ctx, database, gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}}, commandRuntime{Paths: resolved}, printWarn(&stderr))
+				fleet.ReconcileCodexPanes(ctx, database, gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}}, commandRuntime{Paths: resolved}, fleet.PrintWarn(&stderr))
 			}
 			reconcile()
 			if scenario != "stale-baseline" {
@@ -142,7 +143,7 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 	const warning = "record clear kill"
 	warningEvents := make(chan string, 8)
 	warn := func(message string) {
-		printWarn(&stderr)(message)
+		fleet.PrintWarn(&stderr)(message)
 		if strings.Contains(message, warning) {
 			warningEvents <- message
 		}
@@ -245,7 +246,7 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	if failRefresh {
 		dependencies.newIndexer = func(*store.Store) (indexRunner, error) { return &clearRetryIndexRunner{}, nil }
 	}
-	go streamFleetRefreshesWith(ctx, database, scanRequest{}, printWarn(&stderr), &stderr, updates, dependencies)
+	go streamFleetRefreshesWith(ctx, database, scanRequest{}, fleet.PrintWarn(&stderr), &stderr, updates, dependencies)
 	defer func() {
 		cancel()
 		for range updates {

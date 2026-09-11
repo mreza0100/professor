@@ -1,6 +1,15 @@
-package main
+package fleet
 
-import "sort"
+import (
+	"regexp"
+	"sort"
+)
+
+// ChatIDPattern matches one chat id: a Claude session UUID or a Codex thread
+// UUID, in the canonical 8-4-4-4-12 form.
+var ChatIDPattern = regexp.MustCompile(
+	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
+)
 
 // A Codex pane's identity has one trustworthy source and one treacherous one.
 //
@@ -39,7 +48,7 @@ import "sort"
 // never walk one backward — that is the ENGINE_BUILDER failure, closed for
 // good.
 //
-// decideCodexPanes is deliberately pure: no tmux, no store, no clock. The
+// DecideCodexPanes is deliberately pure: no tmux, no store, no clock. The
 // reconcile pass and `pfm doctor` both run it over the same observations, so
 // the health report cannot disagree with the decision it is reporting on.
 
@@ -48,28 +57,28 @@ import "sort"
 // table — and a diagnostic that paraphrases the decision is a second source
 // of truth.
 const (
-	codexPaneCaptureFailed    = "capture failed (the pane was not read; this is not an idle pane)"
-	codexPaneNoThreadNamed    = "status line named no thread"
-	codexPaneNameUnknown      = "status line name matches no indexed thread"
-	codexPaneNameAmbiguous    = "status line name matches several threads"
-	codexPaneNameTaken        = "status line name matches a thread another pane is already bound to"
-	codexPaneNameCannotMove   = "status line shows a name that resolves to no newer, differently-rooted thread; a name never moves a binding backwards"
-	codexPaneLineageUnknown   = "lineage could not be read, so a clear cannot be told from a resume"
-	codexPaneSameLineage      = "the new thread continues the bound thread's lineage; a resume is not a clear"
-	codexPaneBindingContested = "another pane was bound to this pane's own thread; that binding was stale"
-	codexPaneBindingRetired   = "the bound thread was retired by a /clear, so this binding is impossible"
-	codexPaneNameRetired      = "status line name matches only threads a /clear already retired"
+	CodexPaneCaptureFailed    = "capture failed (the pane was not read; this is not an idle pane)"
+	CodexPaneNoThreadNamed    = "status line named no thread"
+	CodexPaneNameUnknown      = "status line name matches no indexed thread"
+	CodexPaneNameAmbiguous    = "status line name matches several threads"
+	CodexPaneNameTaken        = "status line name matches a thread another pane is already bound to"
+	CodexPaneNameCannotMove   = "status line shows a name that resolves to no newer, differently-rooted thread; a name never moves a binding backwards"
+	CodexPaneLineageUnknown   = "lineage could not be read, so a clear cannot be told from a resume"
+	CodexPaneSameLineage      = "the new thread continues the bound thread's lineage; a resume is not a clear"
+	CodexPaneBindingContested = "another pane was bound to this pane's own thread; that binding was stale"
+	CodexPaneBindingRetired   = "the bound thread was retired by a /clear, so this binding is impossible"
+	CodexPaneNameRetired      = "status line name matches only threads a /clear already retired"
 )
 
-// codexThreadRetired reports whether a thread was retired by a /clear, and
+// CodexThreadRetired reports whether a thread was retired by a /clear, and
 // whether that could be determined AT ALL. The second return is the whole
 // point: a kill table that could not be read must never let a live binding be
 // dropped, because "we failed to look" is not "this thread is dead".
-type codexThreadRetired func(id string) (retired, known bool)
+type CodexThreadRetired func(id string) (retired, known bool)
 
-// codexPaneObservation is one live Codex pane as a reconcile pass found it:
+// CodexPaneObservation is one live Codex pane as a reconcile pass found it:
 // what the pane's own status line said, and what pfm believed it was running.
-type codexPaneObservation struct {
+type CodexPaneObservation struct {
 	Socket   string
 	PaneID   string
 	Name     string
@@ -83,12 +92,12 @@ type codexPaneObservation struct {
 	Bound string
 }
 
-// codexPaneAction is what one pass decided about one pane. Exactly one of
+// CodexPaneAction is what one pass decided about one pane. Exactly one of
 // Bind and Skip is set; ClearKill only ever accompanies a Bind.
-type codexPaneAction struct {
+type CodexPaneAction struct {
 	Socket   string
 	PaneID   string
-	Observed codexPaneObservation
+	Observed CodexPaneObservation
 	// Bind is the thread this pane must be bound to.
 	Bind string
 	// ClearKill is the thread a /clear just replaced — the one to retire with
@@ -107,26 +116,26 @@ type codexPaneAction struct {
 	Loud bool
 }
 
-// decideCodexPanes rules on every observed pane at once. It must see the whole
+// DecideCodexPanes rules on every observed pane at once. It must see the whole
 // pass, not one pane at a time: whether a name may seed a pane depends on what
 // every OTHER pane is already bound to, and a per-pane loop cannot know that.
 //
 // cxNames maps thread id to display name (the shape store.CxNames returns).
 // titleThreads maps a Codex thread's own title to the thread ids that carry
-// it exactly (the shape observeCodexPanes builds from the state store); it is
+// it exactly (the shape ObserveCodexPanes builds from the state store); it is
 // merged into the same name index AFTER cxNames, so a title-only match is
 // exactly as good as a cx_names match once merged. A name can now move a
 // binding, not just confirm or seed one — forward only, see decideCodexPane.
 // lineageRoot returns the lineage root of a thread id, or "" when the lineage
 // could not be read at all — "" therefore means "we failed to look" and never
 // "no lineage", so a failed read can never be mistaken for a clear.
-func decideCodexPanes(
-	observations []codexPaneObservation,
+func DecideCodexPanes(
+	observations []CodexPaneObservation,
 	cxNames map[string]string,
 	titleThreads map[string][]string,
 	lineageRoot func(string) string,
-	retired codexThreadRetired,
-) []codexPaneAction {
+	retired CodexThreadRetired,
+) []CodexPaneAction {
 	// A binding pointing at a thread a /clear already retired is not merely
 	// suspicious, it is IMPOSSIBLE: the clear that retired it is the same
 	// event that moved the pane onto its replacement. A fleet that reached
@@ -192,7 +201,7 @@ func decideCodexPanes(
 	// display name are decided by which one is looked at first, and a fleet
 	// that reshuffles its own answer every pass would hand the thread back and
 	// forth forever.
-	ordered := make([]codexPaneObservation, len(observations))
+	ordered := make([]CodexPaneObservation, len(observations))
 	copy(ordered, observations)
 	sort.Slice(ordered, func(first, second int) bool {
 		if ordered[first].Socket != ordered[second].Socket {
@@ -201,14 +210,14 @@ func decideCodexPanes(
 		return ordered[first].PaneID < ordered[second].PaneID
 	})
 
-	byPane := make(map[string]codexPaneAction, len(ordered))
+	byPane := make(map[string]CodexPaneAction, len(ordered))
 	for _, observation := range ordered {
 		action := decideCodexPane(observation, threadsByName, claimedBy, lineageRoot, retired)
 		if dropped[observation.Socket+"\x00"+observation.PaneID] {
 			// Say it either way, but only ERASE the key when nothing replaced
 			// it: a fresh Bind overwrites the same key, and deleting it after
 			// would undo the repair.
-			action.Skip, action.Loud = codexPaneBindingRetired, true
+			action.Skip, action.Loud = CodexPaneBindingRetired, true
 			action.Forget = action.Bind == ""
 		}
 		// A binding handed out in THIS pass claims its thread too. Without
@@ -221,7 +230,7 @@ func decideCodexPanes(
 	}
 
 	// Return in the caller's original order; only the ruling order is sorted.
-	actions := make([]codexPaneAction, 0, len(observations))
+	actions := make([]CodexPaneAction, 0, len(observations))
 	for _, observation := range observations {
 		actions = append(actions, byPane[observation.Socket+"\x00"+observation.PaneID])
 	}
@@ -229,19 +238,19 @@ func decideCodexPanes(
 }
 
 func decideCodexPane(
-	observation codexPaneObservation,
+	observation CodexPaneObservation,
 	threadsByName map[string][]string,
 	claimedBy map[string]string,
 	lineageRoot func(string) string,
-	retired codexThreadRetired,
-) codexPaneAction {
-	action := codexPaneAction{
+	retired CodexThreadRetired,
+) CodexPaneAction {
+	action := CodexPaneAction{
 		Socket: observation.Socket, PaneID: observation.PaneID, Observed: observation,
 	}
 	self := observation.Socket + "\x00" + observation.PaneID
 
 	if observation.Failed {
-		action.Skip, action.Loud = codexPaneCaptureFailed, true
+		action.Skip, action.Loud = CodexPaneCaptureFailed, true
 		return action
 	}
 
@@ -255,7 +264,7 @@ func decideCodexPane(
 		// binding is stale — the pane's own screen outranks it — but a fleet
 		// that reached that state has already mis-followed something, so say so.
 		if owner, taken := claimedBy[observation.ThreadID]; taken && owner != self {
-			action.Skip, action.Loud = codexPaneBindingContested, true
+			action.Skip, action.Loud = CodexPaneBindingContested, true
 			return action
 		}
 		if observation.Bound == "" {
@@ -268,13 +277,13 @@ func decideCodexPane(
 			// Keep the old binding until retirement can be decided. Advancing
 			// here would forget the only evidence of the missed clear forever.
 			action.Bind = ""
-			action.Skip, action.Loud = codexPaneLineageUnknown, true
+			action.Skip, action.Loud = CodexPaneLineageUnknown, true
 			return action
 		}
 		if previousRoot == currentRoot {
 			// Codex resumes and forks land a CHILD rollout in the same pane.
 			// Retiring the lineage root there would hide the live chat itself.
-			action.Skip = codexPaneSameLineage
+			action.Skip = CodexPaneSameLineage
 			return action
 		}
 		action.ClearKill = observation.Bound
@@ -282,7 +291,7 @@ func decideCodexPane(
 	}
 
 	if observation.Name == "" {
-		action.Skip = codexPaneNoThreadNamed
+		action.Skip = CodexPaneNoThreadNamed
 		// A pane whose screen never names a thread is a pane pfm can never
 		// follow through a clear. That is a standing blind spot, not a quiet
 		// no-op — but it is also what an ordinary modal, picker, or startup
@@ -306,32 +315,32 @@ func decideCodexPane(
 		// binding exactly where it was — this is the exact input that used to
 		// walk a pane backwards onto a dead thread.
 		if len(matches) != 1 {
-			action.Skip = codexPaneNameCannotMove
+			action.Skip = CodexPaneNameCannotMove
 			return action
 		}
 		target := matches[0]
 		if owner, taken := claimedBy[target]; taken && owner != self {
-			action.Skip, action.Loud = codexPaneNameTaken, true
+			action.Skip, action.Loud = CodexPaneNameTaken, true
 			return action
 		}
 		previousRoot, currentRoot := lineageRoot(observation.Bound), lineageRoot(target)
 		if previousRoot == "" || currentRoot == "" {
 			// The name still might be right, but a forward move that kills the
 			// old binding must never run on a guess.
-			action.Skip, action.Loud = codexPaneLineageUnknown, true
+			action.Skip, action.Loud = CodexPaneLineageUnknown, true
 			return action
 		}
 		if previousRoot == currentRoot {
 			// Same lineage: a resume or fork, not a clear. The name did not
 			// witness a new chat, so it must not act like one.
-			action.Skip = codexPaneSameLineage
+			action.Skip = CodexPaneSameLineage
 			return action
 		}
 		if !codexThreadNewer(target, observation.Bound) {
 			// The exact input that once walked a pane backwards onto a dead
 			// thread: the name resolves to a real, differently-rooted thread,
 			// but not one born after the binding it would replace.
-			action.Skip = codexPaneNameCannotMove
+			action.Skip = CodexPaneNameCannotMove
 			return action
 		}
 		action.Bind = target
@@ -366,20 +375,20 @@ func decideCodexPane(
 		// identical, unactionable line on every reconcile pass of every pfm
 		// invocation, forever — precisely the "warning on every pass for an
 		// ordinary one-refresh lag" this file's own header warns against.
-		action.Skip = codexPaneNameRetired
+		action.Skip = CodexPaneNameRetired
 	case len(matches) == 0:
 		// Ordinary and self-healing: a chat named a moment ago is on screen
 		// before Codex's index has been re-read. It is quiet HERE because this
 		// runs behind an interactive picker on every refresh — but it is a
 		// pane pfm cannot follow through a clear while it lasts, so `pfm
 		// doctor` names it. Quiet on the hot path is not the same as invisible.
-		action.Skip = codexPaneNameUnknown
+		action.Skip = CodexPaneNameUnknown
 	case len(free) == 0:
-		action.Skip, action.Loud = codexPaneNameTaken, true
+		action.Skip, action.Loud = CodexPaneNameTaken, true
 	case len(free) == 1:
 		action.Bind = free[0]
 	default:
-		action.Skip = codexPaneNameAmbiguous
+		action.Skip = CodexPaneNameAmbiguous
 	}
 	return action
 }
@@ -389,10 +398,10 @@ func decideCodexPane(
 // is '7', and the first 48 bits (the first 13 characters, "xxxxxxxx-xxxx")
 // are a millisecond creation timestamp, so once both ids are confirmed v7 a
 // lexical compare of those 13 characters is a creation-order compare. Either
-// id failing chatUUIDPattern, or failing the version check, answers false: a
+// id failing ChatIDPattern, or failing the version check, answers false: a
 // name that cannot prove it is newer is never allowed to move a binding.
 func codexThreadNewer(a, b string) bool {
-	if !chatUUIDPattern.MatchString(a) || !chatUUIDPattern.MatchString(b) {
+	if !ChatIDPattern.MatchString(a) || !ChatIDPattern.MatchString(b) {
 		return false
 	}
 	if a[14] != '7' || b[14] != '7' {

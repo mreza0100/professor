@@ -1,0 +1,6 @@
+internal/config/config.go
+internal/installer/files.go
+internal/recovery/recovery.go
+internal/statusline/render.go
+internal/updatecheck/updatecheck.go
+internal/usagehook/hook.go

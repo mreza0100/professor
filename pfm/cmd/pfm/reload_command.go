@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"io"
 	"io/fs"
 	"os"
@@ -100,7 +101,7 @@ func (tmux reloadCommandTmux) Display(ctx context.Context, socket, pane, message
 }
 
 func runChatReload(args []string, stdout, stderr io.Writer) int {
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: load config: %v\n", err)
 		return 1
@@ -196,7 +197,7 @@ func runChatReloadWithRuntime(
 }
 
 func runChatReloadWorker(args []string, stdout, stderr io.Writer) int {
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: load config: %v\n", err)
 		return 1
@@ -890,7 +891,7 @@ func resolveReloadSession(
 		return "", "", err
 	}
 	transcript := ""
-	if id != "" && !chatUUIDPattern.MatchString(id) {
+	if id != "" && !fleet.ChatIDPattern.MatchString(id) {
 		return "", "", fmt.Errorf("couldn't identify this chat from breadcrumb %q", crumbPath)
 	}
 	if crumbPath != "" {
@@ -910,7 +911,7 @@ func resolveReloadSession(
 		if engine == pfmengine.Codex {
 			ambient = os.Getenv("CODEX_THREAD_ID")
 		}
-		if chatUUIDPattern.MatchString(ambient) {
+		if fleet.ChatIDPattern.MatchString(ambient) {
 			path, err := findEngineTranscript(resolved, machine, engine, ambient)
 			if err != nil {
 				return "", "", err
@@ -960,7 +961,7 @@ func resolveReloadCodexPaneBinding(
 		}
 	}()
 
-	manager, err := kill.New(database, killDependencies(commandRuntime{
+	manager, err := kill.New(database, fleet.KillDependencies(commandRuntime{
 		Config: machine,
 		Paths:  resolved,
 	}))
@@ -978,7 +979,7 @@ func resolveReloadCodexPaneBinding(
 	if !found {
 		return "", nil
 	}
-	if !chatUUIDPattern.MatchString(id) {
+	if !fleet.ChatIDPattern.MatchString(id) {
 		return "", fmt.Errorf("Codex pane binding for %s %s is not a valid thread id", filepath.Base(socketPath), pane)
 	}
 	return id, nil

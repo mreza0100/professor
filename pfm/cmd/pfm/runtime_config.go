@@ -7,74 +7,17 @@ import (
 	"strings"
 
 	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
 )
 
-// commandRuntime is loaded exactly once by run and then passed to the command
-// branches that consume machine policy. It is immutable for that invocation.
-type commandRuntime struct {
-	Config      pfmconfig.Config
-	Paths       paths.Values
-	ConfigError error
-}
+// commandRuntime is the process runtime every command branch consumes; the
+// one shape lives in internal/config (Runtime, LoadRuntime).
+type commandRuntime = pfmconfig.Runtime
 
 func optionalCommandRuntime(runtimes []commandRuntime) (commandRuntime, error) {
 	if len(runtimes) != 0 {
 		return runtimes[0], nil
 	}
-	return loadCommandRuntime("")
-}
-
-func loadCommandRuntime(configPath string) (commandRuntime, error) {
-	resolved, err := paths.Resolve()
-	if err != nil {
-		return commandRuntime{}, fmt.Errorf("resolve paths: %w", err)
-	}
-	effective, err := pfmconfig.Load(
-		configPath,
-		resolved.Home,
-		resolved.Roots[pfmengine.Claude],
-		firstRoot(resolved.Roots[pfmengine.Codex]),
-	)
-	if err != nil {
-		return commandRuntime{}, err
-	}
-	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
-	resolved.Roots[pfmengine.Codex] = codexHomes(effective)
-	return commandRuntime{Config: effective, Paths: resolved}, nil
-}
-
-func loadDiagnosticRuntime(configPath string) (commandRuntime, error) {
-	resolved, err := paths.Resolve()
-	if err != nil {
-		return commandRuntime{}, fmt.Errorf("resolve paths: %w", err)
-	}
-	effective, configErr := pfmconfig.Load(configPath, resolved.Home, resolved.Roots[pfmengine.Claude], firstRoot(resolved.Roots[pfmengine.Codex]))
-	if configErr == nil {
-		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
-		resolved.Roots[pfmengine.Codex] = codexHomes(effective)
-		return commandRuntime{Config: effective, Paths: resolved}, nil
-	}
-	// Diagnostics must remain usable on a broken config. They operate on
-	// defaults, but carry the original error to the visible command surface.
-	path := configPath
-	if path == "" {
-		path = pfmconfig.ResolvePath(resolved.Home)
-	}
-	effective = pfmconfig.Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], firstRoot(resolved.Roots[pfmengine.Codex]))
-	effective.Path = path
-	effective.Exists = true
-	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
-	resolved.Roots[pfmengine.Codex] = codexHomes(effective)
-	return commandRuntime{Config: effective, Paths: resolved, ConfigError: configErr}, nil
-}
-
-func firstRoot(roots []string) string {
-	if len(roots) == 0 {
-		return ""
-	}
-	return roots[0]
+	return pfmconfig.LoadRuntime("")
 }
 
 // splitGlobalConfig accepts the global flag only before the command. This is

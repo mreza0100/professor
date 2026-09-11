@@ -186,3 +186,12 @@ func SocketPath(socket string) (string, error) {
 	}
 	return filepath.Join(resolved.TmuxDir, socket), nil
 }
+
+// FirstRoot is the engine's first configured root, or "" with none — the root
+// a single-root consumer (recovery, heal, the dreamer's rollout locator) reads.
+func (values Values) FirstRoot(id pfmengine.ID) string {
+	if roots := values.Roots[id]; len(roots) != 0 {
+		return roots[0]
+	}
+	return ""
+}

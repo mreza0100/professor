@@ -1,0 +1,2 @@
+internal/installer/installer.go 1
+internal/paths/paths.go 2

@@ -18,6 +18,7 @@ import (
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/spawn"
 )
 
@@ -98,7 +99,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		fmt.Fprintln(stderr, "pfm internal launch: --cwd must be an absolute path")
 		return 2
 	}
-	primary := readPrimaryAccount(runtime.Paths, runtime.Config)
+	primary := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if configDir == "" {
 		if account, found := runtime.Config.AccountByID(primary); found && !account.Implicit {

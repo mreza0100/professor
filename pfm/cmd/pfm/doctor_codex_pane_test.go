@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/store"
 )
@@ -183,7 +184,7 @@ func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
 		t.Fatalf("doctor called an unfollowable pane healthy:\n%s", report)
 	}
 	if !strings.Contains(report, "codex_pane=unfollowable") ||
-		!strings.Contains(report, codexPaneNameUnknown) {
+		!strings.Contains(report, fleet.CodexPaneNameUnknown) {
 		t.Fatalf("doctor did not name the pane it cannot follow:\n%s", report)
 	}
 	if !strings.Contains(report, "codex_panes live=1 unfollowable=1") {

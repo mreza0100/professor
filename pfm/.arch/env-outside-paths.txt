@@ -1,0 +1,7 @@
+cmd/pfm/doctor.go 1
+cmd/pfm/init_command.go 1
+cmd/pfm/launch_command.go 1
+cmd/pfm/update_notice_command.go 1
+internal/gather/tmuxprobe.go 1
+internal/harvestmcp/service.go 1
+internal/inject/engine.go 1

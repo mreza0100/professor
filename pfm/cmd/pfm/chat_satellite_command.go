@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"io"
 	"io/fs"
 	"os"
@@ -554,7 +555,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	if requestedAccount == 0 && parentFound && parent.Account != 0 {
 		requestedAccount = parent.Account
 	}
-	primary := readPrimaryAccount(runtime.Paths, runtime.Config)
+	primary := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	engine, selectedAccount, err := resolveRunEngineIDAccount(engine, requestedAccount, runtime.Config, primary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)

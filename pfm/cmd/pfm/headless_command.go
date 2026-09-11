@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/compose"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
@@ -63,7 +64,7 @@ func runHeadless(
 }
 
 func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 		return 1

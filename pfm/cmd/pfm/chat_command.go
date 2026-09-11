@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
@@ -20,10 +20,6 @@ import (
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/recovery"
 	"hostops/pfm/internal/resolve"
-)
-
-var chatUUIDPattern = regexp.MustCompile(
-	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
 )
 
 func runChatRead(args []string, stdin io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -98,7 +94,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	// the only path that can tombstone an id the composer no longer lists.
 	chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
 	if err != nil {
-		if !chatUUIDPattern.MatchString(target) {
+		if !fleet.ChatIDPattern.MatchString(target) {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 			return 1
 		}
@@ -128,7 +124,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 				id, chat.Socket, chat.Pane,
 			)
 		}
-	case !chatUUIDPattern.MatchString(target):
+	case !fleet.ChatIDPattern.MatchString(target):
 		fmt.Fprintf(stdout, "%s\tnot-found\n", target)
 		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
 		return codeUnknownChat
@@ -196,7 +192,7 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		return 2
 	}
 	target := flags.Arg(0)
-	if !chatUUIDPattern.MatchString(target) {
+	if !fleet.ChatIDPattern.MatchString(target) {
 		chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
@@ -315,7 +311,7 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat recover: resolve source paths: %v\n", err)
 		return 1
 	}
-	codexRoot := firstRoot(resolved.Roots[pfmengine.Codex])
+	codexRoot := resolved.FirstRoot(pfmengine.Codex)
 	result, err := recovery.Run(context.Background(), codexRoot, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat recover: %v\n", err)

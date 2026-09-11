@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/inject"
@@ -54,26 +55,21 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 
-	environment, err := resolveScanEnvironment(scanRequest{Runtime: &runtime})
+	environment, err := fleet.ResolveEnv(fleet.Request{Runtime: &runtime})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	data, err := loadFleetData(ctx, database)
+	data, err := fleet.LoadData(ctx, database)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
 	// ReadOnly is what makes --dry-run a dry run: the gather pass applies the
 	// renames it plans, and only a read-only pass plans without applying.
-	live, err := gatherFleet(
-		ctx,
-		database,
-		environment.paths,
-		environment.config,
-		data,
+	live, err := fleet.Gather(ctx, database, environment, data,
 		*dryRun,
-		printWarn(stderr),
+		fleet.PrintWarn(stderr),
 		stderr,
 	)
 	if err != nil {
@@ -81,7 +77,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 	if !*dryRun {
-		reconcileCodexPanes(ctx, database, live, runtime, printWarn(stderr))
+		fleet.ReconcileCodexPanes(ctx, database, live, runtime, fleet.PrintWarn(stderr))
 	}
 	verb := "renamed"
 	if *dryRun {
@@ -105,12 +101,12 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}
-	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.paths.TmuxDir)}
+	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
 	_, titlesUnverified := convergeTmuxTitles(
 		ctx,
 		titlesTmux,
 		liveSockets(live.Panes),
-		environment.config.Tmux.Titles,
+		environment.Config.Tmux.Titles,
 		stdout,
 		stderr,
 	)

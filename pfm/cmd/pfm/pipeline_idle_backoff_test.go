@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
 )
@@ -118,7 +119,7 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 		ctx,
 		database,
 		scanRequest{},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{

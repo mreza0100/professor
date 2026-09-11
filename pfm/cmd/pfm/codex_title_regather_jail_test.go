@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/compose"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
@@ -180,7 +181,7 @@ func TestInteractiveRefreshFirstPassRegathersAfterAMovedBinding(t *testing.T) {
 		ctx,
 		database,
 		scanRequest{},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{

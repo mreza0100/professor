@@ -174,7 +174,7 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	if err := os.WriteFile(legacy, []byte(`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := loadCommandRuntime("")
+	runtime, err := config.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}

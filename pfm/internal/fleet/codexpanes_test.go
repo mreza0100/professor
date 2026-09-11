@@ -1,4 +1,4 @@
-package main
+package fleet
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ func nothingRetired(string) (bool, bool) { return false, true }
 
 // retiredThreads answers from a fixed set, and unknownRetirement is the store
 // outage — the answer that must never let a binding be dropped.
-func retiredThreads(ids ...string) codexThreadRetired {
+func retiredThreads(ids ...string) CodexThreadRetired {
 	set := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		set[id] = true
@@ -39,10 +39,10 @@ func retiredThreads(ids ...string) codexThreadRetired {
 
 func unknownRetirement(string) (bool, bool) { return false, false }
 
-func onePaneAction(t *testing.T, actions []codexPaneAction) codexPaneAction {
+func onePaneAction(t *testing.T, actions []CodexPaneAction) CodexPaneAction {
 	t.Helper()
 	if len(actions) != 1 {
-		t.Fatalf("decideCodexPanes returned %d actions, want 1", len(actions))
+		t.Fatalf("DecideCodexPanes returned %d actions, want 1", len(actions))
 	}
 	return actions[0]
 }
@@ -66,11 +66,11 @@ func TestDecideCodexPaneRulings(t *testing.T) {
 	)
 	for _, test := range []struct {
 		name        string
-		observation codexPaneObservation
+		observation CodexPaneObservation
 		names       map[string]string
 		titles      map[string][]string
 		lineage     func(string) string
-		retired     codexThreadRetired
+		retired     CodexThreadRetired
 		wantBind    string
 		wantKill    string
 		wantSkip    string
@@ -78,111 +78,111 @@ func TestDecideCodexPaneRulings(t *testing.T) {
 	}{
 		{
 			name:        "bare id on an unbound pane seeds without retiring anything",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh},
 			wantBind:    fresh,
 		},
 		{
 			name:        "bare id equal to the binding is a no-op",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: bound, Bound: bound},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: bound, Bound: bound},
 		},
 		{
 			name:        "a bare id that replaced another lineage IS the clear",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
 			wantBind:    fresh,
 			wantKill:    bound,
 		},
 		{
 			name:        "a resume in the same lineage is never a clear",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
 			lineage:     staticLineage(map[string]string{fresh: bound}),
 			wantBind:    fresh,
-			wantSkip:    codexPaneSameLineage,
+			wantSkip:    CodexPaneSameLineage,
 		},
 		{
 			name:        "an unreadable lineage retains the binding for retry",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", ThreadID: fresh, Bound: bound},
 			lineage:     brokenLineage,
-			wantSkip:    codexPaneLineageUnknown,
+			wantSkip:    CodexPaneLineageUnknown,
 			wantLoud:    true,
 		},
 		{
 			name:        "a failed capture is loud and touches nothing",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Failed: true},
-			wantSkip:    codexPaneCaptureFailed,
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Failed: true},
+			wantSkip:    CodexPaneCaptureFailed,
 			wantLoud:    true,
 		},
 		{
 			name:        "a name that confirms the binding is silent",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW", Bound: bound},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW", Bound: bound},
 			names:       map[string]string{bound: "GW"},
 		},
 		{
 			name:        "a name resolving to a DIFFERENT thread never moves the binding",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW", Bound: fresh},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW", Bound: fresh},
 			names:       map[string]string{bound: "GW"},
-			wantSkip:    codexPaneNameCannotMove,
+			wantSkip:    CodexPaneNameCannotMove,
 		},
 		{
 			name:        "a unique name seeds an unbound pane",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW"},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW"},
 			names:       map[string]string{bound: "GW"},
 			wantBind:    bound,
 		},
 		{
 			name:        "a name nothing indexes is recorded but not shouted",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "FIX_HAND"},
-			wantSkip:    codexPaneNameUnknown,
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "FIX_HAND"},
+			wantSkip:    CodexPaneNameUnknown,
 		},
 		{
 			name:        "an ambiguous name seeds nothing",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW"},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "GW"},
 			names:       map[string]string{bound: "GW", sibling: "GW"},
-			wantSkip:    codexPaneNameAmbiguous,
+			wantSkip:    CodexPaneNameAmbiguous,
 		},
 		{
 			name:        "a screen naming no thread at all is reported, not assumed idle",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0"},
-			wantSkip:    codexPaneNoThreadNamed,
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0"},
+			wantSkip:    CodexPaneNoThreadNamed,
 		},
 		// T3 — a status-line NAME that is really Codex's own thread TITLE may
 		// now move a binding, but only forward.
 		{
 			name:        "a title moves a binding FORWARD onto a single newer, differently-rooted thread",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
 			titles:      map[string][]string{"Reply with SECOND": {codexB}},
 			wantBind:    codexB,
 			wantKill:    codexA,
 		},
 		{
 			name:        "a title never moves a binding onto an OLDER thread",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with FIRST", Bound: codexB},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with FIRST", Bound: codexB},
 			titles:      map[string][]string{"Reply with FIRST": {codexA}},
-			wantSkip:    codexPaneNameCannotMove,
+			wantSkip:    CodexPaneNameCannotMove,
 		},
 		{
 			name:        "a title resolving into the SAME lineage is a resume, not a clear",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
 			titles:      map[string][]string{"Reply with SECOND": {codexB}},
 			lineage:     staticLineage(map[string]string{codexA: "root", codexB: "root"}),
-			wantSkip:    codexPaneSameLineage,
+			wantSkip:    CodexPaneSameLineage,
 		},
 		{
 			name:        "a title matching two threads never moves a binding",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
 			titles:      map[string][]string{"Reply with SECOND": {codexB, sibling}},
-			wantSkip:    codexPaneNameCannotMove,
+			wantSkip:    CodexPaneNameCannotMove,
 		},
 		{
 			name:        "a title matching the binding itself is silent",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
 			titles:      map[string][]string{"Reply with SECOND": {codexA}},
 		},
 		{
 			name:        "a title move with unreadable lineage is refused loudly, never guessed",
-			observation: codexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
+			observation: CodexPaneObservation{Socket: "cx-a", PaneID: "%0", Name: "Reply with SECOND", Bound: codexA},
 			titles:      map[string][]string{"Reply with SECOND": {codexB}},
 			lineage:     brokenLineage,
-			wantSkip:    codexPaneLineageUnknown,
+			wantSkip:    CodexPaneLineageUnknown,
 			wantLoud:    true,
 		},
 	} {
@@ -195,8 +195,8 @@ func TestDecideCodexPaneRulings(t *testing.T) {
 			if retired == nil {
 				retired = nothingRetired
 			}
-			action := onePaneAction(t, decideCodexPanes(
-				[]codexPaneObservation{test.observation}, test.names, test.titles, lineage, retired,
+			action := onePaneAction(t, DecideCodexPanes(
+				[]CodexPaneObservation{test.observation}, test.names, test.titles, lineage, retired,
 			))
 			if action.Bind != test.wantBind {
 				t.Errorf("Bind = %q, want %q", action.Bind, test.wantBind)
@@ -223,8 +223,8 @@ func TestDecideCodexPaneRulings(t *testing.T) {
 // earn, and says so out loud.
 func TestDecideCodexPanesNeverSeedsTwoPanesOntoOneThread(t *testing.T) {
 	const shared = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	actions := decideCodexPanes(
-		[]codexPaneObservation{
+	actions := DecideCodexPanes(
+		[]CodexPaneObservation{
 			{Socket: "cx-first", PaneID: "%0", Name: "ENGINE_BUILDER"},
 			{Socket: "cx-second", PaneID: "%0", Name: "ENGINE_BUILDER"},
 		},
@@ -252,8 +252,8 @@ func TestDecideCodexPanesNeverSeedsTwoPanesOntoOneThread(t *testing.T) {
 // state is mis-following something and silence is how it stayed that way.
 func TestDecideCodexPanesRefusesToSeedOntoAClaimedThread(t *testing.T) {
 	const shared = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	actions := decideCodexPanes(
-		[]codexPaneObservation{
+	actions := DecideCodexPanes(
+		[]CodexPaneObservation{
 			{Socket: "cx-incumbent", PaneID: "%0", Name: "ENGINE_BUILDER", Bound: shared},
 			{Socket: "cx-newcomer", PaneID: "%0", Name: "ENGINE_BUILDER"},
 		},
@@ -267,9 +267,9 @@ func TestDecideCodexPanesRefusesToSeedOntoAClaimedThread(t *testing.T) {
 	if actions[1].Bind != "" {
 		t.Fatalf("newcomer stole the thread: bind=%q", actions[1].Bind)
 	}
-	if actions[1].Skip != codexPaneNameTaken || !actions[1].Loud {
+	if actions[1].Skip != CodexPaneNameTaken || !actions[1].Loud {
 		t.Fatalf("newcomer refusal = (%q, loud=%v), want (%q, loud=true)",
-			actions[1].Skip, actions[1].Loud, codexPaneNameTaken)
+			actions[1].Skip, actions[1].Loud, CodexPaneNameTaken)
 	}
 }
 
@@ -290,11 +290,11 @@ func TestDecideCodexPanesClearTimelineNeverWalksBackwards(t *testing.T) {
 	binding := before
 	kills := make([]string, 0, 2)
 
-	step := func(label string, observed codexPaneObservation) codexPaneAction {
+	step := func(label string, observed CodexPaneObservation) CodexPaneAction {
 		t.Helper()
 		observed.Socket, observed.PaneID, observed.Bound = socket, pane, binding
-		action := onePaneAction(t, decideCodexPanes(
-			[]codexPaneObservation{observed}, names, nil, staticLineage(nil), nothingRetired,
+		action := onePaneAction(t, DecideCodexPanes(
+			[]CodexPaneObservation{observed}, names, nil, staticLineage(nil), nothingRetired,
 		))
 		if action.Bind != "" {
 			binding = action.Bind
@@ -307,13 +307,13 @@ func TestDecideCodexPanesClearTimelineNeverWalksBackwards(t *testing.T) {
 	}
 
 	// 1. Steady state: the pane shows its name, bound to the thread that owns it.
-	step("steady", codexPaneObservation{Name: chat})
+	step("steady", CodexPaneObservation{Name: chat})
 	if binding != before {
 		t.Fatalf("steady state moved the binding to %q", binding)
 	}
 
 	// 2. /clear. The new thread is unnamed, so the pane shows a bare id.
-	action := step("cleared", codexPaneObservation{ThreadID: after})
+	action := step("cleared", CodexPaneObservation{ThreadID: after})
 	if action.ClearKill != before || binding != after {
 		t.Fatalf("clear was not detected: kill=%q binding=%q", action.ClearKill, binding)
 	}
@@ -321,18 +321,18 @@ func TestDecideCodexPanesClearTimelineNeverWalksBackwards(t *testing.T) {
 	// 3. pfm re-applies the chat name. cx_names has NOT caught up yet, so the
 	//    only thread carrying this name is the one that just died.
 	for pass := 1; pass <= 3; pass++ {
-		action = step(fmt.Sprintf("lagging pass %d", pass), codexPaneObservation{Name: chat})
+		action = step(fmt.Sprintf("lagging pass %d", pass), CodexPaneObservation{Name: chat})
 		if action.Bind != "" || action.ClearKill != "" {
 			t.Fatalf("pass %d acted on a lagging name: %+v", pass, action)
 		}
-		if action.Skip != codexPaneNameCannotMove {
-			t.Fatalf("pass %d skip = %q, want %q", pass, action.Skip, codexPaneNameCannotMove)
+		if action.Skip != CodexPaneNameCannotMove {
+			t.Fatalf("pass %d skip = %q, want %q", pass, action.Skip, CodexPaneNameCannotMove)
 		}
 	}
 
 	// 4. The index catches up: both threads now carry the name.
 	names[after] = chat
-	step("index caught up", codexPaneObservation{Name: chat})
+	step("index caught up", CodexPaneObservation{Name: chat})
 
 	if binding != after {
 		t.Fatalf("binding ended on %q, want the post-clear thread %q", binding, after)
@@ -352,8 +352,8 @@ func TestDecideCodexPanesClearTimelineNeverWalksBackwards(t *testing.T) {
 // re-seats it the moment it shows a bare id.
 func TestDecideCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	const dead = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	action := onePaneAction(t, decideCodexPanes(
-		[]codexPaneObservation{
+	action := onePaneAction(t, DecideCodexPanes(
+		[]CodexPaneObservation{
 			{Socket: "cx-a", PaneID: "%0", Name: "ENGINE_BUILDER", Bound: dead},
 		},
 		map[string]string{dead: "ENGINE_BUILDER"},
@@ -377,8 +377,8 @@ func TestDecideCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 // churn the store once per gather pass and change nothing.
 func TestDecideCodexPanesNeverSeedsOntoARetiredThread(t *testing.T) {
 	const dead = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	action := onePaneAction(t, decideCodexPanes(
-		[]codexPaneObservation{{Socket: "cx-a", PaneID: "%0", Name: "ENGINE_BUILDER"}},
+	action := onePaneAction(t, DecideCodexPanes(
+		[]CodexPaneObservation{{Socket: "cx-a", PaneID: "%0", Name: "ENGINE_BUILDER"}},
 		map[string]string{dead: "ENGINE_BUILDER"},
 		nil,
 		staticLineage(nil),
@@ -390,8 +390,8 @@ func TestDecideCodexPanesNeverSeedsOntoARetiredThread(t *testing.T) {
 	// Quiet on purpose: this is a standing structural condition, not an
 	// event, and it cannot self-heal — a Loud line here would repeat on
 	// every reconcile pass forever. `pfm doctor` carries it instead.
-	if action.Skip != codexPaneNameRetired || action.Loud {
-		t.Fatalf("skip = (%q, loud=%v), want (%q, loud=false)", action.Skip, action.Loud, codexPaneNameRetired)
+	if action.Skip != CodexPaneNameRetired || action.Loud {
+		t.Fatalf("skip = (%q, loud=%v), want (%q, loud=false)", action.Skip, action.Loud, CodexPaneNameRetired)
 	}
 }
 
@@ -400,8 +400,8 @@ func TestDecideCodexPanesNeverSeedsOntoARetiredThread(t *testing.T) {
 // leave every binding exactly where it is.
 func TestDecideCodexPanesKeepsBindingsWhenRetirementIsUnknowable(t *testing.T) {
 	const bound = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	action := onePaneAction(t, decideCodexPanes(
-		[]codexPaneObservation{
+	action := onePaneAction(t, DecideCodexPanes(
+		[]CodexPaneObservation{
 			{Socket: "cx-a", PaneID: "%0", Name: "ENGINE_BUILDER", Bound: bound},
 		},
 		map[string]string{bound: "ENGINE_BUILDER"},
@@ -422,8 +422,8 @@ func TestDecideCodexPanesKeepsBindingsWhenRetirementIsUnknowable(t *testing.T) {
 // prompt-baseline kill) proves the pane moved on.
 func TestDecideCodexPanesKeepsABindingOnAnExplicitlyKilledChat(t *testing.T) {
 	const bound = "01a02dca-c83c-7871-bdf1-461c75441c77"
-	action := onePaneAction(t, decideCodexPanes(
-		[]codexPaneObservation{
+	action := onePaneAction(t, DecideCodexPanes(
+		[]CodexPaneObservation{
 			{Socket: "cx-a", PaneID: "%0", Name: "ENGINE_BUILDER", Bound: bound},
 		},
 		map[string]string{bound: "ENGINE_BUILDER"},
@@ -441,17 +441,17 @@ func TestDecideCodexPanesKeepsABindingOnAnExplicitlyKilledChat(t *testing.T) {
 // The forward-name-move law from the collision angle, not the ordering angle:
 // the thread a title would move a binding onto is already claimed by another
 // live pane. That other pane's binding is stale evidence for a THIRD chat,
-// never proof this pane may steal it — the exact refusal codexPaneNameTaken
+// never proof this pane may steal it — the exact refusal CodexPaneNameTaken
 // already gives the bare-id seed path. This needs two observations at once
 // (claimedBy is built across the whole pass), so it cannot live as a row in
-// TestDecideCodexPaneRulings, which only ever feeds decideCodexPanes one.
+// TestDecideCodexPaneRulings, which only ever feeds DecideCodexPanes one.
 func TestDecideCodexPanesTitleMoveRefusesAClaimedThread(t *testing.T) {
 	const (
 		codexA = "01a05eef-6a09-7063-a0f8-43fd0315dcc3"
 		codexB = "01a05ef0-adc0-7092-b696-df46f33d5461"
 	)
-	actions := decideCodexPanes(
-		[]codexPaneObservation{
+	actions := DecideCodexPanes(
+		[]CodexPaneObservation{
 			// The incumbent: already bound to codexB, confirmed by its own
 			// bare id so nothing about ITS ruling is in question here.
 			{Socket: "cx-incumbent", PaneID: "%0", ThreadID: codexB, Bound: codexB},
@@ -475,8 +475,8 @@ func TestDecideCodexPanesTitleMoveRefusesAClaimedThread(t *testing.T) {
 	if mover.Bind != "" {
 		t.Fatalf("mover stole the claimed thread: bind=%q", mover.Bind)
 	}
-	if mover.Skip != codexPaneNameTaken || !mover.Loud {
-		t.Fatalf("mover refusal = (%q, loud=%v), want (%q, loud=true)", mover.Skip, mover.Loud, codexPaneNameTaken)
+	if mover.Skip != CodexPaneNameTaken || !mover.Loud {
+		t.Fatalf("mover refusal = (%q, loud=%v), want (%q, loud=true)", mover.Skip, mover.Loud, CodexPaneNameTaken)
 	}
 }
 

@@ -1,0 +1,69 @@
+package config
+
+import (
+	"fmt"
+
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/paths"
+)
+
+// Runtime is the resolved machine policy for one pfm process: the effective
+// config and the filesystem locations it implies. It is loaded exactly once
+// per invocation and then passed, immutable, to every package that consumes
+// machine policy — the CLI, the fleet scan, the MCP server.
+//
+// ConfigError is set only by LoadDiagnosticRuntime: a diagnostic command runs
+// on defaults over a broken config and must still report the original error.
+type Runtime struct {
+	Config      Config
+	Paths       paths.Values
+	ConfigError error
+}
+
+// LoadRuntime resolves paths, loads the config at configPath (the default
+// location when empty), and re-points the engine roots at the configured
+// accounts. A broken config is an error.
+func LoadRuntime(configPath string) (Runtime, error) {
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
+	}
+	effective, err := Load(
+		configPath,
+		resolved.Home,
+		resolved.Roots[pfmengine.Claude],
+		resolved.FirstRoot(pfmengine.Codex),
+	)
+	if err != nil {
+		return Runtime{}, err
+	}
+	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
+	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
+	return Runtime{Config: effective, Paths: resolved}, nil
+}
+
+// LoadDiagnosticRuntime is LoadRuntime for commands that must stay usable on
+// a broken config: they run on defaults and carry the load error in
+// ConfigError to the visible command surface.
+func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
+	}
+	effective, configErr := Load(configPath, resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
+	if configErr == nil {
+		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
+		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
+		return Runtime{Config: effective, Paths: resolved}, nil
+	}
+	path := configPath
+	if path == "" {
+		path = ResolvePath(resolved.Home)
+	}
+	effective = Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
+	effective.Path = path
+	effective.Exists = true
+	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
+	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
+	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr}, nil
+}

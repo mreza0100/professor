@@ -6,23 +6,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
 )
@@ -98,22 +91,6 @@ func (cadence *refreshCadence) next() time.Duration {
 	}
 	cadence.interval = grown
 	return cadence.interval
-}
-
-// gatherWarn reports one tmux probe warning raised during a gather pass.
-// scanFleet's callers — plain, tsv, check, and every one-shot command — print
-// immediately through printWarn; the interactive picker instead buffers
-// through bufferedWarnings, because Bubble Tea owns the tty for as long as it
-// runs and a warning written straight to stderr mid-refresh lands on top of
-// its alt-screen frame.
-type gatherWarn func(warning string)
-
-// printWarn reports a warning immediately, matching every non-interactive
-// caller's existing behavior.
-func printWarn(stderr io.Writer) gatherWarn {
-	return func(warning string) {
-		fmt.Fprintf(stderr, "pfm: tmux probe warning: %s\n", warning)
-	}
 }
 
 // bufferedWarnings collects gather warnings raised from the background
@@ -195,21 +172,94 @@ type scanResult struct {
 	Paths    paths.Values
 }
 
-type fleetData struct {
-	transcripts  []store.Transcript
-	rollouts     []store.Rollout
-	ocSessions   []store.OcSession
-	cxNames      map[string]string
-	killed       []store.Killed
-	cachedCounts *store.CachedCounts
+// fleetRequest is the scan scope inside a picker request; the rest of
+// scanRequest shapes the snapshot the picker renders.
+func (request scanRequest) fleetRequest() fleet.Request {
+	return fleet.Request{View: request.View, ReadOnly: request.ReadOnly, Runtime: request.Runtime}
 }
 
-type scanEnvironment struct {
-	paths      paths.Values
-	currentDir string
-	nowNS      int64
-	primary    int
-	config     pfmconfig.Config
+// scanFleet is fleet.Scan plus the picker snapshot over its rows.
+func scanFleet(
+	ctx context.Context,
+	database *store.Store,
+	request scanRequest,
+	stderr io.Writer,
+) (scanResult, error) {
+	result, err := fleet.Scan(ctx, database, request.fleetRequest(), stderr)
+	if err != nil {
+		return scanResult{}, err
+	}
+	return scanResult{
+		Output:   result.Output,
+		Snapshot: buildSnapshot(ctx, result.Env, request, result.Output),
+		Live:     result.Live,
+		Counters: result.Counters,
+		Paths:    result.Env.Paths,
+	}, nil
+}
+
+// scanFleetCached is the picker's first frame: the index as it stands,
+// marked refreshing while the real scan runs.
+func scanFleetCached(
+	ctx context.Context,
+	database *store.Store,
+	request scanRequest,
+) (scanResult, error) {
+	result, err := fleet.ScanCached(ctx, database, request.fleetRequest())
+	if err != nil {
+		return scanResult{}, err
+	}
+	snapshot := buildSnapshot(ctx, result.Env, request, result.Output)
+	snapshot.Refreshing = true
+	return scanResult{Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
+}
+
+// buildSnapshot is the picker's view of one composed pass: rows, account
+// chrome, and the cosmos over the comms ledger.
+func buildSnapshot(
+	ctx context.Context,
+	environment fleet.Env,
+	request scanRequest,
+	output compose.Output,
+) ui.Snapshot {
+	cosmos := compose.BuildCosmos(output.Rows, nil, environment.NowNS, true)
+	if request.Comms != nil {
+		events, err := request.Comms.CommsSince(
+			ctx,
+			environment.NowNS-int64(compose.CosmosWindow),
+			compose.CosmosEventCap,
+		)
+		if err != nil {
+			cosmos.Err = fmt.Errorf("read comms ledger: %w", err).Error()
+		} else {
+			cosmos = compose.BuildCosmos(output.Rows, events, environment.NowNS, true)
+			if len(events) == compose.CosmosEventCap {
+				cosmos.Warnings = append(cosmos.Warnings, compose.CosmosTruncationWarning)
+			}
+		}
+	}
+	machine := environment.Config
+	return ui.Snapshot{
+		Rows:                   output.Rows,
+		View:                   request.View,
+		KilledCount:            output.KilledCount,
+		SuppressedCount:        output.SuppressedCount,
+		PrimaryAccount:         environment.Primary,
+		AccountIDs:             machine.AccountIDs(),
+		AccountEmojis:          machine.AccountEmojis(),
+		CodexPrimaryAccount:    machine.PrimaryCodexAccount(),
+		CodexAccountIDs:        machine.CodexAccountIDs(),
+		CodexAccountEmojis:     machine.CodexAccountEmojis(),
+		OpencodePrimaryAccount: machine.PrimaryOpencodeAccount(),
+		OpencodeAccountIDs:     machine.OpencodeAccountIDs(),
+		Theme:                  machine.Theme,
+		Cache1H:                request.Cache1H,
+		NowNS:                  environment.NowNS,
+		InitialQuery:           request.Query,
+		NoSky:                  request.NoSky,
+		CosmosSafe:             resolveCosmosSafe(request.Safe, os.Getenv("TERM_PROGRAM")),
+		Cosmos:                 cosmos,
+	}
 }
 
 type indexRunner interface {
@@ -224,476 +274,11 @@ type refreshDependencies struct {
 	activity *ui.ActivityClock
 }
 
-func scanFleet(
-	ctx context.Context,
-	database *store.Store,
-	request scanRequest,
-	stderr io.Writer,
-) (scanResult, error) {
-	environment, err := resolveScanEnvironment(request)
-	if err != nil {
-		return scanResult{}, err
-	}
-	indexer, err := fleetindex.NewWithRoots(database, environment.paths, environment.paths.Roots)
-	if err != nil {
-		return scanResult{}, err
-	}
-	counters, err := indexer.Run(ctx, fleetindex.Options{
-		PriorityCWD: environment.currentDir,
-	})
-	if err != nil {
-		return scanResult{}, err
-	}
-	data, err := loadFleetData(ctx, database)
-	if err != nil {
-		return scanResult{}, err
-	}
-	live, err := gatherFleet(
-		ctx,
-		database,
-		environment.paths,
-		environment.config,
-		data,
-		request.ReadOnly,
-		printWarn(stderr),
-		stderr,
-	)
-	if err != nil {
-		return scanResult{}, err
-	}
-	// The one-shot path reconciles too: a /clear observed here must not wait
-	// for somebody to open the picker before the fleet stops pointing at the
-	// thread it replaced. A read-only scan still writes nothing.
-	if !request.ReadOnly && reconcileCodexPanes(ctx, database, live, commandRuntime{
-		Config: environment.config,
-		Paths:  environment.paths,
-	}, printWarn(stderr)) {
-		data, err = loadFleetData(ctx, database)
-		if err != nil {
-			return scanResult{}, err
-		}
-		// A pass that moved a binding changed what the resolver answers for
-		// the pane's own process: `live` above was gathered BEFORE the move,
-		// so its LiveCodex.RolloutPath still names the thread the pane just
-		// left. Composing from that snapshot renders the successor `↻`
-		// (resumable) for this whole call instead of `●` (live) — gather
-		// again against the reconciled data before this call hands anybody
-		// a row.
-		live, err = gatherFleet(
-			ctx,
-			database,
-			environment.paths,
-			environment.config,
-			data,
-			request.ReadOnly,
-			printWarn(stderr),
-			stderr,
-		)
-		if err != nil {
-			return scanResult{}, err
-		}
-	}
-	result := composeFleet(ctx, environment, request, data, live)
-	result.Counters = counters
-	result.Live = live
-	return result, nil
-}
-
-// resolveRowTarget looks id up in a compose pass over CURRENT database state
-// plus a live gather — the picker's own source of truth for what exists right
-// now — and reports the engine, rollout path, and live tmux address (socket
-// name, pane id) of the row that carries it. It finds exactly the ids the
-// picker displays, including a live agent row and a live Codex pane the
-// index has not caught up with; an id nothing composes returns all empty
-// strings, which leaves an ordinary kill free to refuse it as unindexed.
-// Errors from the pass itself are swallowed the same way: a failed vouch
-// attempt falls through to that same refusal rather than replacing the
-// kill's own error. A row with no live socket returns an empty socket and
-// pane, which is how kill.Manager tells a hide of a resumable-only chat from
-// a hide of a live one — the latter also ends it.
-//
-// The rollout path lets kill.Manager resolve an UNINDEXED Codex lineage
-// member to its root through the file's own session_meta header
-// (resolveUnindexedCodexParent) instead of hiding under the member's own id
-// — the id compose never carries once a full lineage IS indexed, since a
-// Codex row is always keyed on its lineage root, never a member.
-//
-// This deliberately skips the indexer scanFleet runs: a caller resolving one
-// id for a kill has no business reconciling the whole filesystem index, and
-// a delta run can prune a transcript row whose file is not there YET — the
-// exact row a kill right after spawning a chat is racing to catch.
-func resolveRowTarget(
-	ctx context.Context,
-	database *store.Store,
-	id string,
-	stderr io.Writer,
-	runtimes ...commandRuntime,
-) (engine pfmengine.ID, rolloutPath, socket, paneID string) {
-	request := scanRequest{View: compose.AllView}
-	if len(runtimes) != 0 {
-		request.Runtime = &runtimes[0]
-	}
-	environment, err := resolveScanEnvironment(request)
-	if err != nil {
-		return "", "", "", ""
-	}
-	data, err := loadFleetData(ctx, database)
-	if err != nil {
-		return "", "", "", ""
-	}
-	live, err := gatherFleet(ctx, database, environment.paths, environment.config, data, false, printWarn(stderr), stderr)
-	if err != nil {
-		return "", "", "", ""
-	}
-	result := composeFleet(ctx, environment, request, data, live)
-	for _, row := range result.Output.Rows {
-		if row.ID == id {
-			return compose.EngineForKind(row.Kind), row.Path, row.Socket, row.PaneID
-		}
-	}
-	return "", "", "", ""
-}
-
-func scanFleetCached(
-	ctx context.Context,
-	database *store.Store,
-	request scanRequest,
-) (scanResult, error) {
-	environment, err := resolveScanEnvironment(request)
-	if err != nil {
-		return scanResult{}, err
-	}
-	var data fleetData
-	if request.View == compose.DefaultView {
-		data, err = loadDefaultFleetData(ctx, database)
-	} else {
-		data, err = loadFleetData(ctx, database)
-	}
-	if err != nil {
-		return scanResult{}, err
-	}
-	result := composeFleet(ctx, environment, request, data, gather.Snapshot{})
-	result.Snapshot.Refreshing = true
-	return result, nil
-}
-
-func resolveScanEnvironment(request scanRequest) (scanEnvironment, error) {
-	var resolved paths.Values
-	var machine pfmconfig.Config
-	if request.Runtime != nil {
-		resolved = request.Runtime.Paths
-		machine = request.Runtime.Config
-	} else {
-		var err error
-		resolved, err = paths.Resolve()
-		if err != nil {
-			return scanEnvironment{}, err
-		}
-		machine = pfmconfig.Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], firstRoot(resolved.Roots[pfmengine.Codex]))
-	}
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return scanEnvironment{}, fmt.Errorf("read current directory: %w", err)
-	}
-	nowNS := time.Now().UnixNano()
-	if value := os.Getenv(testNowNSEnv); value != "" {
-		parsed, parseErr := strconv.ParseInt(value, 10, 64)
-		if parseErr != nil {
-			return scanEnvironment{}, fmt.Errorf("%s: %w", testNowNSEnv, parseErr)
-		}
-		nowNS = parsed
-	}
-	return scanEnvironment{
-		paths:      resolved,
-		currentDir: currentDir,
-		nowNS:      nowNS,
-		primary:    readPrimaryAccount(resolved, machine),
-		config:     machine,
-	}, nil
-}
-
-func loadFleetData(ctx context.Context, database *store.Store) (fleetData, error) {
-	transcripts, err := database.Transcripts(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	rollouts, err := database.Rollouts(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	ocSessions, err := database.OcSessions(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	cxNames, err := database.CxNames(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	killed, err := database.KilledChats(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	return fleetData{
-		transcripts: transcripts,
-		rollouts:    rollouts,
-		ocSessions:  ocSessions,
-		cxNames:     cxNames,
-		killed:      killed,
-	}, nil
-}
-
-func loadDefaultFleetData(
-	ctx context.Context,
-	database *store.Store,
-) (fleetData, error) {
-	transcripts, rollouts, counts, err := database.DefaultCandidates(
-		ctx,
-		30,
-		15,
-	)
-	if err != nil {
-		return fleetData{}, err
-	}
-	// The default view caps resume rows per engine; the OpenCode mirror is a
-	// full read (it has no per-file delta machinery), so it bypasses
-	// DefaultCandidates by design and compose applies ocResumeCap itself.
-	ocSessions, err := database.OcSessions(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	cxNames, err := database.CxNames(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	killed, err := database.KilledChats(ctx)
-	if err != nil {
-		return fleetData{}, err
-	}
-	return fleetData{
-		transcripts:  transcripts,
-		rollouts:     rollouts,
-		ocSessions:   ocSessions,
-		cxNames:      cxNames,
-		killed:       killed,
-		cachedCounts: &counts,
-	}, nil
-}
-
-func gatherFleet(
-	ctx context.Context,
-	database *store.Store,
-	resolved paths.Values,
-	machine pfmconfig.Config,
-	data fleetData,
-	readOnly bool,
-	warn gatherWarn,
-	stderr io.Writer,
-) (gather.Snapshot, error) {
-	codexNamesByPath, codexNamesByID := naming.CodexNameIndex(
-		store.CodexThreads(data.rollouts),
-		data.cxNames,
-	)
-	tmuxClient := gather.CommandTmux{
-		TmuxTmpDir: filepath.Dir(resolved.TmuxDir),
-	}
-	// The pane-binding manager lets the rollout-less live-process resolver
-	// (store.NewCodexThreadResolverRoots) rank a pane's fleet-recorded thread
-	// binding over its own birth-window guess — the guess never moves once a
-	// pane clears, since the pane's TUI process is not restarted.
-	bindingManager, err := kill.New(database, killDependencies(commandRuntime{Config: machine, Paths: resolved}))
-	if err != nil {
-		return gather.Snapshot{}, fmt.Errorf("prepare Codex pane binding resolver: %w", err)
-	}
-	gatherer, err := gather.New(gather.Dependencies{
-		Tmux:       tmuxClient,
-		TmuxTmpDir: filepath.Dir(resolved.TmuxDir),
-		CodexName: func(rolloutPath string) string {
-			return codexNamesByPath[filepath.Clean(rolloutPath)]
-		},
-		CodexIDName: func(threadID string) string {
-			return codexNamesByID[threadID]
-		},
-		CodexThread: store.NewCodexThreadResolverRoots(
-			ctx, codexHomes(machine), bindingManager.CodexPaneBound(ctx),
-		),
-		CodexRoots:   codexHomes(machine),
-		ClaudeBinary: machine.Claude.Binary,
-		CodexBinary:  machine.Codex.Binary,
-		LabelEmojis:  configuredAccountEmojis(machine),
-		ReadOnly:     readOnly,
-	})
-	if err != nil {
-		return gather.Snapshot{}, err
-	}
-	live, err := gatherer.Gather(ctx)
-	if err != nil {
-		return gather.Snapshot{}, err
-	}
-	for _, warning := range live.Warnings {
-		warn(warning)
-	}
-	if !readOnly {
-		for _, rename := range live.Renames {
-			if err := tmuxClient.RenameWindow(ctx, rename); err != nil {
-				fmt.Fprintf(stderr, "pfm: %v\n", err)
-				continue
-			}
-			for index := range live.Panes {
-				if live.Panes[index].Socket == rename.Socket &&
-					live.Panes[index].WindowID == rename.WindowID {
-					live.Panes[index].WindowName = rename.TargetName
-				}
-			}
-		}
-	}
-	return live, nil
-}
-
-func configuredAccountEmojis(machine pfmconfig.Config) []string {
-	result := make([]string, 0, len(machine.Accounts))
-	for _, account := range machine.Accounts {
-		if emoji := machine.EmojiFor(account.ID); emoji != "" && emoji != "·" {
-			result = append(result, emoji)
-		}
-	}
-	return result
-}
-
-func composeFleet(
-	ctx context.Context,
-	environment scanEnvironment,
-	request scanRequest,
-	data fleetData,
-	live gather.Snapshot,
-) scanResult {
-	output := compose.Compose(compose.Input{
-		Snapshot:     live,
-		Transcripts:  data.transcripts,
-		Rollouts:     data.rollouts,
-		OcSessions:   data.ocSessions,
-		CxNames:      data.cxNames,
-		Killed:       data.killed,
-		AccountRoots: accountRoots(environment.config.Accounts),
-		CodexRoots:   codexAccountRoots(environment.config.CodexAccounts),
-		Options: compose.Options{
-			View:                request.View,
-			CurrentDir:          environment.currentDir,
-			CurrentSocket:       currentSocket(),
-			PrimaryAccount:      environment.primary,
-			CodexAccountIDs:     environment.config.CodexAccountIDs(),
-			PrimaryCodexAccount: firstCodexAccount(environment.config),
-			OpencodeAccountIDs:  opencodeAccountIDs(environment.config),
-			PrimaryOpencode:     firstOpencodeAccount(environment.config),
-			NowNS:               environment.nowNS,
-		},
-	})
-	if data.cachedCounts != nil {
-		output.KilledCount = data.cachedCounts.Killed
-		output.SuppressedCount = data.cachedCounts.Suppressed
-	}
-	cosmos := compose.BuildCosmos(output.Rows, nil, environment.nowNS, true)
-	if request.Comms != nil {
-		events, err := request.Comms.CommsSince(
-			ctx,
-			environment.nowNS-int64(compose.CosmosWindow),
-			compose.CosmosEventCap,
-		)
-		if err != nil {
-			cosmos.Err = fmt.Errorf("read comms ledger: %w", err).Error()
-		} else {
-			cosmos = compose.BuildCosmos(output.Rows, events, environment.nowNS, true)
-			if len(events) == compose.CosmosEventCap {
-				cosmos.Warnings = append(cosmos.Warnings, compose.CosmosTruncationWarning)
-			}
-		}
-	}
-	snapshot := ui.Snapshot{
-		Rows:                   output.Rows,
-		View:                   request.View,
-		KilledCount:            output.KilledCount,
-		SuppressedCount:        output.SuppressedCount,
-		PrimaryAccount:         environment.primary,
-		AccountIDs:             environment.config.AccountIDs(),
-		AccountEmojis:          accountEmojis(environment.config),
-		CodexPrimaryAccount:    firstCodexAccount(environment.config),
-		CodexAccountIDs:        environment.config.CodexAccountIDs(),
-		CodexAccountEmojis:     codexAccountEmojis(environment.config),
-		OpencodePrimaryAccount: firstOpencodeAccount(environment.config),
-		OpencodeAccountIDs:     opencodeAccountIDs(environment.config),
-		Theme:                  environment.config.Theme,
-		Cache1H:                request.Cache1H,
-		NowNS:                  environment.nowNS,
-		InitialQuery:           request.Query,
-		NoSky:                  request.NoSky,
-		CosmosSafe:             resolveCosmosSafe(request.Safe, os.Getenv("TERM_PROGRAM")),
-		Cosmos:                 cosmos,
-	}
-	return scanResult{
-		Output:   output,
-		Snapshot: snapshot,
-		Paths:    environment.paths,
-	}
-}
-
-func accountEmojis(machine pfmconfig.Config) map[int]string {
-	result := make(map[int]string, len(machine.Accounts))
-	for _, account := range machine.Accounts {
-		result[account.ID] = machine.EmojiFor(account.ID)
-	}
-	return result
-}
-
-func codexAccountRoots(accounts []pfmconfig.CodexAccount) []compose.AccountRoot {
-	result := make([]compose.AccountRoot, 0, len(accounts))
-	for _, account := range accounts {
-		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home})
-	}
-	return result
-}
-
-func codexHomes(machine pfmconfig.Config) []string {
-	result := make([]string, 0, len(machine.CodexAccounts))
-	for _, account := range machine.CodexAccounts {
-		result = append(result, account.Home)
-	}
-	return result
-}
-
-func codexAccountEmojis(machine pfmconfig.Config) map[int]string {
-	result := make(map[int]string, len(machine.CodexAccounts))
-	for _, account := range machine.CodexAccounts {
-		result[account.ID] = machine.CodexEmojiFor(account.ID)
-	}
-	return result
-}
-
-func firstCodexAccount(machine pfmconfig.Config) int {
-	if len(machine.CodexAccounts) == 0 {
-		return 0
-	}
-	return machine.CodexAccounts[0].ID
-}
-
-func opencodeAccountIDs(machine pfmconfig.Config) []int {
-	result := make([]int, 0, len(machine.OpencodeAccounts))
-	for _, account := range machine.OpencodeAccounts {
-		result = append(result, account.ID)
-	}
-	return result
-}
-
-func firstOpencodeAccount(machine pfmconfig.Config) int {
-	if len(machine.OpencodeAccounts) == 0 {
-		return 0
-	}
-	return machine.OpencodeAccounts[0].ID
-}
-
 func streamFleetRefreshes(
 	ctx context.Context,
 	database *store.Store,
 	request scanRequest,
-	warn gatherWarn,
+	warn fleet.Warn,
 	stderr io.Writer,
 	updates chan<- ui.Snapshot,
 	activity *ui.ActivityClock,
@@ -724,33 +309,28 @@ func streamFleetRefreshesWith(
 	ctx context.Context,
 	database *store.Store,
 	request scanRequest,
-	warn gatherWarn,
+	warn fleet.Warn,
 	stderr io.Writer,
 	updates chan<- ui.Snapshot,
 	dependencies refreshDependencies,
 ) {
 	defer close(updates)
-	environment, err := resolveScanEnvironment(request)
+	environment, err := fleet.ResolveEnv(request.fleetRequest())
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
 		return
 	}
-	var data fleetData
+	var data fleet.Data
 	if request.View == compose.DefaultView {
-		data, err = loadDefaultFleetData(ctx, database)
+		data, err = fleet.LoadDefaultData(ctx, database)
 	} else {
-		data, err = loadFleetData(ctx, database)
+		data, err = fleet.LoadData(ctx, database)
 	}
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
 		return
 	}
-	live, err := gatherFleet(
-		ctx,
-		database,
-		environment.paths,
-		environment.config,
-		data,
+	live, err := fleet.Gather(ctx, database, environment, data,
 		request.ReadOnly,
 		warn,
 		stderr,
@@ -759,7 +339,7 @@ func streamFleetRefreshesWith(
 		writeRefreshError(ctx, stderr, " gather", err)
 		return
 	}
-	data, err = enrichLiveFleetData(ctx, database, data, live)
+	data, err = fleet.EnrichLive(ctx, database, data, live)
 	if err != nil {
 		writeRefreshError(ctx, stderr, " live cache", err)
 		return
@@ -769,16 +349,13 @@ func streamFleetRefreshesWith(
 	}
 	movedBinding := false
 	if !request.ReadOnly {
-		movedBinding = reconcileCodexPanes(ctx, database, live, commandRuntime{
-			Config: environment.config,
-			Paths:  environment.paths,
-		}, warn)
+		movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
 	}
 
 	newIndexer := dependencies.newIndexer
 	if newIndexer == nil {
 		newIndexer = func(database *store.Store) (indexRunner, error) {
-			return fleetindex.NewWithRoots(database, environment.paths, environment.paths.Roots)
+			return fleetindex.NewWithRoots(database, environment.Paths, environment.Paths.Roots)
 		}
 	}
 	indexer, err := newIndexer(database)
@@ -787,31 +364,26 @@ func streamFleetRefreshesWith(
 		return
 	}
 	if _, err := indexer.Run(ctx, fleetindex.Options{
-		PriorityCWD:  environment.currentDir,
+		PriorityCWD:  environment.CurrentDir,
 		PriorityOnly: true,
 	}); err != nil {
 		writeRefreshError(ctx, stderr, " project index", err)
 		return
 	}
-	data, err = loadFleetData(ctx, database)
+	data, err = fleet.LoadData(ctx, database)
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
 		return
 	}
 	if movedBinding {
 		// The `live` this pass has been carrying since the gather above was
-		// taken BEFORE reconcileCodexPanes moved a binding — its
+		// taken BEFORE fleet.ReconcileCodexPanes moved a binding — its
 		// LiveCodex.RolloutPath still names the thread the pane just left,
 		// so the final snapshot below would show the successor `↻`
 		// (resumable) rather than `●` (live) for this whole pass. Gather and
 		// re-enrich again, the same way the pass started, now that the
 		// reconciled data is what the resolver sees.
-		live, err = gatherFleet(
-			ctx,
-			database,
-			environment.paths,
-			environment.config,
-			data,
+		live, err = fleet.Gather(ctx, database, environment, data,
 			request.ReadOnly,
 			warn,
 			stderr,
@@ -820,17 +392,13 @@ func streamFleetRefreshesWith(
 			writeRefreshError(ctx, stderr, " gather", err)
 			return
 		}
-		data, err = enrichLiveFleetData(ctx, database, data, live)
+		data, err = fleet.EnrichLive(ctx, database, data, live)
 		if err != nil {
 			writeRefreshError(ctx, stderr, " live cache", err)
 			return
 		}
 	}
-	result := composeFleet(ctx, environment, request, data, live)
-	result.Snapshot.Refreshing = false
-	select {
-	case updates <- result.Snapshot:
-	case <-ctx.Done():
+	if !sendRefresh(ctx, environment, request, data, live, false, updates) {
 		return
 	}
 
@@ -847,15 +415,15 @@ func streamFleetRefreshesWith(
 	// committed the binding and therefore reports no further identity change.
 	pendingRefresh := false
 	// parkedRollouts is the FDLinks-observed identity of every live Codex
-	// PID as of the previous parked poll. reconcileCodexPanes' observation
+	// PID as of the previous parked poll. fleet.ReconcileCodexPanes' observation
 	// step runs a tmux capture-pane over every live Codex pane — the same
 	// exec fleetRefreshParkPollInterval exists to avoid paying on every
 	// fire — so a parked poll whose procfs probe reports the identical set
 	// of rollouts, where every one of them is a shape procfs alone already
-	// resolves (see codexRolloutFingerprintsSkippable), skips that call
+	// resolves (see fleet.CodexRolloutFingerprintsSkippable), skips that call
 	// outright. Only a reconciliation without warnings populates this cache;
 	// a full pass invalidates it so the next idle probe verifies the binding.
-	var parkedRollouts map[int]codexRolloutFingerprint
+	var parkedRollouts map[int]fleet.CodexRolloutFingerprint
 	var nextCodexProbe time.Time
 	for {
 		select {
@@ -877,14 +445,14 @@ func streamFleetRefreshesWith(
 			nextCodexProbe = time.Now().Add(fleetRefreshCodexPollInterval)
 			probe := gather.Snapshot{Panes: live.Panes}
 			probe.Codex, err = gather.RefreshCodexHeldRollouts(
-				gather.NewProcFS(environment.paths.ProcRoot), live.Codex, environment.paths.Roots[pfmengine.Codex],
+				gather.NewProcFS(environment.Paths.ProcRoot), live.Codex, environment.Paths.Roots[pfmengine.Codex],
 			)
 			if err != nil {
 				warn(fmt.Sprintf("Codex idle identity probe: %v", err))
 			}
-			fingerprints := codexRolloutFingerprints(probe.Codex)
-			unchanged := codexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
-			if unchanged && codexRolloutFingerprintsSkippable(probe.Codex) {
+			fingerprints := fleet.CodexRolloutFingerprints(probe.Codex)
+			unchanged := fleet.CodexRolloutFingerprintsEqual(parkedRollouts, fingerprints)
+			if unchanged && fleet.CodexRolloutFingerprintsSkippable(probe.Codex) {
 				// No live Codex PID's FDLinks-observed rollout moved since
 				// the previous poll, AND every one of them already has an
 				// answer procfs alone can stand behind (a held rollout, or a
@@ -901,7 +469,7 @@ func streamFleetRefreshesWith(
 			// a fully verified pass; an unchanged rollout is not proof that
 			// the previous database write succeeded.
 			verified := true
-			changed := reconcileCodexPanes(ctx, database, probe, commandRuntime{Config: environment.config, Paths: environment.paths}, func(message string) {
+			changed := fleet.ReconcileCodexPanes(ctx, database, probe, environment.Runtime(), func(message string) {
 				verified = false
 				warn(message)
 			})
@@ -921,15 +489,15 @@ func streamFleetRefreshesWith(
 			timer.Reset(next)
 		}
 		pendingRefresh = true
-		environment, err = resolveScanEnvironment(request)
+		environment, err = fleet.ResolveEnv(request.fleetRequest())
 		if err != nil {
 			writeRefreshError(ctx, stderr, "", err)
 			continue
 		}
 		if request.View == compose.DefaultView {
-			data, err = loadDefaultFleetData(ctx, database)
+			data, err = fleet.LoadDefaultData(ctx, database)
 		} else {
-			data, err = loadFleetData(ctx, database)
+			data, err = fleet.LoadData(ctx, database)
 		}
 		if err != nil {
 			if !writeRefreshError(ctx, stderr, "", err) {
@@ -937,12 +505,7 @@ func streamFleetRefreshesWith(
 			}
 			continue
 		}
-		live, err = gatherFleet(
-			ctx,
-			database,
-			environment.paths,
-			environment.config,
-			data,
+		live, err = fleet.Gather(ctx, database, environment, data,
 			request.ReadOnly,
 			warn,
 			stderr,
@@ -953,7 +516,7 @@ func streamFleetRefreshesWith(
 			}
 			continue
 		}
-		data, err = enrichLiveFleetData(ctx, database, data, live)
+		data, err = fleet.EnrichLive(ctx, database, data, live)
 		if err != nil {
 			if !writeRefreshError(ctx, stderr, " live cache", err) {
 				return
@@ -962,16 +525,13 @@ func streamFleetRefreshesWith(
 		}
 		movedBinding := false
 		if !request.ReadOnly {
-			movedBinding = reconcileCodexPanes(ctx, database, live, commandRuntime{
-				Config: environment.config,
-				Paths:  environment.paths,
-			}, warn)
+			movedBinding = fleet.ReconcileCodexPanes(ctx, database, live, environment.Runtime(), warn)
 		}
 		if !sendRefresh(ctx, environment, request, data, live, true, updates) {
 			return
 		}
 		if _, err = indexer.Run(ctx, fleetindex.Options{
-			PriorityCWD:  environment.currentDir,
+			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
 			if !writeRefreshError(ctx, stderr, " index", err) {
@@ -979,7 +539,7 @@ func streamFleetRefreshesWith(
 			}
 			continue
 		}
-		data, err = loadFleetData(ctx, database)
+		data, err = fleet.LoadData(ctx, database)
 		if err != nil {
 			if !writeRefreshError(ctx, stderr, "", err) {
 				return
@@ -988,21 +548,18 @@ func streamFleetRefreshesWith(
 		}
 		if movedBinding {
 			// Same stale-snapshot trap as the first pass above: `live` was
-			// gathered before reconcileCodexPanes moved a binding, so the
+			// gathered before fleet.ReconcileCodexPanes moved a binding, so the
 			// resolver's answer for that pane's process still names the thread
 			// it just left. Gather and re-enrich before the final snapshot,
 			// or the successor renders `↻` until the next tick.
-			live, err = gatherFleet(
-				ctx, database, environment.paths, environment.config,
-				data, request.ReadOnly, warn, stderr,
-			)
+			live, err = fleet.Gather(ctx, database, environment, data, request.ReadOnly, warn, stderr)
 			if err != nil {
 				if !writeRefreshError(ctx, stderr, " gather", err) {
 					return
 				}
 				continue
 			}
-			data, err = enrichLiveFleetData(ctx, database, data, live)
+			data, err = fleet.EnrichLive(ctx, database, data, live)
 			if err != nil {
 				if !writeRefreshError(ctx, stderr, " live cache", err) {
 					return
@@ -1020,619 +577,23 @@ func streamFleetRefreshesWith(
 	}
 }
 
-// codexRolloutFingerprint is one Codex PID's FDLinks-observed rollout
-// identity as of the last time it was checked. streamFleetRefreshesWith
-// caches one of these per PID across parked polls so it can tell whether
-// gather.RefreshCodexHeldRollouts' procfs probe actually changed anything
-// before paying for reconcileCodexPanes' tmux capture-pane over every live
-// Codex pane (2026-09-08 measurement — see fleetRefreshParkPollInterval).
-type codexRolloutFingerprint struct {
-	rolloutPath   string
-	rolloutHeld   bool
-	identityError string
-}
-
-// codexRolloutFingerprints snapshots the comparable identity of every PID in
-// codex. Two snapshots with the same fingerprints for the same PID set mean
-// procfs saw no change worth a capture-pane.
-func codexRolloutFingerprints(codex []gather.LiveCodex) map[int]codexRolloutFingerprint {
-	fingerprints := make(map[int]codexRolloutFingerprint, len(codex))
-	for _, process := range codex {
-		fingerprints[process.PID] = codexRolloutFingerprint{
-			rolloutPath:   process.RolloutPath,
-			rolloutHeld:   process.RolloutHeld,
-			identityError: process.IdentityError,
-		}
-	}
-	return fingerprints
-}
-
-// codexRolloutFingerprintsEqual reports whether two fingerprint snapshots
-// name the exact same PIDs holding the exact same rollout identities. A
-// PID appearing, disappearing, or changing what it holds all count as a
-// change — only bit-for-bit agreement counts as "nothing moved".
-func codexRolloutFingerprintsEqual(a, b map[int]codexRolloutFingerprint) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for pid, fingerprint := range a {
-		other, found := b[pid]
-		if !found || other != fingerprint {
-			return false
-		}
-	}
-	return true
-}
-
-// codexRolloutFingerprintsSkippable reports whether procfs alone already
-// pins the resolved identity for EVERY live Codex process, making a
-// capture-pane over their panes redundant when combined with an unchanged
-// fingerprint. observeCodexPanes overrides whatever a pane's screen shows in
-// exactly two cases: a process holding its own rollout open (RolloutHeld —
-// the live process wins outright) and a process carrying an IdentityError
-// (processConflicts forces identity.Failed regardless of pane text). Every
-// OTHER live Codex process — RolloutHeld false with no error, the shape
-// DetectCodexThreads' own doc calls "the normal shape of a paginated thread
-// since Codex 0.146.1" — has no procfs-derived opinion at all: the pane's
-// own screen is the only identity signal that exists for it, so it is never
-// skippable no matter how long its (nonexistent) rollout stays the same.
-func codexRolloutFingerprintsSkippable(codex []gather.LiveCodex) bool {
-	for _, process := range codex {
-		if !process.RolloutHeld && process.IdentityError == "" {
-			return false
-		}
-	}
-	return true
-}
-
-// codexRenamerFor returns the tmux driver reconcileCodexPanes re-applies a
-// chat's name through after a clear. It is a variable so a test can substitute
-// a driver: renaming is the one step of the pass that has to talk to a live
-// Codex composer, so before this seam existed the step had NO automated
-// coverage — and neither did anything sequenced after it. That is exactly
-// where the missing cx_names record hid.
-var codexRenamerFor = func(runtime commandRuntime) spawn.Tmux {
-	return spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir}
-}
-
-// reconcileCodexPanes is the clear-detection pass itself, run every gather
-// pass: for each live Codex pane it reads the pane's own status line, hands
-// every pane at once to decideCodexPanes, and applies that ruling — advance
-// the binding, retire the thread a /clear replaced with the same
-// prompt-baseline kill Claude's SessionEnd hook gets, and re-apply the chat's
-// established name to the new thread. Codex has no launch flag for a thread
-// name, so without that last step the pane runs the new thread unnamed
-// forever.
-//
-// The ruling itself lives in codexpanes.go, pure and shared with
-// `pfm doctor`, so the health report cannot disagree with the decision it
-// reports on. Read the law at the top of that file before changing anything
-// here: a name may SEED an unbound pane, and only an observed thread id may
-// MOVE one.
-//
-// Every pane this pass declines to act on carries a reason. The loud ones
-// reach stderr now; the rest wait in `pfm doctor --verbose`, because this
-// runs behind an interactive picker and a warning on every pass for an
-// ordinary one-refresh lag is how a real signal gets tuned out.
-func reconcileCodexPanes(
-	ctx context.Context,
-	database *store.Store,
-	live gather.Snapshot,
-	runtime commandRuntime,
-	warn gatherWarn,
-) bool {
-	changed := false
-	manager, err := kill.New(database, killDependencies(runtime))
-	if err != nil {
-		warn(fmt.Sprintf("Codex pane reconcile: %v", err))
-		return changed
-	}
-	cxNames, err := database.CxNames(ctx)
-	if err != nil {
-		warn(fmt.Sprintf("Codex pane reconcile: read thread names: %v", err))
-		return changed
-	}
-	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
-	renamer := codexRenamerFor(runtime)
-
-	_, actions := observeCodexPanes(ctx, database, manager, capturer, live, runtime, cxNames, warn)
-	for _, action := range actions {
-		if action.Skip != "" && action.Bind == "" {
-			switch {
-			case action.Forget:
-				// One event, one line. The reason and the repair are the same
-				// event, and reporting them as two separate warnings taught an
-				// operator that a SUCCESSFUL self-repair looks like a pair of
-				// failures. Only the pass that WRITES may claim the write —
-				// the same reason string reaches read-only `pfm doctor`, and a
-				// report claiming a repair it never performed is the failure
-				// mode this whole wave is about.
-				if err := manager.ForgetCodexPane(ctx, action.Socket, action.PaneID); err != nil {
-					warn(fmt.Sprintf(
-						"codex pane %s %s: %s — drop failed: %v",
-						action.Socket, action.PaneID, action.Skip, err,
-					))
-				} else {
-					changed = true
-					warn(fmt.Sprintf(
-						"codex pane %s %s: repaired — %s; binding dropped",
-						action.Socket, action.PaneID, action.Skip,
-					))
-				}
-			case action.Loud:
-				warn(fmt.Sprintf(
-					"codex pane %s %s: %s",
-					action.Socket, action.PaneID, action.Skip,
-				))
-			}
-			continue
-		}
-		if action.Skip != "" && action.Loud {
-			warn(fmt.Sprintf(
-				"codex pane %s %s: %s",
-				action.Socket, action.PaneID, action.Skip,
-			))
-		}
-		var target kill.Target
-		if action.ClearKill != "" {
-			var recorded bool
-			target, recorded, err = manager.KillClearedCodex(ctx, action.ClearKill)
-			if err != nil {
-				warn(fmt.Sprintf("codex pane %s %s: record clear kill (binding retained for retry): %v", action.Socket, action.PaneID, err))
-				continue
-			}
-			if !recorded {
-				warn(fmt.Sprintf("codex pane %s %s: clear lineage %s unavailable; binding retained for retry", action.Socket, action.PaneID, action.ClearKill))
-				continue
-			}
-			changed = true
-		}
-		if _, moved, err := manager.AdvanceCodexPane(
-			ctx, action.Socket, action.PaneID, action.Bind,
-		); err != nil {
-			warn(fmt.Sprintf(
-				"codex pane %s %s: advance binding: %v", action.Socket, action.PaneID, err,
-			))
-			continue
-		} else {
-			changed = changed || moved
-		}
-		if action.ClearKill == "" {
-			continue
-		}
-		// The name is stored per THREAD, so the cleared thread's own row is
-		// the one that carries it. The lineage root is the fallback for a
-		// cleared thread that was itself a resumed child: its row can be
-		// absent while the root's is not.
-		name := cxNames[action.ClearKill]
-		if name == "" {
-			name = cxNames[target.ID]
-		}
-		if name == "" {
-			continue
-		}
-		warning, renameErr := spawn.RenameCodex(
-			ctx, renamer, action.Socket, action.PaneID, name, spawn.Defaults(), spawn.Trace{},
-		)
-		if renameErr != nil {
-			warn(fmt.Sprintf("codex pane %s %s: re-apply chat name after clear: %v", action.Socket, action.PaneID, renameErr))
-			continue
-		}
-		if warning != "" {
-			warn(fmt.Sprintf("codex pane %s %s: chat name was not re-applied after clear: %s", action.Socket, action.PaneID, warning))
-			continue
-		}
-		// Record the rename pfm just performed, rather than waiting for it to
-		// come back around through Codex's session index.
-		//
-		// Without this the pass leaves a trap it set itself. cx_names is only
-		// ever refreshed by an index pass, so between the rename and the next
-		// one the chat's name resolves to exactly ONE thread — the retired
-		// pre-clear one. A pane that then loses its binding for any reason is
-		// unbindable: a name may seed an unbound pane, but every thread that
-		// name matches is retired, so nothing may seed it. It warns on every
-		// refresh and never recovers. pfm authored this rename; it does not
-		// need a mirror to tell it what it just did.
-		if err := database.UpsertCxName(ctx, store.CxName{
-			ID:         action.Bind,
-			ThreadName: name,
-			Source:     store.CxNameSourceSessionIndex,
-			RenamedAt:  time.Now().UnixNano(),
-		}); err != nil {
-			warn(fmt.Sprintf(
-				"codex pane %s %s: record re-applied chat name: %v",
-				action.Socket, action.PaneID, err,
-			))
-		}
-	}
-	return changed
-}
-
-// observeCodexPanes captures every live Codex pane, pairs each with the
-// binding pfm currently holds for it, and returns both the observations and
-// the ruling decideCodexPanes made over them. `pfm doctor` calls it for the
-// observations alone, which is why it never writes: the health report must be
-// able to describe this pass without performing it.
-func observeCodexPanes(
-	ctx context.Context,
-	database *store.Store,
-	manager *kill.Manager,
-	capturer gather.PaneCapturer,
-	live gather.Snapshot,
-	runtime commandRuntime,
-	cxNames map[string]string,
-	warn gatherWarn,
-) ([]codexPaneObservation, []codexPaneAction) {
-	// A rollout held open by the pane's live Codex process is its current
-	// conversation even when the TUI status line has already returned to the
-	// display name. Compact/reset continuations can rotate that rollout without
-	// restarting the process, which makes argv, inherited CODEX_THREAD_ID, and
-	// an existing pane binding birth records rather than current identity.
-	processThreads := make(map[string]string, len(live.Codex))
-	processConflicts := make(map[string]bool)
-	for _, process := range live.Codex {
-		if process.IdentityError != "" {
-			processConflicts[process.Socket+"\x00"+process.PaneID] = true
-			warn(fmt.Sprintf("codex pane %s %s: %s; binding not guessed", process.Socket, process.PaneID, process.IdentityError))
-			continue
-		}
-
-		// Only a rollout the process itself has open right now may override
-		// the screen. A resolver-derived identity (binding/argv/env guess,
-		// RolloutHeld false) never enters this map, so it can never overrule
-		// what the pane's own status line just said.
-		if !process.RolloutHeld {
-			continue
-		}
-		id := gather.CodexRolloutID(process.RolloutPath)
-		if id == "" {
-			continue
-		}
-		key := process.Socket + "\x00" + process.PaneID
-		if previous := processThreads[key]; previous != "" && previous != id {
-			processConflicts[key] = true
-			warn(fmt.Sprintf(
-				"codex pane %s %s: live processes hold conflicting rollouts %s and %s; binding not guessed",
-				process.Socket, process.PaneID, previous, id,
-			))
-			continue
-		}
-		processThreads[key] = id
-	}
-	identities := gather.CaptureCodexIdentity(ctx, capturer, live.Panes)
-	observations := make([]codexPaneObservation, 0, len(identities))
-	for _, identity := range identities {
-		key := identity.Socket + "\x00" + identity.PaneID
-		if processID := processThreads[key]; processID != "" && !processConflicts[key] {
-			if identity.Failed {
-				warn(fmt.Sprintf(
-					"codex pane %s %s: capture failed, but its live process holds rollout %s",
-					identity.Socket, identity.PaneID, processID,
-				))
-			} else if identity.ThreadID != "" && identity.ThreadID != processID {
-				warn(fmt.Sprintf(
-					"codex pane %s %s: status thread %s disagrees with live process rollout %s; using the live rollout",
-					identity.Socket, identity.PaneID, identity.ThreadID, processID,
-				))
-			}
-			identity.Name = ""
-			identity.ThreadID = processID
-			identity.Failed = false
-		}
-		if processConflicts[key] {
-			identity.Failed = true
-			identity.ThreadID = ""
-			identity.Name = ""
-		}
-		observation := codexPaneObservation{
-			Socket: identity.Socket, PaneID: identity.PaneID,
-			Name: identity.Name, ThreadID: identity.ThreadID, Failed: identity.Failed,
-		}
-		if !identity.Failed {
-			bound, found, bindErr := manager.CodexPaneBinding(ctx, identity.Socket, identity.PaneID)
-			if bindErr != nil {
-				// A store read that failed is not an unbound pane. Treating it
-				// as one would let a name seed a binding over a live one.
-				warn(fmt.Sprintf(
-					"codex pane %s %s: read binding: %v",
-					identity.Socket, identity.PaneID, bindErr,
-				))
-				continue
-			}
-			if found {
-				observation.Bound = bound
-			}
-		}
-		observations = append(observations, observation)
-	}
-	return observations, decideCodexPanes(
-		observations, cxNames, codexTitleThreads(ctx, runtime, warn),
-		codexLineageRoots(ctx, database), codexRetiredThreads(ctx, database),
-	)
-}
-
-// codexTitleThreads builds the title index a Codex status-line NAME can move
-// a binding through: exact thread title (threads.title, trimmed) to thread
-// ids, sorted. It reads the same state-store lister
-// store.NewCodexThreadResolverRoots already reads — store.CodexStateFiles then
-// store.ReadCodexThreads, over the runtime's own Codex roots — never a second
-// walker over the same stores. A lister failure is WARNed by name and leaves
-// the index empty for this pass: an empty title index only means "no title
-// can move anything this pass", and it never blocks the bare-id path this
-// file's own header describes.
-func codexTitleThreads(
-	ctx context.Context,
-	runtime commandRuntime,
-	warn gatherWarn,
-) map[string][]string {
-	titleThreads := make(map[string][]string)
-	codexRoots := runtime.Paths.Roots[pfmengine.Codex]
-	files := make([]string, 0, len(codexRoots))
-	for _, codexRoot := range codexRoots {
-		rootFiles, err := store.CodexStateFiles(codexRoot)
-		if err != nil {
-			warn(fmt.Sprintf(
-				"codex pane reconcile: list Codex state store %q: %v", codexRoot, err,
-			))
-			continue
-		}
-		files = append(files, rootFiles...)
-	}
-	threads, err := store.ReadCodexThreads(ctx, files)
-	if err != nil {
-		warn(fmt.Sprintf("codex pane reconcile: read Codex state stores: %v", err))
-		return titleThreads
-	}
-	for _, thread := range threads {
-		if thread.Title == "" {
-			continue
-		}
-		titleThreads[thread.Title] = append(titleThreads[thread.Title], thread.ID)
-	}
-	for title := range titleThreads {
-		sort.Strings(titleThreads[title])
-	}
-	return titleThreads
-}
-
-// codexRetiredThreads answers whether a thread was retired by a /clear,
-// reading the kill table at most once per pass and only when asked.
-//
-// The "known" return is what keeps this honest. A kill table that could not be
-// read answers (false, false), and every caller treats that as "do not act" —
-// so a store outage can never be mistaken for proof that a thread is alive,
-// nor let a live binding be dropped. Only a CLEAR retirement counts: an
-// explicit `pfm chat kill` hides a chat that is still perfectly alive in its
-// pane, and dropping that pane's binding would be wrong.
-func codexRetiredThreads(ctx context.Context, database *store.Store) codexThreadRetired {
-	var (
-		loaded  bool
-		broken  bool
-		records map[string]store.Killed
-	)
-	return func(id string) (bool, bool) {
-		if id == "" {
-			return false, false
-		}
-		if !loaded {
-			loaded = true
-			killed, err := database.KilledChats(ctx)
-			if err != nil {
-				broken = true
-			} else {
-				records = make(map[string]store.Killed, len(killed))
-				for _, record := range killed {
-					records[record.ID] = record
-				}
-			}
-		}
-		if broken {
-			return false, false
-		}
-		record, found := records[id]
-		return found && record.BaselinePrompts != nil, true
-	}
-}
-
-// codexLineageRoots resolves thread ids to lineage roots, loading the rollout
-// table at most once and only when a caller actually asks — the common pass
-// moves no binding and never needs it.
-//
-// It returns "" for one reason only: the rollouts could not be read. A thread
-// that is simply its own root answers with its own id. That distinction is
-// load-bearing — decideCodexPanes reads "" as "we failed to look" and refuses
-// to call a clear on it.
-func codexLineageRoots(ctx context.Context, database *store.Store) func(string) string {
-	var (
-		loaded bool
-		broken bool
-		roots  map[string]string
-	)
-	return func(id string) string {
-		if id == "" {
-			return ""
-		}
-		if !loaded {
-			loaded = true
-			rollouts, err := database.Rollouts(ctx)
-			if err != nil {
-				broken = true
-			} else {
-				_, roots = store.ResolveCodexLineages(rollouts)
-			}
-		}
-		if broken {
-			return ""
-		}
-		if root := roots[id]; root != "" {
-			return root
-		}
-		return id
-	}
-}
-
-func enrichLiveFleetData(
-	ctx context.Context,
-	database *store.Store,
-	data fleetData,
-	live gather.Snapshot,
-) (fleetData, error) {
-	transcriptIDs := make(map[string]struct{}, len(data.transcripts))
-	for _, transcript := range data.transcripts {
-		transcriptIDs[transcript.UUID] = struct{}{}
-	}
-	wantedTranscripts := make(map[string]struct{})
-	for _, crumb := range live.Crumbs {
-		id := strings.TrimSuffix(
-			filepath.Base(crumb.TranscriptPath),
-			filepath.Ext(crumb.TranscriptPath),
-		)
-		if id != "" {
-			wantedTranscripts[id] = struct{}{}
-		}
-	}
-	for _, agent := range live.Agents {
-		if agent.SessionID != "" {
-			wantedTranscripts[agent.SessionID] = struct{}{}
-		}
-	}
-	for id := range wantedTranscripts {
-		if _, found := transcriptIDs[id]; found {
-			continue
-		}
-		transcript, found, err := database.Transcript(ctx, id)
-		if err != nil {
-			return fleetData{}, err
-		}
-		if found {
-			data.transcripts = append(data.transcripts, transcript)
-			transcriptIDs[id] = struct{}{}
-		}
-	}
-
-	rolloutIDs := make(map[string]struct{}, len(data.rollouts))
-	for _, rollout := range data.rollouts {
-		rolloutIDs[rollout.ID] = struct{}{}
-	}
-	for _, process := range live.Codex {
-		id := rolloutIDFromPath(process.RolloutPath)
-		if id == "" {
-			continue
-		}
-		if _, found := rolloutIDs[id]; found {
-			continue
-		}
-		family, err := database.RolloutLineage(ctx, id)
-		if err != nil {
-			return fleetData{}, err
-		}
-		for _, rollout := range family {
-			if _, found := rolloutIDs[rollout.ID]; found {
-				continue
-			}
-			data.rollouts = append(data.rollouts, rollout)
-			rolloutIDs[id] = struct{}{}
-			rolloutIDs[rollout.ID] = struct{}{}
-		}
-	}
-	return data, nil
-}
-
-func rolloutIDFromPath(path string) string {
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	rest := strings.TrimPrefix(stem, "rollout-")
-	if len(rest) > 20 &&
-		rest[4] == '-' &&
-		rest[7] == '-' &&
-		rest[10] == 'T' &&
-		rest[13] == '-' &&
-		rest[16] == '-' &&
-		rest[19] == '-' {
-		return rest[20:]
-	}
-	return rest
-}
-
 func sendRefresh(
 	ctx context.Context,
-	environment scanEnvironment,
+	environment fleet.Env,
 	request scanRequest,
-	data fleetData,
+	data fleet.Data,
 	live gather.Snapshot,
 	refreshing bool,
 	updates chan<- ui.Snapshot,
 ) bool {
-	result := composeFleet(ctx, environment, request, data, live)
-	result.Snapshot.Refreshing = refreshing
+	snapshot := buildSnapshot(ctx, environment, request, fleet.Compose(environment, request.View, data, live))
+	snapshot.Refreshing = refreshing
 	select {
-	case updates <- result.Snapshot:
+	case updates <- snapshot:
 		return true
 	case <-ctx.Done():
 		return false
 	}
-}
-
-func accountRoots(accounts []pfmconfig.Account) []compose.AccountRoot {
-	roots := make([]compose.AccountRoot, 0, len(accounts))
-	for _, account := range accounts {
-		path := account.ProjectDir
-		if resolved, err := filepath.EvalSymlinks(account.ProjectDir); err == nil {
-			path = resolved
-		} else if absolute, err := filepath.Abs(account.ProjectDir); err == nil {
-			path = absolute
-		}
-		roots = append(roots, compose.AccountRoot{
-			Account: account.ID,
-			Path:    filepath.Clean(path),
-		})
-	}
-	return roots
-}
-
-// readPrimaryAccount resolves the shared database's meta row first, then the
-// ~/.claude-primary mirror, and maps anything off the roster to the first
-// configured account.
-//
-// Reading the mirror alone is how the picker came up showing a different
-// account from the one the launchers used: primary-set writes both, but a
-// database restored without the file, or a file left behind by a rollback,
-// makes them disagree, and only one of the two is authoritative.
-func readPrimaryAccount(
-	values paths.Values,
-	configs ...pfmconfig.Config,
-) int {
-	machine := pfmconfig.Defaults(values.Home, values.Roots[pfmengine.Claude])
-	if len(configs) != 0 {
-		machine = configs[0]
-	}
-	account, found := shared.PrimaryAccount(context.Background(), values)
-	if found {
-		if _, exists := machine.Account(account); exists {
-			return account
-		}
-	}
-	if len(machine.Accounts) != 0 {
-		return machine.Accounts[0].ID
-	}
-	return 1
-}
-
-// writePrimaryAccount validates the operator-facing roster before committing
-// the shared state row and statusline mirror as one reported operation.
-func writePrimaryAccount(
-	values paths.Values,
-	machine pfmconfig.Config,
-	account int,
-) error {
-	if _, found := machine.Account(account); !found {
-		return fmt.Errorf("primary account %d is not in the configured roster", account)
-	}
-	return shared.SetPrimaryAccount(
-		context.Background(),
-		values,
-		account,
-		time.Now().Unix(),
-	)
 }
 
 // primaryWriteback decides whether an ls session's picker outcome is worth
@@ -1652,17 +613,6 @@ func primaryWriteback(kind ui.OutcomeKind, account, current int) (int, bool) {
 	return account, true
 }
 
-func currentSocket() string {
-	value := os.Getenv("TMUX")
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		value = value[:comma]
-	}
-	if value == "" {
-		return ""
-	}
-	return filepath.Base(value)
-}
-
 func inBunker() bool {
-	return currentSocket() == "vsct"
+	return fleet.CurrentSocket() == "vsct"
 }

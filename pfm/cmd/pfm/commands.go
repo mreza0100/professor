@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"io"
 	"os"
 	"path/filepath"
@@ -200,9 +201,9 @@ func runLS(
 	if account, should := primaryWriteback(
 		outcome.Kind,
 		claudePrimary,
-		readPrimaryAccount(scan.Paths, runtime.Config),
+		fleet.PrimaryAccount(scan.Paths, runtime.Config),
 	); should {
-		if err := writePrimaryAccount(scan.Paths, runtime.Config, account); err != nil {
+		if err := fleet.SetPrimaryAccount(scan.Paths, runtime.Config, account); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: save primary account: %v\n", err)
 			return 1
 		}
@@ -339,7 +340,7 @@ func openID(
 	}
 	for _, row := range scan.Output.Rows {
 		if row.ID == id {
-			primary := readPrimaryAccount(scan.Paths, runtime.Config)
+			primary := fleet.PrimaryAccount(scan.Paths, runtime.Config)
 			return openRow(
 				ctx,
 				row,
@@ -388,7 +389,7 @@ func openRowWithPrompt(
 	// The Codex projection repair rides the resume path itself: a wedged
 	// thread is repaired in the same breath that opens it, with no shell
 	// helper in the run string to be missing, unexecutable, or stale.
-	healCodexRoot := firstRoot(resolved.Roots[pfmengine.Codex])
+	healCodexRoot := resolved.FirstRoot(pfmengine.Codex)
 	if account, found := runtime.Config.CodexAccountByID(primary); found {
 		healCodexRoot = account.Home
 	}
@@ -508,7 +509,7 @@ func killApplier(
 	database *store.Store,
 	runtime commandRuntime,
 ) (func(ui.KillChange) error, error) {
-	manager, err := kill.New(database, killDependencies(runtime))
+	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
 		return nil, err
 	}
@@ -530,15 +531,6 @@ func killApplier(
 		}
 		return nil
 	}, nil
-}
-
-func killDependencies(runtime commandRuntime) kill.Dependencies {
-	return kill.Dependencies{
-		Paths:       runtime.Paths,
-		ClaudeRoots: append([]string(nil), runtime.Paths.Roots[pfmengine.Claude]...),
-		CodexRoots:  codexHomes(runtime.Config),
-		ConfigPath:  runtime.Config.Path,
-	}
 }
 
 // killChatServer ends one chat's tmux server and removes every handle that

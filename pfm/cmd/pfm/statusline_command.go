@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/nudge"
 	"hostops/pfm/internal/statusline"
@@ -21,7 +22,7 @@ var statuslineGPTOptions = func() statusline.GPTOptions {
 }
 
 func runStatusline(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline: load config (fail-open): %v\n", err)
 		return 0
@@ -146,7 +147,7 @@ func canonicalAccountPath(path string) string {
 }
 
 func runUsageHook(args []string, stdout, stderr io.Writer) int {
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm usage-hook: load config (fail-open): %v\n", err)
 		return 0

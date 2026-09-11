@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/paths"
 )
@@ -255,7 +255,7 @@ func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *testing.T) {
 	jailTest(t)
 	repo := newTaggedBuildFixture(t)
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 	jailTest(t)
 	repo := newTaggedBuildFixture(t)
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +590,7 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	repo := newUpdateGitFixture(t)
 	runtime := updateTestRuntime(t)
 	home := runtime.Paths.Home
-	runtime.Config = config.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")})
+	runtime.Config = pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")})
 	settings = filepath.Join(home, ".cc", "1", "settings.json")
 	canonical := filepath.Join(home, ".local", "bin", "pfm")
 	original = []byte("{\n  \"hooks\": {}\n}\n")

@@ -15,7 +15,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/fleet"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/shared"
@@ -43,33 +43,31 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 			AtNS: nowNS - 1, Kind: shared.KindInject,
 			SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 		}}}
-		result := composeFleet(
+		snapshot := buildSnapshot(
 			context.Background(),
-			scanEnvironment{nowNS: nowNS},
+			fleet.Env{NowNS: nowNS},
 			scanRequest{Comms: reader},
-			fleetData{},
-			gather.Snapshot{},
+			compose.Output{},
 		)
 		if reader.sinceNS != nowNS-int64(compose.CosmosWindow) || reader.limit != compose.CosmosEventCap {
 			t.Fatalf("CommsSince() args = %d, %d", reader.sinceNS, reader.limit)
 		}
-		if result.Snapshot.Cosmos.Err != "" || len(result.Snapshot.Cosmos.Edges) != 1 {
-			t.Fatalf("Cosmos = %#v", result.Snapshot.Cosmos)
+		if snapshot.Cosmos.Err != "" || len(snapshot.Cosmos.Edges) != 1 {
+			t.Fatalf("Cosmos = %#v", snapshot.Cosmos)
 		}
 	})
 
 	t.Run("read failure", func(t *testing.T) {
 		reader := &fakeCommsReader{err: errors.New("database unavailable")}
-		result := composeFleet(
+		snapshot := buildSnapshot(
 			context.Background(),
-			scanEnvironment{nowNS: nowNS},
+			fleet.Env{NowNS: nowNS},
 			scanRequest{Comms: reader},
-			fleetData{},
-			gather.Snapshot{},
+			compose.Output{},
 		)
-		if !strings.Contains(result.Snapshot.Cosmos.Err, "database unavailable") ||
-			len(result.Snapshot.Cosmos.Nodes) != 0 {
-			t.Fatalf("failed Cosmos = %#v", result.Snapshot.Cosmos)
+		if !strings.Contains(snapshot.Cosmos.Err, "database unavailable") ||
+			len(snapshot.Cosmos.Nodes) != 0 {
+			t.Fatalf("failed Cosmos = %#v", snapshot.Cosmos)
 		}
 	})
 
@@ -81,14 +79,13 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 				SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 			}
 		}
-		result := composeFleet(
+		snapshot := buildSnapshot(
 			context.Background(),
-			scanEnvironment{nowNS: nowNS},
+			fleet.Env{NowNS: nowNS},
 			scanRequest{Comms: &fakeCommsReader{events: events}},
-			fleetData{},
-			gather.Snapshot{},
+			compose.Output{},
 		)
-		warnings := result.Snapshot.Cosmos.Warnings
+		warnings := snapshot.Cosmos.Warnings
 		if len(warnings) != 1 || warnings[0] != compose.CosmosTruncationWarning {
 			t.Fatalf("cap warnings = %v", warnings)
 		}
@@ -124,7 +121,7 @@ func TestCanceledPickerRefreshExitsWithoutReportingARefreshFailure(t *testing.T)
 		ctx,
 		database,
 		scanRequest{},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{},
@@ -165,7 +162,7 @@ func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
 		ctx,
 		database,
 		scanRequest{},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{newIndexer: func(*store.Store) (indexRunner, error) {
@@ -329,7 +326,7 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 		refreshContext,
 		database,
 		request,
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{
@@ -452,7 +449,7 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 			stormContext,
 			database,
 			request,
-			printWarn(stormStderr),
+			fleet.PrintWarn(stormStderr),
 			stormStderr,
 			updates,
 			refreshDependencies{
@@ -501,68 +498,6 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 	)
 }
 
-// TestPrimaryAccountGoesThroughTheStateStore fixtures the OUTCOME of a picker
-// account change: the shared store validates the roster and mirrors the choice
-// into ~/.claude-primary for the statusline.
-func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
-	home := t.TempDir()
-	values := paths.Values{
-		Home:     home,
-		SharedDB: filepath.Join(home, ".cc", "fleet.db"),
-	}
-	machine := config.Defaults(home, []string{
-		filepath.Join(home, ".cc", "1", "projects"),
-		filepath.Join(home, ".cc", "2", "projects"),
-		filepath.Join(home, ".cc", "3", "projects"),
-	})
-	if err := writePrimaryAccount(values, machine, 3); err != nil {
-		t.Fatalf("writePrimaryAccount() = %v", err)
-	}
-	if got := readPrimaryAccount(values, machine); got != 3 {
-		t.Fatalf("readPrimaryAccount() = %d", got)
-	}
-	content, err := os.ReadFile(filepath.Join(home, ".claude-primary"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "3\n" {
-		t.Fatalf("primary mirror = %q", content)
-	}
-
-	if err := writePrimaryAccount(values, machine, 4); err == nil {
-		t.Fatal("off-roster account accepted")
-	}
-
-	// An unavailable database degrades to the mirror, so account selection is
-	// never down because the durable store cannot open.
-	bare := t.TempDir()
-	blocked := filepath.Join(bare, "blocked")
-	if err := os.WriteFile(blocked, []byte("file"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	bareValues := paths.Values{
-		Home:     bare,
-		SharedDB: filepath.Join(blocked, "fleet.db"),
-	}
-	if err := writePrimaryAccount(bareValues, machine, 2); err != nil {
-		t.Fatalf("fallback writePrimaryAccount() = %v", err)
-	}
-	if got := readPrimaryAccount(bareValues, machine); got != 2 {
-		t.Fatalf("fallback readPrimaryAccount() = %d", got)
-	}
-	// A stale file naming a retired account reads back as the first account.
-	if err := os.WriteFile(
-		filepath.Join(bare, ".claude-primary"),
-		[]byte("4\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if got := readPrimaryAccount(bareValues, machine); got != 1 {
-		t.Fatalf("off-roster file readPrimaryAccount() = %d", got)
-	}
-}
-
 // TestInternalPrimarySetGetDispatch is F5's regression test: the retired
 // TestShimLaunchPosture (shim/shim_test.go) was the only place that ran a
 // primary-account switch through `pfm internal primary-set` / `primary-get`
@@ -570,7 +505,7 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 // shell-script "pfm" fixture, never the real Go dispatch — the shell
 // functions it exercised (_cc_run, cc-swap, _cc_primary) are exactly what
 // this PR retires. TestPrimaryAccountGoesThroughTheStateStore above already
-// proves writePrimaryAccount/readPrimaryAccount persist through the shared
+// proves fleet.SetPrimaryAccount/fleet.PrimaryAccount persist through the shared
 // store; this test proves the thin CLI argv layer around them — runInternal
 // itself, main.go's "primary-set" (~419-450) and "primary-get" (~421)
 // cases — actually reaches those functions with the right parsing, output,
@@ -675,11 +610,11 @@ func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 		filepath.Join(home, ".cc", "3", "projects"),
 	})
 
-	if err := writePrimaryAccount(values, machine, 0); err == nil {
-		t.Fatal("writePrimaryAccount(0) accepted the sentinel — roster check regressed")
+	if err := fleet.SetPrimaryAccount(values, machine, 0); err == nil {
+		t.Fatal("fleet.SetPrimaryAccount(0) accepted the sentinel — roster check regressed")
 	}
 
-	if _, should := primaryWriteback(ui.OutcomeSelected, 0, readPrimaryAccount(values, machine)); should {
+	if _, should := primaryWriteback(ui.OutcomeSelected, 0, fleet.PrimaryAccount(values, machine)); should {
 		t.Fatal("primaryWriteback let the unset sentinel through — runLS would still crash")
 	}
 }

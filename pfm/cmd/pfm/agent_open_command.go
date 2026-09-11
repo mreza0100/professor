@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"hostops/pfm/internal/agentopen"
+	"hostops/pfm/internal/fleet"
 )
 
 // runInternalAgentOpen is deliberately absent from operator help. It is the
@@ -29,7 +30,7 @@ func runInternalAgentOpen(
 		return 2
 	}
 	resolved := runtime.Paths
-	primary := readPrimaryAccount(resolved, runtime.Config)
+	primary := fleet.PrimaryAccount(resolved, runtime.Config)
 	accounts := make([]agentopen.Account, 0, len(runtime.Config.Accounts))
 	for _, account := range runtime.Config.Accounts {
 		configDir := account.ConfigDir

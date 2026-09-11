@@ -14,6 +14,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/spawn"
@@ -159,12 +160,12 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -215,12 +216,12 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 
 	var stderr bytes.Buffer
 	// No server was ever started on this socket: capture-pane fails.
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	if !strings.Contains(stderr.String(), "capture failed") {
@@ -281,7 +282,7 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{
@@ -289,7 +290,7 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 			codexPane(steadySocket, "%0"),
 		}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	if _, found, err := database.Killed(context.Background(), clearingOldID); err != nil || !found {
@@ -345,12 +346,12 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	if stderr.Len() != 0 {
@@ -414,12 +415,12 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			}
 
 			var stderr bytes.Buffer
-			reconcileCodexPanes(
+			fleet.ReconcileCodexPanes(
 				context.Background(),
 				database,
 				gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 				commandRuntime{Paths: resolved},
-				printWarn(&stderr),
+				fleet.PrintWarn(&stderr),
 			)
 			if stderr.Len() != 0 {
 				t.Fatalf("valid duplicate-name state printed a shutdown warning: %q", stderr.String())
@@ -468,12 +469,12 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 	if stderr.Len() != 0 {
 		t.Fatalf("empty Codex name printed a shutdown warning: %q", stderr.String())
@@ -570,12 +571,12 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -630,12 +631,12 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(first, "%0"), codexPane(second, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bindings := 0
@@ -651,7 +652,7 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	if bindings != 1 {
 		t.Fatalf("%d panes bound to one thread, want exactly 1: stderr=%q", bindings, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), codexPaneNameTaken) {
+	if !strings.Contains(stderr.String(), fleet.CodexPaneNameTaken) {
 		t.Fatalf("the refused pane was silent: stderr=%q", stderr.String())
 	}
 }
@@ -692,12 +693,12 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -762,7 +763,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	)
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{
@@ -773,7 +774,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 			}},
 		},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -861,7 +862,7 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{
@@ -874,7 +875,7 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 			}},
 		},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -934,7 +935,7 @@ func codexJailStateTitle(t *testing.T, codexRoot, id, title, cwd string) {
 // reply, so the pane's status line shows that TITLE, not a bare id, by the
 // time this pass runs. B's rollout is already on disk (pfm's own store, via
 // codexJailRollout) and Codex's OWN state store already carries B's title —
-// the index T2 (codexTitleThreads) reads. B is a real, strictly newer UUIDv7
+// the index T2 (fleet.CodexTitleThreads) reads. B is a real, strictly newer UUIDv7
 // than A, so T3's forward-move law lets the title advance the binding.
 // Watched RED with T3 neutralized (name branch returning CannotMove
 // unconditionally): see TestDecideCodexPaneRulings.
@@ -975,7 +976,7 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{
@@ -991,7 +992,7 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 			}},
 		},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -1056,12 +1057,12 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	bound, found, err := manager.CodexPaneBinding(ctx, socket, "%0")
@@ -1071,8 +1072,8 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	if found {
 		t.Fatalf("the impossible binding survived, still on %q: stderr=%q", bound, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), codexPaneBindingRetired) &&
-		!strings.Contains(stderr.String(), codexPaneNameRetired) {
+	if !strings.Contains(stderr.String(), fleet.CodexPaneBindingRetired) &&
+		!strings.Contains(stderr.String(), fleet.CodexPaneNameRetired) {
 		t.Fatalf("the repair was silent: stderr=%q", stderr.String())
 	}
 
@@ -1081,12 +1082,12 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	const liveID = "88888888-8888-4888-8888-888888888888"
 	const reseated = "cx-1800000013-2-2"
 	startCodexStatusPane(t, tmuxTmpDir, reseated, "  "+liveID+` · /work/example · Full Access\n`)
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(reseated, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 	bound, found, err = manager.CodexPaneBinding(ctx, reseated, "%0")
 	if err != nil || !found || bound != liveID {
@@ -1162,17 +1163,17 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	previousRenamer := codexRenamerFor
-	codexRenamerFor = func(commandRuntime) spawn.Tmux { return fakeCodexRenamer{name: chatName} }
-	t.Cleanup(func() { codexRenamerFor = previousRenamer })
+	previousRenamer := fleet.CodexRenamerFor
+	fleet.CodexRenamerFor = func(commandRuntime) spawn.Tmux { return fakeCodexRenamer{name: chatName} }
+	t.Cleanup(func() { fleet.CodexRenamerFor = previousRenamer })
 
 	var stderr bytes.Buffer
-	reconcileCodexPanes(
+	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 	)
 
 	names, err := database.CxNames(context.Background())
@@ -1198,23 +1199,23 @@ func TestAReAppliedNameReSeatsAnUnboundPane(t *testing.T) {
 	const chatName = "ENGINE_BUILDER"
 
 	retired := func(id string) (bool, bool) { return id == retiredID, true }
-	observations := []codexPaneObservation{
+	observations := []fleet.CodexPaneObservation{
 		{Socket: "cx-1", PaneID: "%0", Name: chatName},
 	}
 
-	stuck := decideCodexPanes(
+	stuck := fleet.DecideCodexPanes(
 		observations,
 		map[string]string{retiredID: chatName},
 		nil,
 		func(string) string { return "" },
 		retired,
 	)
-	if stuck[0].Bind != "" || stuck[0].Skip != codexPaneNameRetired {
+	if stuck[0].Bind != "" || stuck[0].Skip != fleet.CodexPaneNameRetired {
 		t.Fatalf("without the recorded name = %#v, want the stuck state", stuck[0])
 	}
 
-	healed := decideCodexPanes(
-		[]codexPaneObservation{{Socket: "cx-1", PaneID: "%0", Name: chatName}},
+	healed := fleet.DecideCodexPanes(
+		[]fleet.CodexPaneObservation{{Socket: "cx-1", PaneID: "%0", Name: chatName}},
 		map[string]string{retiredID: chatName, liveID: chatName},
 		nil,
 		func(string) string { return "" },

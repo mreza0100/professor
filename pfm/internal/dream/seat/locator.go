@@ -48,13 +48,6 @@ type FilesystemRolloutLocator struct {
 	CodexRoot string
 }
 
-func firstRoot(roots []string) string {
-	if len(roots) == 0 {
-		return ""
-	}
-	return roots[0]
-}
-
 // NewFilesystemRolloutLocator resolves only path names; paths.Resolve does no
 // filesystem I/O and this constructor does not touch fleet.db.
 func NewFilesystemRolloutLocator() (FilesystemRolloutLocator, error) {
@@ -62,7 +55,7 @@ func NewFilesystemRolloutLocator() (FilesystemRolloutLocator, error) {
 	if err != nil {
 		return FilesystemRolloutLocator{}, err
 	}
-	return FilesystemRolloutLocator{CodexRoot: firstRoot(values.Roots[pfmengine.Codex])}, nil
+	return FilesystemRolloutLocator{CodexRoot: values.FirstRoot(pfmengine.Codex)}, nil
 }
 
 func (locator FilesystemRolloutLocator) Snapshot(

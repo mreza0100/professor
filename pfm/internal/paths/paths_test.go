@@ -140,3 +140,15 @@ func TestResolveUsesScratchTmuxBase(t *testing.T) {
 		t.Fatalf("Resolve().TmuxDir = %q, want %q", got.TmuxDir, want)
 	}
 }
+
+// TestFirstRootIsTheEnginesFirstConfiguredRoot pins the single-root read and
+// its empty answer for an engine with no roots.
+func TestFirstRootIsTheEnginesFirstConfiguredRoot(t *testing.T) {
+	values := Values{Roots: map[pfmengine.ID][]string{pfmengine.Codex: {"/r/codex-1", "/r/codex-2"}}}
+	if got := values.FirstRoot(pfmengine.Codex); got != "/r/codex-1" {
+		t.Fatalf("FirstRoot(codex) = %q", got)
+	}
+	if got := values.FirstRoot(pfmengine.Claude); got != "" {
+		t.Fatalf("FirstRoot(claude) = %q, want empty", got)
+	}
+}

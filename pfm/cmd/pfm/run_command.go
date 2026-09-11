@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/agentrole"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
@@ -78,7 +79,7 @@ func runRun(
 		*engine,
 		*account,
 		runtime.Config,
-		readPrimaryAccount(resolved, runtime.Config),
+		fleet.PrimaryAccount(resolved, runtime.Config),
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
