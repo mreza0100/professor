@@ -1,7 +1,7 @@
 ---
 name: git
-description: Git gateway — routes commit/push/pull/tag to gitter when available; when unavailable, the active main Codex chat may perform scoped Git writes after explicit current-turn user authorization. Subagents stay read-only; publication remains explicit-request-only.
-argument-hint: [commit|push|pull|tag|freeform request]
+description: Git gateway — routes commit/push/pull/tag/release to gitter when available; when unavailable, the active main Codex chat may perform scoped Git writes after explicit current-turn user authorization. Subagents stay read-only; publication remains explicit-request-only.
+argument-hint: [commit|push|pull|tag|release|freeform request]
 ---
 
 # Git — Authorized Writer Gateway
@@ -14,6 +14,7 @@ Use `gitter` when it is registered. If it is unavailable, the active main Codex 
 - starts with `push` — `Phase: PUSH`, `$MESSAGE` set to the text after `push`, or empty
 - starts with `pull` — `Phase: PULL`
 - starts with `tag` — `Phase: TAG`, carrying the version
+- starts with `release` — `Phase: RELEASE`, carrying the version: the `develop → main` PR, its checks, the merge, the tag on `main`, and the `develop` fast-forward
 - anything else, empty included — name no Phase; quote `$ARGUMENTS` verbatim to gitter, or handle it directly under the same fallback boundary.
 
-`/git push`, `/git tag`, or a user request that plainly says to push / publish / release is the only authority for `Phase: PUSH` or `Phase: TAG` — `.claude/agents/gitter.md` § Remote Publication Boundary governs, and this repo is public.
+`/git push`, `/git tag`, `/git release`, or a user request that plainly says to push / publish / release is the only authority for `Phase: PUSH`, `Phase: TAG`, or `Phase: RELEASE` — `.claude/agents/gitter.md` § Remote Publication Boundary governs, and this repo is public.

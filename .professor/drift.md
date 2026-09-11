@@ -418,3 +418,15 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `doctor` refuse. Verified both ways on the live `/rnd` links — `generate` completed 28 outputs with a `note:` line,
   `doctor` returned DOCTOR FAIL naming the source. Repo-local: `templates/project/scripts/` ships `build-codex.mjs`,
   never this compiler.
+
+- **KEEP-LOCAL: `develop` is the integration branch; `main` is release-only (user-ordered).** GitHub
+  rulesets `main-release-only` (pull request + the four required checks, no force-push, no deletion,
+  no bypass actors) and `develop-linear-history` (no force-push, no deletion) enforce it remotely;
+  `.githooks/pre-push` refuses `refs/heads/main` locally with the road to take. `/pfm:release` commits
+  and pushes on `develop`, then gitter Phase RELEASE opens the `develop → main` PR, waits for the
+  checks, merges, tags the `main` commit, pushes the tag, and fast-forwards `develop` back onto
+  `main`. CI (`verify.yml`, `install-verify.yml`) runs on `develop` pushes too. Rewired: root
+  `CLAUDE.md` § Publication/§ Process, `.claude/agents/gitter.md`, `.claude/commands/pfm/release.md`,
+  `.claude/commands/wave/live.md`, `docs/dev/isolated-dev-foundation.md`. The `templates/project/**`
+  twins keep the adopter's single-branch pipeline — this flow exists only because this repo IS the
+  published blueprint.
