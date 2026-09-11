@@ -2,7 +2,7 @@
 name: deep-rr
 version: "3.2.4"
 repo: "https://github.com/mreza0100/rr"
-description: Launches Research and Report (RR) — a background Workflow that crawls the web best-first and derives a cited, confidence-scored report from a quote-pinned claim ledger. Use when one web search won't do: "research X", "look into X", "deep-rr X". Modes: goal (one question), collect (inventory a topic); "deep-rr fast X" answers inline instead. Persists to RR/{slug}/; resumable, progress via midrun.js.
+description: USER-ONLY — launch only on the user's explicit request for it; never start a run on your own initiative, and never as a step inside some other task. Launches Research and Report (RR) — a background Workflow that crawls the web best-first and derives a cited, confidence-scored report from a quote-pinned claim ledger. Use when the user has asked and one web search won't do: "research X", "look into X", "deep-rr X". Modes: goal (one question), collect (inventory a topic); "deep-rr fast X" answers inline instead. Persists to RR/{slug}/; resumable, progress via midrun.js.
 ---
 
 # Research and Report (RR)
