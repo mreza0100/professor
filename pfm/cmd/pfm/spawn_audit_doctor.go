@@ -49,9 +49,9 @@ type spawnObservation struct {
 	StartedUnix int64
 }
 
-// classifySpawn is the pure verdict. layerStampUnix is the moment the prompt
-// layer was staged on this host (the staged professor prompt's mtime); 0 means
-// the stamp is unavailable and the age signal is unusable.
+// classifySpawn is the pure verdict. layerStampUnix is the moment this host's
+// current spawn door went live (spawnDoorStamp); 0 means the stamp is
+// unavailable and the age signal is unusable.
 //
 // The reason string names WHICH signal decided, because the two flagless
 // outcomes are indistinguishable without it: "old chat" and "broken spawn
@@ -75,15 +75,15 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 		// to close — so it is reported as its own outcome, distinct from a
 		// spawn site that injected nothing at all.
 		if !argvCarriesOutputStyleDefault(observation.Argv) {
-			// ...but only a seat born AFTER the layer was staged can be
-			// blamed on a spawn site. An older chat carries the argv of the
+			// ...but only a seat born AFTER the current spawn door went live
+			// can be blamed on a spawn site. An older chat carries the argv of the
 			// pfm that launched it, and predates this flag exactly as a
 			// flagless chat predates the prompt itself — a reload is the fix,
 			// not a bug hunt. Skipping this check would accuse every live
 			// seat on the host the moment the flag ships.
 			if age, older := predatesLayer(observation, layerStampUnix); older {
 				return spawnPredatesLayer, fmt.Sprintf(
-					"%s but argv is missing --settings %s, and the process started %s before the prompt layer was staged — reload to carry it",
+					"%s but argv is missing --settings %s, and the process started %s before this host's current spawn door was installed — reload to carry it",
 					promptReason, pfmengine.OutputStyleDefaultSettings, age,
 				)
 			}
@@ -96,7 +96,7 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 	}
 	if age, older := predatesLayer(observation, layerStampUnix); older {
 		return spawnPredatesLayer, fmt.Sprintf(
-			"process started %s before the prompt layer was staged", age,
+			"process started %s before this host's current spawn door was installed", age,
 		)
 	}
 	for _, argument := range observation.Argv {
@@ -117,8 +117,8 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 	return spawnViolation, "fresh launch with no prompt material — some spawn site bypassed the door"
 }
 
-// predatesLayer reports how long before the staged prompt layer this process
-// was born, and whether the age signal decided anything at all. A missing
+// predatesLayer reports how long before the current spawn door went live this
+// process was born, and whether the age signal decided anything at all. A missing
 // birth time or a missing stamp (either one 0) leaves age unusable: the
 // caller must then fall through to a signal it can actually read, never treat
 // an unreadable age as "not old".
@@ -177,7 +177,7 @@ func printSpawnAuditDoctor(
 		return 1
 	}
 
-	stamp, stampSignal := promptLayerStamp(resolved.Home)
+	stamp, stampSignal := spawnDoorStamp(resolved.Home)
 	if len(observations) == 0 {
 		fmt.Fprintf(stdout, "doctor: spawn-audit: policy=%s — no live Claude chats found\n", promptPolicyName(prefs.SystemPrompt))
 		return spawnAuditUnreadWarnings(stdout, unread)
@@ -243,17 +243,45 @@ func promptPolicyName(value string) string {
 	return value
 }
 
-// promptLayerStamp is the moment this host's prompt layer was staged: the
-// mtime of the staged professor prompt `pfm install` writes. It is the best
-// available "before the layer existed" signal, and the name is reported beside
-// the verdicts so a reader knows what the age claim rests on.
-func promptLayerStamp(home string) (int64, string) {
-	path := action.ProfessorPromptPath(home)
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, fmt.Sprintf("unavailable (%v) — age never decided a verdict", err)
+// spawnDoorExecutable locates the pfm binary whose spawn doors the audit
+// judges; tests point it at a fixture.
+var spawnDoorExecutable = os.Executable
+
+// spawnDoorStamp is the moment this host's CURRENT spawn door went live: the
+// later of the staged professor prompt's mtime (the prompt layer) and the
+// running pfm binary's mtime (the argv every door builds). One stamp cannot
+// be the prompt alone: the --settings output-style flag shipped releases
+// after the prompt, and an install that leaves the prompt's bytes unchanged
+// never moves its mtime — so every chat launched by an older pfm read as born
+// "after the layer" and indicted a door that was never broken. Only a seat
+// born after BOTH can blame the door now installed; an older seat carries the
+// argv of the pfm that launched it, and a reload is its fix. The signal names
+// every input, so a reader knows what the age claim rests on.
+func spawnDoorStamp(home string) (int64, string) {
+	var stamp int64
+	var sources, failures []string
+	consider := func(label, path string, err error) {
+		if err == nil {
+			var info os.FileInfo
+			if info, err = os.Stat(path); err == nil {
+				stamp = max(stamp, info.ModTime().Unix())
+				sources = append(sources, "mtime of "+path)
+				return
+			}
+		}
+		failures = append(failures, fmt.Sprintf("%s: %v", label, err))
 	}
-	return info.ModTime().Unix(), "mtime of " + path
+	consider("prompt layer", action.ProfessorPromptPath(home), nil)
+	executable, err := spawnDoorExecutable()
+	consider("pfm binary", executable, err)
+	if stamp == 0 {
+		return 0, fmt.Sprintf("unavailable (%s) — age never decided a verdict", strings.Join(failures, "; "))
+	}
+	signal := fmt.Sprintf("%s, the later of %s", time.Unix(stamp, 0).Format(time.RFC3339), strings.Join(sources, " and "))
+	if len(failures) != 0 {
+		signal += " (unreadable: " + strings.Join(failures, "; ") + ")"
+	}
+	return stamp, signal
 }
 
 // liveClaudeSpawns enumerates the fleet's own Claude sockets through the same

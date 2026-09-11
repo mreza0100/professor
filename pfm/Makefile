@@ -33,8 +33,8 @@ UNIT    := pfm-mcp.service
 VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: help build fmt fmt-check vet test iso gate install host-install \
-        mcp-restart mcp-status stale kill-stale clean
+.PHONY: help build fmt fmt-check vet test iso gate install host-install rollback \
+        mcp-restart mcp-status stale kill-stale sweep-stale clean
 
 help: ## List every target
 	@echo "pfm targets — run as: make <target>"
@@ -77,21 +77,47 @@ gate: fmt-check vet test iso ## Everything a change must pass before it merges
 
 # -------------------------------------------------------------- install ----
 
-install: host-install mcp-restart stale ## Build, replace the host binary, restart the daemon, report stale processes
+install: ## Swap in a new build atomically, restart the daemon, then sweep stale processes — any failure rolls back and sweeps nothing
+	@$(MAKE) --no-print-directory host-install
+	@if ! $(MAKE) --no-print-directory mcp-restart; then \
+	  echo "install: FAILED at the MCP restart — rolling back to $(BIN).prev; no process was touched" >&2; \
+	  $(MAKE) --no-print-directory rollback; \
+	  exit 1; \
+	fi
+	@$(MAKE) --no-print-directory sweep-stale
 	@echo
-	@echo "install: complete — host binary replaced and the MCP daemon restarted."
+	@echo "install: complete — binary swapped, MCP daemon restarted, stale processes swept."
+	@# Order is the safety: nothing is killed until the new binary is in place
+	@# AND the daemon is serving it. A failed build or smoke test changes
+	@# nothing; a failed restart restores the previous binary. Only a fully
+	@# successful install sweeps, so a failure never leaves the host with the
+	@# old processes gone and no working replacement.
 
-host-install: ## Replace ~/.local/bin/pfm, keeping the previous build
-	@tmp="$$(mktemp -t pfm.XXXXXX)"; \
-	go build $(LDFLAGS) -o "$$tmp" ./cmd/pfm; \
-	if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev"; fi; \
-	mkdir -p "$$(dirname "$(BIN)")"; \
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev)
+	@mkdir -p "$$(dirname "$(BIN)")"; \
+	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	go build $(LDFLAGS) -o "$$tmp" ./cmd/pfm || { echo "host-install: build FAILED — $(BIN) untouched" >&2; exit 1; }; \
+	reported="$$("$$tmp" --version 2>&1)" || { echo "host-install: smoke test FAILED ($$reported) — $(BIN) untouched" >&2; exit 1; }; \
+	case "$$reported" in *"$(VERSION)"*) ;; \
+	  *) echo "host-install: smoke test reported '$$reported', not $(VERSION) — $(BIN) untouched" >&2; exit 1;; esac; \
+	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
 	mv -f "$$tmp" "$(BIN)"; \
-	echo "installed: $(BIN) (previous kept at $(BIN).prev)"
+	echo "installed: $(BIN) ($$reported$$kept)"
 	@# Never write onto the running path directly: an executing binary gives
-	@# ETXTBSY. Building elsewhere and renaming over it is atomic and lets any
-	@# process already running keep its own image — which is exactly why the
-	@# stale sweep below has to exist.
+	@# ETXTBSY. The build lands BESIDE the target — same directory, same
+	@# filesystem — so the final mv is a rename(2): atomic, never a
+	@# copy-over-the-running-image. Processes already running keep their own
+	@# image, which is exactly why the sweep below has to exist.
+
+rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the daemon on it
+	@[ -x "$(BIN).prev" ] || { echo "rollback: no $(BIN).prev to restore — $(BIN) left as is" >&2; exit 1; }
+	@tmp="$$(mktemp "$(BIN).rollback.XXXXXX")"; \
+	cp -f "$(BIN).prev" "$$tmp" && chmod 755 "$$tmp" && mv -f "$$tmp" "$(BIN)" \
+	  || { rm -f "$$tmp"; echo "rollback: FAILED to restore $(BIN) from $(BIN).prev" >&2; exit 1; }; \
+	echo "rollback: restored $(BIN) from $(BIN).prev"
+	@$(MAKE) --no-print-directory mcp-restart \
+	  || echo "rollback: the daemon did not come back on the restored binary either — systemctl --user status $(UNIT)" >&2
 
 # ---------------------------------------------------------------- mcp ------
 
@@ -181,9 +207,39 @@ kill-stale: ## Kill pfm processes running a replaced binary (interactive pickers
 	  esac; \
 	done; \
 	echo "kill-stale: signalled $$killed process(es)"
-	@# Separate from `install` on purpose: a stale process may be a picker the
-	@# operator is looking at right now. `install` names them; closing them is
-	@# a decision someone makes, not a side effect of building.
+	@# The manual, unverified form. `install` runs sweep-stale instead — and
+	@# only after the new binary is in place and the daemon serves it.
+
+sweep-stale: ## Kill every pfm process still running a replaced binary, then prove none is left
+	@if [ ! -d /proc ]; then \
+	  echo "STALE-UNKNOWN: this platform has no /proc, so stale pfm processes could NOT be enumerated or swept." >&2; \
+	  echo "  This is not a clean result: the daemon was restarted, but a long-lived 'pfm' picker may still hold the old binary — close it by hand." >&2; \
+	  exit 0; \
+	fi; \
+	stale_pids() { \
+	  for pid in $$(pgrep -x pfm 2>/dev/null || true); do \
+	    case "$$(readlink /proc/$$pid/exe 2>/dev/null || true)" in *"(deleted)"*) echo "$$pid";; esac; \
+	  done; \
+	}; \
+	pids="$$(stale_pids)"; \
+	if [ -z "$$pids" ]; then echo "sweep: none — every running pfm process uses the binary now on disk"; exit 0; fi; \
+	mcp=0; \
+	for pid in $$pids; do \
+	  cmd="$$(tr '\0' ' ' < /proc/$$pid/cmdline 2>/dev/null | cut -c1-70)"; \
+	  case "$$cmd" in *" mcp "*) mcp=1;; esac; \
+	  echo "sweep: TERM pid=$$pid  $$cmd"; \
+	  kill "$$pid" 2>/dev/null || true; \
+	done; \
+	for _ in 1 2 3 4 5 6; do [ -z "$$(stale_pids)" ] && break; sleep 0.5; done; \
+	for pid in $$(stale_pids); do echo "sweep: KILL pid=$$pid (ignored TERM for 3s)"; kill -9 "$$pid" 2>/dev/null || true; done; \
+	sleep 0.2; \
+	left="$$(stale_pids)"; \
+	if [ -n "$$left" ]; then echo "SWEEP-INCOMPLETE: still running a replaced binary: $$left" >&2; exit 1; fi; \
+	[ "$$mcp" -eq 0 ] || echo "sweep: a session whose chat MCP server was swept reconnects it with /mcp"; \
+	echo "sweep: done — no pfm process runs a replaced binary"
+	@# Readback, not trust: the sweep re-scans after signalling and fails
+	@# loudly on a survivor. It matches only images the kernel marks
+	@# "(deleted)", so the binary just installed is never touched.
 
 clean: ## Remove local build artifacts
 	rm -f $(LOCAL)

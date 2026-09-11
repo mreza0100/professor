@@ -305,10 +305,10 @@ func (spawn ClaudeSpawn) leanEnvironment(prefs pfmconfig.ClaudePrefs) bool {
 // wiring one in here would print on every ordinary launch of an account that
 // simply has not run `pfm install` yet. The surface that DOES report this
 // gap already exists: `pfm doctor`'s spawn audit
-// (cmd/pfm/spawn_audit_doctor.go:194 promptLayerStamp, fed into the
-// classifier a few lines above) reports a live Professor-policy launch with
-// no --system-prompt-file in its argv as VIOLATION, "fresh launch with no
-// prompt material — some spawn site bypassed the door".
+// (cmd/pfm/spawn_audit_doctor.go, spawnDoorStamp feeding classifySpawn)
+// reports a live Professor-policy launch with no --system-prompt-file in its
+// argv as VIOLATION, "fresh launch with no prompt material — some spawn site
+// bypassed the door".
 //
 // A stat error that is not "file does not exist" (permission denied, a
 // dangling symlink, a filesystem gone away) is not the same silence as

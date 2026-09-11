@@ -255,7 +255,7 @@ func discoverSourceRepo() string {
 	}
 	for {
 		if isSourceRepo(current) {
-			return current
+			return mainWorktreeOf(current)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -263,6 +263,42 @@ func discoverSourceRepo() string {
 		}
 		current = parent
 	}
+}
+
+// mainWorktreeOf maps a linked git worktree of the source clone to the clone
+// itself. A worktree carries every file isSourceRepo checks, yet it is deleted
+// when its wave merges — recording it would leave the source marker, `pfm
+// update`, and the global links pointing at nothing. A linked worktree's .git
+// is a FILE ("gitdir: <common>/worktrees/<name>") whose gitdir holds a
+// commondir file naming the shared .git; that directory's parent is the main
+// checkout. Every other shape — a real .git directory, a submodule's gitdir
+// with no commondir, a main checkout that is not a source repo — returns root
+// unchanged.
+func mainWorktreeOf(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, ".git"))
+	if err != nil {
+		return root
+	}
+	gitdir, found := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !found {
+		return root
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	common, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return root
+	}
+	commonDir := strings.TrimSpace(string(common))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(gitdir, commonDir)
+	}
+	main := filepath.Dir(filepath.Clean(commonDir))
+	if !isSourceRepo(main) {
+		return root
+	}
+	return main
 }
 
 func isSourceRepo(root string) bool {

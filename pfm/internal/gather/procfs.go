@@ -179,16 +179,47 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 	return ProcStat{ParentPID: parentPID, StartTime: startTime}, nil
 }
 
-// Birth returns the process start time in epoch seconds. The kernel stamps
-// the /proc/<pid> directory when it creates the process, so its modification
-// time is the birth moment without the boot-time arithmetic /proc/<pid>/stat
-// ticks would need.
+// userHZ is USER_HZ, the fixed tick rate the kernel reports /proc times in
+// (<asm/param.h>): 100 on every Linux architecture pfm builds for (amd64,
+// arm64). It is an ABI constant, not the kernel's internal CONFIG_HZ.
+const userHZ = 100
+
+// Birth returns the process start time in epoch seconds: the boot time from
+// /proc/stat plus the start tick /proc/<pid>/stat records. The /proc/<pid>
+// directory's own mtime is NOT a birth stamp — procfs instantiates that inode
+// lazily on first lookup, and again after cache eviction, so it reads a
+// process as minutes or hours younger than it is (measured: kernel threads
+// 318 s late on an ordinary host).
 func (proc RealProcFS) Birth(pid int) (int64, error) {
-	info, err := os.Stat(filepath.Join(proc.root(), strconv.Itoa(pid)))
+	stat, err := proc.Stat(pid)
 	if err != nil {
 		return 0, err
 	}
-	return info.ModTime().Unix(), nil
+	boot, err := proc.bootTime()
+	if err != nil {
+		return 0, err
+	}
+	return boot + int64(stat.StartTime/userHZ), nil
+}
+
+// bootTime reads the "btime" line of /proc/stat: the boot moment in epoch
+// seconds every start tick counts from.
+func (proc RealProcFS) bootTime() (int64, error) {
+	path := filepath.Join(proc.root(), "stat")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read boot time: %w", err)
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if value, found := strings.CutPrefix(line, "btime "); found {
+			boot, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse btime in %s: %w", path, err)
+			}
+			return boot, nil
+		}
+	}
+	return 0, errors.New("no btime line in " + path)
 }
 
 // RSSKB returns a process's resident set size in kilobytes, read from

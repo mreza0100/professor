@@ -459,9 +459,18 @@ func runInternal(
 		}
 		return 0
 	}
-	if len(args) == 0 || args[0] != "kill-exit" {
-		fmt.Fprintln(stderr, "usage: pfm internal clear-kill|exit-close|exit-intercept|kill-exit|then|update-check|explore-deny|epic-inject [options]")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|then|tmux-titles|update-check [options]")
 		return 2
+	}
+	if args[0] != "kill-exit" {
+		// Hooks and units are the only callers of an internal name, and exit 2
+		// is Claude Code's BLOCKING hook code: a hook a different pfm version
+		// registered (a rollback, a stale binary on PATH) would erase every
+		// prompt or deny every tool call. An unknown name is a non-blocking
+		// error that says what happened and how to converge.
+		fmt.Fprintf(stderr, "pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n", args[0], displayVersion())
+		return 1
 	}
 	flags := newFlagSet(
 		"internal kill-exit",

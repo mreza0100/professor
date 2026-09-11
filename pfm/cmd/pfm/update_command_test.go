@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/paths"
 )
@@ -527,4 +528,148 @@ func updateGitRevision(t *testing.T, repo, revision string) string {
 		t.Fatalf("resolve fixture revision %s: %v\n%s", revision, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+// TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree pins
+// -buildvcs=false. pfm update stages its source as a git worktree, whose .git
+// is a FILE cmd/go does not accept as a VCS root, so VCS stamping walks up and
+// dies on any .git DIRECTORY above it — an empty $HOME/.git did it live:
+// "error obtaining VCS status: exit status 128".
+func TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree(t *testing.T) {
+	for _, tool := range []string{"git", "go"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " is not installed")
+		}
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(root, "source")
+	for name, content := range map[string]string{
+		"pfm/go.mod":          "module probe\n\ngo 1.24\n",
+		"pfm/cmd/pfm/main.go": "package main\n\nvar version = \"dev\"\n\nfunc main() { println(version) }\n",
+	} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-q", "-m", "probe")
+	stage := filepath.Join(root, "stage")
+	git("worktree", "add", "--detach", "-q", stage, "HEAD")
+
+	candidate := filepath.Join(root, "pfm-candidate")
+	if err := buildUpdateCandidate(context.Background(), stage, "v9.9.9", candidate); err != nil {
+		t.Fatalf("candidate build beneath a stray .git directory: %v", err)
+	}
+	printed, err := exec.Command(candidate).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(printed)) != "v9.9.9" {
+		t.Fatalf("candidate printed %q, %v; want the stamped v9.9.9", printed, err)
+	}
+}
+
+// updateHookRollbackFixture drives a real `runUpdate` whose candidate install
+// rewrites an account's Claude settings with a hook only the newer release
+// knows, then fails at doctor. between runs after that install and before the
+// rollback — the window in which something other than the update may write.
+func updateHookRollbackFixture(t *testing.T, between func(settings string)) (settings string, original []byte, stderr string) {
+	t.Helper()
+	repo := newUpdateGitFixture(t)
+	runtime := updateTestRuntime(t)
+	home := runtime.Paths.Home
+	runtime.Config = config.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")})
+	settings = filepath.Join(home, ".cc", "1", "settings.json")
+	canonical := filepath.Join(home, ".local", "bin", "pfm")
+	original = []byte("{\n  \"hooks\": {}\n}\n")
+	for path, content := range map[string][]byte{canonical: []byte("old\n"), settings: original} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.RecordCanonicalBinary(home); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := []any{updateBuildCandidate, updateApplyInstall, updateRunDoctor, updateRollbackInstall, updateRollbackDoctor}
+	t.Cleanup(func() {
+		updateBuildCandidate = saved[0].(func(context.Context, string, string, string) error)
+		updateApplyInstall = saved[1].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRollbackInstall = saved[3].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return os.WriteFile(settings, []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal hook-only-the-new-release-knows\"}]}]}\n}\n"), 0o600)
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		between(settings)
+		return errors.New("injected doctor failure")
+	}
+	// The previous release's installer recognises only hooks IT generates, so
+	// it leaves the newer hook alone — exactly the live behaviour.
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error { return nil }
+
+	var stdout, stderrBuffer bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderrBuffer, runtime); code == 0 {
+		t.Fatalf("runUpdate() code=0, want failure; stderr=%q", stderrBuffer.String())
+	}
+	return settings, original, stderrBuffer.String()
+}
+
+// TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged pins the
+// rollback-residue regression: a hook only the newer release registered
+// survived the rollback and ran a subcommand the restored binary lacks —
+// "UserPromptSubmit operation blocked by hook" on every prompt, twice live.
+func TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged(t *testing.T) {
+	settings, original, stderr := updateHookRollbackFixture(t, func(string) {})
+	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("settings after rollback = %q, %v; want the pre-update bytes %q", got, err, original)
+	}
+	if !strings.Contains(stderr, "restored "+settings) {
+		t.Fatalf("rollback did not report the restored hook file: %q", stderr)
+	}
+}
+
+// TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt pins the
+// race guard: a live chat can save its settings while the update runs, and a
+// byte restore would erase that edit. A file that no longer holds exactly
+// what the candidate's install wrote is left as is and named as residue.
+func TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt(t *testing.T) {
+	edited := []byte("{\n  \"hooks\": {},\n  \"theme\": \"saved by a live chat\"\n}\n")
+	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
+		if err := os.WriteFile(settings, edited, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, edited) {
+		t.Fatalf("settings after rollback = %q, %v; want the concurrent edit kept %q", got, err, edited)
+	}
+	if !strings.Contains(stderr, settings) || !strings.Contains(stderr, "rollback residue") {
+		t.Fatalf("rollback did not name the untouched file as residue: %q", stderr)
+	}
 }

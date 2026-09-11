@@ -324,3 +324,40 @@ func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 		t.Fatalf("TargetName is invalid UTF-8: %x", renames[0].TargetName)
 	}
 }
+
+// TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime pins Birth to
+// /proc/stat btime + the /proc/<pid>/stat start tick. The fixture's pid
+// directory carries a deliberately wrong, recent mtime: the lazily
+// instantiated procfs inode the old implementation read as the birth.
+func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T) {
+	root := t.TempDir()
+	pidDir := filepath.Join(root, "4242")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("cpu  1 2 3 4\nbtime 1700000000\nprocesses 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A comm holding ") " pins the last-paren parse; field 22 (starttime) is 12345 ticks.
+	stat := "4242 (tmux: a) b) S 1 4242 4242 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0\n"
+	if err := os.WriteFile(filepath.Join(pidDir, "stat"), []byte(stat), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lazy := time.Unix(1_800_000_000, 0)
+	if err := os.Chtimes(pidDir, lazy, lazy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RealProcFS{Root: root}.Birth(4242)
+	if want := int64(1_700_000_000 + 12345/100); err != nil || got != want {
+		t.Fatalf("Birth = %d, %v; want %d (btime + starttime/USER_HZ), not the pid dir mtime %d", got, err, want, lazy.Unix())
+	}
+
+	// No btime to count from: an error, never a zero that reads as "unknown
+	// but fine" or a guess.
+	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("cpu  1 2 3 4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (RealProcFS{Root: root}).Birth(4242); err == nil {
+		t.Fatalf("Birth without btime = %d, nil; want an error", got)
+	}
+}
