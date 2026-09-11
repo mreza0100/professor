@@ -41,6 +41,7 @@ Bullets MUST follow this shape:
 
 ## Releases
 
+- [v0.76.0](releases/v0.76.0.md) — hiding a live chat ends it, `/exit`/`e` close the terminal tab, `chat new` inherits the caller's engine, WebGL-safe glyphs, and the first `develop → main` release.
 - [v0.75.1](releases/v0.75.1.md) — `pfm install` stops restarting a launch agent whose plist did not change, so it no longer takes the MCP daemon down with it.
 
 - [v0.75.0](releases/v0.75.0.md) — output styles retired and pinned off at every Claude launch, `rr` persists every answer, `/rnd` goes project-scope, `deep-rr` gated to explicit request, plus reload/limits/usage-hook fixes.
