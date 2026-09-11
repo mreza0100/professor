@@ -179,6 +179,46 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	if err != nil || !strings.Contains(rewarn, "USAGE LIMIT IMMINENT") {
 		t.Fatalf("rewarn=%q err=%v", rewarn, err)
 	}
+	// REGRESSION (2026-09-10, observed live): fable at 95% printed "This window is nearly
+	// exhausted: finish the in-flight step, then /reload" on every prompt while the 5-hour
+	// window was 1% used. Severity by max() is correct; asserting it about the LIVE window was
+	// not. A model-scoped cap must name the model and report the real 5-hour headroom.
+	seedNamed := func(five, seven int, fable string) {
+		t.Helper()
+		body := []byte(`{"config_dir":` + `"` + configDir + `",` + `"five_hour":{"utilization":` + itoa(five) +
+			`,"resets_at":"2030-01-01T10:00:00Z"},` +
+			`"seven_day":{"utilization":` + itoa(seven) +
+			`,"resets_at":"2030-01-03T08:00:00Z"},` +
+			`"seven_day_opus":{"utilization":null},` +
+			`"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},` +
+			`"percent":` + fable + `,"resets_at":"2030-01-03T08:00:00Z","is_active":true}]}`)
+		if err := os.WriteFile(filepath.Join(cacheDir, "acct-1.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(5, 5)
+	if _, err := Evaluate(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+	seedNamed(1, 76, "95")
+	scoped, err := Evaluate(context.Background(), options)
+	if err != nil || !strings.Contains(scoped, "USAGE LIMIT IMMINENT") {
+		t.Fatalf("scoped=%q err=%v", scoped, err)
+	}
+	if !strings.Contains(scoped, "Only the 7-day fable cap") ||
+		!strings.Contains(scoped, "5-hour window is 1% used") ||
+		!strings.Contains(scoped, "Keep working") {
+		t.Fatalf("model-scoped cap must name the model and the real 5h headroom: %q", scoped)
+	}
+	if strings.Contains(scoped, "finish the in-flight step") {
+		t.Fatalf("model-scoped cap must NOT order a session-wide stop: %q", scoped)
+	}
+	seedNamed(97, 76, "20")
+	fiveCrit, err := Evaluate(context.Background(), options)
+	if err != nil || !strings.Contains(fiveCrit, "The 5-hour window is nearly exhausted") {
+		t.Fatalf("fiveCrit=%q err=%v", fiveCrit, err)
+	}
+
 	seed(5, 5)
 	secondRecovery, err := Evaluate(context.Background(), options)
 	if err != nil || !strings.Contains(secondRecovery, "usage recovered") {
