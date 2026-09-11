@@ -26,19 +26,14 @@ var exitWords = map[string]bool{"e": true, "/e": true}
 // identical call into Bash.
 //
 // Claude Code's UserPromptSubmit contract: exit 0 lets the prompt through
-// (stdout is added as context); exit 2 BLOCKS the prompt, erases it, and shows
-// stderr to the human. A matched prompt always exits 2 — it must never reach
-// the model whether the close succeeded or failed; the human reads the front's
-// own result on stderr instead.
-//
-// The close itself is `chat kill self --exit`, which sends /exit to this pane.
-// That means the terminal is closed by the SessionEnd hook (exit-close), the
-// same path a hand-typed /exit takes — one closer, two entry points, so the two
-// spellings can never drift apart.
-//
-// Codex has no UserPromptSubmit hook, so a Codex seat's "e" still goes through
-// the model. This is a Claude-only shortcut, not the only path to a close.
-func runExitIntercept(stdin io.Reader, stderr io.Writer, runtime commandRuntime) int {
+// (stdout is added as context); exit 2 BLOCKS it behind the full banner with
+// stderr; exit 0 with the quiet JSON block (quietPromptBlock) blocks it with
+// a bare notice. A matched prompt never reaches the model: a close that ran
+// is swallowed quietly, a close that failed keeps the exit-2 banner so its
+// text reaches the human. Codex has no UserPromptSubmit hook, so a Codex
+// seat's `e` still goes through the model. This is a Claude-only shortcut,
+// not the only path to a close.
+func runExitIntercept(stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	var payload struct {
 		Prompt string `json:"prompt"`
 	}
@@ -52,7 +47,9 @@ func runExitIntercept(stdin io.Reader, stderr io.Writer, runtime commandRuntime)
 	// One buffer for both streams so the front's success line and any error it
 	// writes land in the order the front itself produced them.
 	var captured bytes.Buffer
-	exitInterceptRun([]string{"--self", "--exit"}, &captured, &captured, runtime)
+	if exitInterceptRun([]string{"--self", "--exit"}, &captured, &captured, runtime) == 0 {
+		return blockPromptQuietly(stdout)
+	}
 	fmt.Fprintf(stderr, "exit: %s", captured.String())
 	return 2
 }

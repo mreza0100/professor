@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -25,10 +26,10 @@ func TestRunExitIntercept(t *testing.T) {
 		frontWanted bool
 		wantExit    int
 	}{
-		{name: "bare e closes the chat", prompt: "e", frontWanted: true, wantExit: 2},
-		{name: "slash e closes the chat", prompt: "/e", frontWanted: true, wantExit: 2},
-		{name: "surrounding whitespace is trimmed", prompt: "  e  ", frontWanted: true, wantExit: 2},
-		{name: "surrounding whitespace on the slash form is trimmed", prompt: "\t/e\n", frontWanted: true, wantExit: 2},
+		{name: "bare e closes the chat", prompt: "e", frontWanted: true, wantExit: 0},
+		{name: "slash e closes the chat", prompt: "/e", frontWanted: true, wantExit: 0},
+		{name: "surrounding whitespace is trimmed", prompt: "  e  ", frontWanted: true, wantExit: 0},
+		{name: "surrounding whitespace on the slash form is trimmed", prompt: "\t/e\n", frontWanted: true, wantExit: 0},
 		{name: "the word exit is not a match", prompt: "exit", wantExit: 0},
 		{name: "uppercase E is not a match", prompt: "E", wantExit: 0},
 		{name: "trailing text after e is not a match", prompt: "e now", wantExit: 0},
@@ -50,8 +51,8 @@ func TestRunExitIntercept(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var stderr bytes.Buffer
-			code := runExitIntercept(bytes.NewReader(payload), &stderr, commandRuntime{})
+			var stdout, stderr bytes.Buffer
+			code := runExitIntercept(bytes.NewReader(payload), &stdout, &stderr, commandRuntime{})
 
 			if code != test.wantExit {
 				t.Fatalf("exit=%d, want %d; stderr=%q", code, test.wantExit, stderr.String())
@@ -63,8 +64,8 @@ func TestRunExitIntercept(t *testing.T) {
 				if !reflect.DeepEqual(calls[0], []string{"--self", "--exit"}) {
 					t.Fatalf("front args = %#v, want [--self --exit]", calls[0])
 				}
-				if !strings.HasPrefix(stderr.String(), "exit: ") {
-					t.Fatalf("stderr=%q, want it to start with \"exit: \"", stderr.String())
+				if stdout.String() != quietPromptBlock || stderr.Len() != 0 {
+					t.Fatalf("a successful close must be swallowed quietly: stdout=%q stderr=%q", stdout.String(), stderr.String())
 				}
 			} else if stderr.Len() != 0 {
 				t.Fatalf("stderr=%q, want empty for a non-matching prompt", stderr.String())
@@ -85,8 +86,25 @@ func TestRunExitInterceptMalformedJSONNeverBlocks(t *testing.T) {
 	t.Cleanup(func() { exitInterceptRun = original })
 
 	var stderr bytes.Buffer
-	code := runExitIntercept(strings.NewReader("{not valid json"), &stderr, commandRuntime{})
+	code := runExitIntercept(strings.NewReader("{not valid json"), io.Discard, &stderr, commandRuntime{})
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
+	}
+}
+
+// TestRunExitInterceptFailureStaysLoud pins the other half of the quiet
+// block: a close that FAILED is the one message the human must see, so it
+// keeps the exit-2 banner with the front's own text.
+func TestRunExitInterceptFailureStaysLoud(t *testing.T) {
+	original := exitInterceptRun
+	t.Cleanup(func() { exitInterceptRun = original })
+	exitInterceptRun = func(_ []string, _, stderr io.Writer, _ ...commandRuntime) int {
+		fmt.Fprintln(stderr, "pfm chat kill: no live pane")
+		return 1
+	}
+	var stdout, stderr bytes.Buffer
+	code := runExitIntercept(strings.NewReader(`{"prompt":"e"}`), &stdout, &stderr, commandRuntime{})
+	if code != 2 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "exit: pfm chat kill: no live pane") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want 2 / empty / the front's error behind the banner", code, stdout.String(), stderr.String())
 	}
 }

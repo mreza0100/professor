@@ -141,6 +141,38 @@ func (o *Options) defaults() {
 	}
 }
 
+// LockPath is the pane mutex Run holds for the whole reboot — from before the
+// old process is sent /exit until the reborn one is up. The file persists;
+// the flock on it is the signal.
+func LockPath(sidDir, socketName, pane string) string {
+	return filepath.Join(sidDir, "."+socketName+"."+pane+".reloadlock")
+}
+
+// InFlight reports whether a reload currently holds the pane mutex, so a
+// SessionEnd hook can tell a reload's /exit (the pane is being rebooted —
+// leave its terminal alone) from a human's. A missing lock file is a plain
+// "no"; a lock that cannot be probed is an error, never a "no".
+func InFlight(sidDir, socketName, pane string) (bool, error) {
+	lock, err := os.OpenFile(LockPath(sidDir, socketName, pane), os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("open reload lock: %w", err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return true, nil
+		}
+		return false, fmt.Errorf("probe reload lock: %w", err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		return false, fmt.Errorf("release reload lock probe: %w", err)
+	}
+	return false, nil
+}
+
 // Run performs the graceful in-place reboot. The caller has already resolved
 // the target identity and account/cache birth values; this package owns every
 // tmux mutation and the pane lock.
@@ -165,7 +197,7 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	lockPath := filepath.Join(options.SIDDir, "."+filepath.Base(request.SocketPath)+"."+request.Pane+".reloadlock")
+	lockPath := LockPath(options.SIDDir, filepath.Base(request.SocketPath), request.Pane)
 	if err := os.MkdirAll(options.SIDDir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create reload lock directory: %w", err)
 	}

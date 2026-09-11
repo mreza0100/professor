@@ -30,6 +30,9 @@ func TestRunReloadIntercept(t *testing.T) {
 		wantExit     int
 		wantStderr   string
 		wantNoStderr bool
+		// wantQuiet: the front succeeded, so the prompt is swallowed with the
+		// quiet JSON block on stdout — no banner text, no prompt echo.
+		wantQuiet bool
 	}{
 		{
 			name:         "plain prompt never touches reload",
@@ -44,24 +47,26 @@ func TestRunReloadIntercept(t *testing.T) {
 			wantNoStderr: true,
 		},
 		{
-			name:        "bare /reload calls the front with no args",
-			prompt:      "/reload",
-			frontOutput: "reload scheduled in place (log x)\n",
-			frontCode:   0,
-			frontWanted: true,
-			wantArgs:    []string{},
-			wantExit:    2,
-			wantStderr:  "reload: ",
+			name:         "bare /reload calls the front with no args",
+			prompt:       "/reload",
+			frontOutput:  "reload scheduled in place (log x)\n",
+			frontCode:    0,
+			frontWanted:  true,
+			wantArgs:     []string{},
+			wantExit:     0,
+			wantNoStderr: true,
+			wantQuiet:    true,
 		},
 		{
-			name:        "quoted --then payload splits into one word",
-			prompt:      `/reload --account 2 --then "go on, friend"`,
-			frontOutput: "reload scheduled in place (log y)\n",
-			frontCode:   0,
-			frontWanted: true,
-			wantArgs:    []string{"--account", "2", "--then", "go on, friend"},
-			wantExit:    2,
-			wantStderr:  "reload: ",
+			name:         "quoted --then payload splits into one word",
+			prompt:       `/reload --account 2 --then "go on, friend"`,
+			frontOutput:  "reload scheduled in place (log y)\n",
+			frontCode:    0,
+			frontWanted:  true,
+			wantArgs:     []string{"--account", "2", "--then", "go on, friend"},
+			wantExit:     0,
+			wantNoStderr: true,
+			wantQuiet:    true,
 		},
 		{
 			name:        "front failure text still lands on stderr behind the exit-2 block",
@@ -94,8 +99,14 @@ func TestRunReloadIntercept(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var stderr bytes.Buffer
-			code := runReloadIntercept(bytes.NewReader(payload), &stderr, commandRuntime{})
+			var stdout, stderr bytes.Buffer
+			code := runReloadIntercept(bytes.NewReader(payload), &stdout, &stderr, commandRuntime{})
+			if test.wantQuiet && stdout.String() != quietPromptBlock {
+				t.Fatalf("stdout=%q, want the quiet block %q", stdout.String(), quietPromptBlock)
+			}
+			if !test.wantQuiet && stdout.Len() != 0 {
+				t.Fatalf("stdout=%q, want empty when the prompt is not quietly swallowed", stdout.String())
+			}
 
 			if code != test.wantExit {
 				t.Fatalf("exit=%d, want %d; stderr=%q", code, test.wantExit, stderr.String())
@@ -138,7 +149,7 @@ func TestRunReloadInterceptRealFrontSurfacesValidationHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	code := runReloadIntercept(bytes.NewReader(payload), &stderr, commandRuntime{})
+	code := runReloadIntercept(bytes.NewReader(payload), io.Discard, &stderr, commandRuntime{})
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, stderr.String())
 	}
@@ -163,7 +174,7 @@ func TestRunReloadInterceptMalformedJSONNeverBlocks(t *testing.T) {
 	t.Cleanup(func() { reloadInterceptRun = original })
 
 	var stderr bytes.Buffer
-	code := runReloadIntercept(strings.NewReader("{not valid json"), &stderr, commandRuntime{})
+	code := runReloadIntercept(strings.NewReader("{not valid json"), io.Discard, &stderr, commandRuntime{})
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
 	}

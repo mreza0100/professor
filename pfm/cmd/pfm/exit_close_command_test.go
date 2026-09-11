@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 // "prompt_input_exit" ("clear" especially — that chat keeps running), only
 // when $TMUX names a real fleet socket, and always returns 0.
 func TestRunExitCloseGuards(t *testing.T) {
+	jailExitClosePaths(t)
 	original := exitCloseTerminals
 	originalEnv := exitCloseEnv
 	t.Cleanup(func() {
@@ -86,6 +88,9 @@ func TestRunExitCloseGuards(t *testing.T) {
 				if key == "TMUX" {
 					return test.tmux
 				}
+				if key == "TMUX_PANE" && test.tmux != "" {
+					return "%0"
+				}
 				return ""
 			}
 
@@ -108,6 +113,7 @@ func TestRunExitCloseGuards(t *testing.T) {
 // the closer itself: an error closing terminals must never cost the human
 // their SessionEnd hook exit code.
 func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
+	jailExitClosePaths(t)
 	original := exitCloseTerminals
 	originalEnv := exitCloseEnv
 	t.Cleanup(func() {
@@ -120,6 +126,9 @@ func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
 	exitCloseEnv = func(key string) string {
 		if key == "TMUX" {
 			return "/tmp/tmux-501/cc-500-1-1,9999,0"
+		}
+		if key == "TMUX_PANE" {
+			return "%0"
 		}
 		return ""
 	}
@@ -140,6 +149,7 @@ func TestRunExitCloseFailsOpenOnCloserError(t *testing.T) {
 // always named on stderr — never silent — and that a real close is reported
 // too, both alongside the always-0 exit code.
 func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
+	jailExitClosePaths(t)
 	original := exitCloseTerminals
 	originalEnv := exitCloseEnv
 	t.Cleanup(func() {
@@ -152,6 +162,9 @@ func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
 	exitCloseEnv = func(key string) string {
 		if key == "TMUX" {
 			return "/tmp/tmux-501/cc-500-1-1,9999,0"
+		}
+		if key == "TMUX_PANE" {
+			return "%0"
 		}
 		return ""
 	}
@@ -169,4 +182,14 @@ func TestRunExitCloseReportsSkippedAndClosed(t *testing.T) {
 	if !strings.Contains(stderr.String(), "closed 1 terminal(s) [4242]") {
 		t.Fatalf("stderr=%q, missing the closed report", stderr.String())
 	}
+}
+
+// jailExitClosePaths gives the hook a sid dir to probe for a reload lock; no
+// lock file there means "not a reload", which is the case every guard test
+// above assumes.
+func jailExitClosePaths(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("PFM_HOME", home)
+	t.Setenv("PFM_SID_DIR", filepath.Join(home, "sid"))
 }

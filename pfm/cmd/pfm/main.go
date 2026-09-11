@@ -408,10 +408,10 @@ func runInternal(
 		return runEpicInject(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-intercept" {
-		return runReloadIntercept(os.Stdin, stderr, runtime)
+		return runReloadIntercept(os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
-		return runExitIntercept(os.Stdin, stderr, runtime)
+		return runExitIntercept(os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "exit-close" {
 		return runExitClose(os.Stdin, stderr)
