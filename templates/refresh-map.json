@@ -62,15 +62,6 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
-    "global/commands/rnd.md": {
-      "curated": true
-    },
-    "global/commands/rnd/hammer.md": {
-      "curated": true
-    },
-    "global/commands/rnd/referee.md": {
-      "curated": true
-    },
     "global/commands/tokens/README.md": {
       "curated": true
     },
@@ -132,6 +123,11 @@
         ".claude/agents/infra-qa.md": "544903a31f20f4b64a0f0440f2bf8440f5306cfe0c74cc377667516536cd1a46",
         ".claude/agents/web-qa.md": "17fac5e23e6d91b5d6b02b09528fae7790c382f9a56ca10905d25509c1c80459",
         ".claude/agents/contracts-qa.md": "80456984c8b7a813d63ec04b89414566b0f30278c65e073ced4daa69bb2fa392"
+      }
+    },
+    "project/agents/rndier.md": {
+      "sources": {
+        ".claude/agents/rndier.md": "f7b54778e2552b7fbba8d9cd4c668a1f9b0451361fc20bef8354a747c488acb8"
       }
     },
     "project/agents/role-wrapper.md": {
@@ -247,6 +243,11 @@
     },
     "project/commands/qa/live.md": {
       "curated": true
+    },
+    "project/commands/rnd.md": {
+      "sources": {
+        ".claude/commands/rnd.md": "383e939d000af1a0a3c856827f60d3c98a28223fd0ca69eec6779e3360e5f6c2"
+      }
     },
     "project/commands/wave/live.md": {
       "sources": {

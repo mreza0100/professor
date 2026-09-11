@@ -29,7 +29,7 @@ Tracers retrieve raw maps; you judge and author.
 
 `AskUserQuestion` rounds, ≤4 questions per call. First always: (a) `NEEDS-USER-SPEC` tasks — spec / defer / drop; (b) scope boundary — restate the user's full objective and confirm what this wave includes vs defers; scope never narrows silently. Ask nothing derivable from code. Continue until every task is clear or the user disposes it (defer/drop) — proceeding unclear is not an option. Forecast every user touchpoint the wave will EVER need (secrets, deploy reviews, destructive-op ratifications, merge nods) and record each as pre-authorized in the spec — a wave that stops mid-flight for a user answer is a failed spec.
 
-A task needing prototype evidence before it can be specified runs `refine poc` or `/rnd` first; the spec embeds the findings (§ RND findings).
+A task needing prototype evidence before it can be specified runs `refine poc` or the project-scope `/rnd`, which spawns `rndier` to execute the run; the spec embeds the findings (§ RND findings).
 
 ## R3 — Decide and write
 

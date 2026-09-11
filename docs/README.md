@@ -107,7 +107,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 - **/pfm** — Professor Template Management. Edits pipeline rules at the source.
 - **/wave:{orchestrator,builder,refine,walker,live,schedule,watcher}, /dev, /git, /documenter** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`.
+**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`. `/rnd` is project-scope and spawns the `rndier` agent to execute one research run.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `engines/deep-rr/`; `architecture-design` ships in-tree under `templates/global/skills/architecture-design/`; `legal` is bundled under `templates/project/skills/`.
 
