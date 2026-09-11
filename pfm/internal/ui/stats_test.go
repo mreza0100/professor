@@ -347,7 +347,7 @@ func TestLimitsTabScrollsAcrossClaudeCodexAndOpenCodeCardsAfterResize(t *testing
 		t.Fatalf("Home after resize did not reset Limits offset: command=%v offset=%d", command, model.limitsOffset)
 	}
 	wide := ansi.Strip(model.renderLimitsPanel(80, 30))
-	for _, label := range []string{"Claude", "Codex", "OpenCode", " 1% used", " 96% left", " 6% used"} {
+	for _, label := range []string{"Claude", "Codex", "OpenCode", " 1% used", " 4% used", " 6% used"} {
 		if !strings.Contains(wide, label) {
 			t.Fatalf("resized Limits viewport lost %q:\n%s", label, wide)
 		}
@@ -367,7 +367,7 @@ func TestLimitsTabRendersFancyCardsAndRefreshesPastResets(t *testing.T) {
 	}}}
 	panel := model.renderLimitsPanel(120, 10)
 	plain := ansi.Strip(panel)
-	for _, want := range []string{"🥇 account 1", "█", "52%", "FULL", "↻ refreshing…"} {
+	for _, want := range []string{"🥇 account 1", "▰", "52%", "FULL", "↻ refreshing…"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("fancy Limits panel missing %q:\n%s", want, plain)
 		}
@@ -455,15 +455,24 @@ func TestLimitsTabShowsOnlyFirstCodexWindow(t *testing.T) {
 	}
 }
 
-func TestLimitBarsKeepEighthCellPrecisionAndFullTail(t *testing.T) {
+func TestLimitBarsRoundToWholeFontGlyphsAndFullTail(t *testing.T) {
 	_ = NewModel(fixtureSnapshot(120))
 	left := ansi.Strip(limitBar(52.4, 20))
 	right := ansi.Strip(limitBar(55, 20))
-	if left == right || !strings.Contains(left, "▌") {
-		t.Fatalf("subcell bars did not distinguish 52.4%% from 55%%: %q vs %q", left, right)
+	if left != "[▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱]" || right != "[▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱]" {
+		t.Fatalf("bars did not round 52.4%% and 55%% to whole cells: %q vs %q", left, right)
+	}
+	// Block elements (U+2580–U+259F) are custom glyphs in VS Code's WebGL
+	// terminal and rendered as stale/blank cells; the bar must never use one.
+	for _, bar := range []string{left, right, ansi.Strip(limitBar(100, 20))} {
+		for _, r := range bar {
+			if r >= 0x2580 && r <= 0x259F {
+				t.Fatalf("bar %q uses block element %U", bar, r)
+			}
+		}
 	}
 	full := ansi.Strip(limitBar(100, 20))
-	if !strings.Contains(full, "FULL▏") {
+	if !strings.Contains(full, "FULL]") {
 		t.Fatalf("full bar=%q, want FULL tail", full)
 	}
 }
@@ -599,9 +608,9 @@ func TestUsageSparkScalesToTheBusiestSample(t *testing.T) {
 		want   string
 	}{
 		{"no history yet", nil, "…"},
-		{"all idle", []int64{0, 0, 0}, "▁▁▁"},
-		{"burst after idle", []int64{0, 100}, "▁█"},
-		{"mixed", []int64{50, 100, 25}, "▅█▃"},
+		{"all idle", []int64{0, 0, 0}, "___"},
+		{"burst after idle", []int64{0, 100}, "_¯"},
+		{"mixed", []int64{50, 100, 25}, "⎻¯⎽"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -870,7 +879,7 @@ func TestLimitsTabRendersPassedResetNoteInsteadOfStaleBar(t *testing.T) {
 		t.Fatalf("expired 5h row did not render an em dash without a number:\n%s", plain)
 	}
 	for _, line := range strings.Split(plain, "\n") {
-		if strings.Contains(line, "5h") && (strings.Contains(line, "▕") || strings.Contains(line, "░")) {
+		if strings.Contains(line, "5h") && (strings.Contains(line, "▰") || strings.Contains(line, "▱")) {
 			t.Fatalf("expired 5h row still drew a bar: %q", line)
 		}
 	}

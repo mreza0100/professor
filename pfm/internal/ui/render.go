@@ -548,7 +548,7 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 			if account.Engine == pfmengine.Codex && renderedWindows >= 1 {
 				break
 			}
-			appendLine(renderLimitWindowMode(now, window, innerWidth, account.Engine == pfmengine.Codex))
+			appendLine(renderLimitWindow(now, window, innerWidth))
 			renderedWindows++
 		}
 		if renderedWindows == 0 {
@@ -592,11 +592,10 @@ func limitAccountHeader(account pfmstats.AccountLimits, now time.Time) string {
 	return fmt.Sprintf("%s %s · %s · %s", emoji, identity, plan, confirmation)
 }
 
+// renderLimitWindow draws one usage row on the single scale every engine
+// shares: the bar fills by usage and the number reads "% used". A Codex row
+// on an inverted "% left" scale drew the same short bar for opposite meanings.
 func renderLimitWindow(now time.Time, window pfmstats.Window, innerWidth int) string {
-	return renderLimitWindowMode(now, window, innerWidth, false)
-}
-
-func renderLimitWindowMode(now time.Time, window pfmstats.Window, innerWidth int, remaining bool) string {
 	const nameWidth = 10
 	showReset := innerWidth >= 60
 	reserved := 27
@@ -607,18 +606,13 @@ func renderLimitWindowMode(now time.Time, window pfmstats.Window, innerWidth int
 	name := fmt.Sprintf("%-*s", nameWidth, clipRunes(cleanField(window.Name), nameWidth))
 	bar := limitBar(window.UsedPct, barWidth)
 	percent := fmt.Sprintf("%.0f%% used", window.UsedPct)
-	switch {
-	case window.UsedPct < 0:
+	if window.UsedPct < 0 {
 		// pfmstats.UnknownUsedPct — no trustworthy reading (an expired window
 		// awaiting its refetch). Blank the bar's columns so the rows stay
 		// aligned and print an em dash where the number would be; the reset
 		// note carries the explanation.
 		bar = strings.Repeat(" ", lipgloss.Width(bar))
 		percent = "—"
-	case remaining:
-		left := 100 - math.Max(0, math.Min(100, window.UsedPct))
-		bar = renderLimitBar(left, window.UsedPct, barWidth, false)
-		percent = fmt.Sprintf("%.0f%% left", left)
 	}
 	percentStyle := limitPercentStyle
 	if window.UsedPct >= 95 {
@@ -637,37 +631,22 @@ func renderLimitWindowMode(now time.Time, window pfmstats.Window, innerWidth int
 }
 
 func limitBar(percent float64, width int) string {
-	return renderLimitBar(percent, percent, width, true)
-}
-
-// Fill follows the displayed quantity; warning colors always follow usage.
-func renderLimitBar(percent, used float64, width int, fullLabel bool) string {
+	// Geometric shapes (U+25B0/U+25B1) and ASCII brackets on purpose: block
+	// elements (U+2580–U+259F — █ ░ ▉ ▕) are drawn by VS Code's WebGL
+	// terminal as "custom glyphs" from its own atlas rather than the font,
+	// and a live 2s refresh of them left stale and blank cells on screen
+	// (2026-09-11). Every glyph here goes through the ordinary font path.
 	width = maxInt(1, width)
 	percent = math.Max(0, math.Min(100, percent))
-	style := limitUsageStyle(used)
-	if fullLabel && percent >= 100 && width >= 4 {
-		return style.Render("▕" + strings.Repeat("█", width-4) + "FULL" + "▏")
+	style := limitUsageStyle(percent)
+	if percent >= 100 && width >= 4 {
+		return style.Render("[" + strings.Repeat("▰", width-4) + "FULL" + "]")
 	}
-	scaled := percent / 100 * float64(width)
-	full := int(math.Floor(scaled))
-	eighth := int(math.Round((scaled - float64(full)) * 8))
-	if eighth == 8 {
-		full++
-		eighth = 0
+	filled := int(math.Round(percent / 100 * float64(width)))
+	if filled > width {
+		filled = width
 	}
-	if full > width {
-		full = width
-	}
-	partials := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
-	content := strings.Repeat("█", full)
-	if eighth > 0 && full < width {
-		content += partials[eighth]
-	}
-	empty := width - lipgloss.Width(content)
-	if empty > 0 {
-		content += strings.Repeat("░", empty)
-	}
-	return style.Render("▕" + content + "▏")
+	return style.Render("[" + strings.Repeat("▰", filled) + strings.Repeat("▱", width-filled) + "]")
 }
 
 func limitUsageStyle(percent float64) lipgloss.Style {
@@ -849,7 +828,7 @@ func (model Model) renderGroupedRow(
 		if row.Kind == compose.ProfessorUpdate {
 			for index, label := range labels {
 				if strings.HasPrefix(label, "[ ") {
-					labels[index] = "▐ " + strings.TrimSuffix(strings.TrimPrefix(label, "[ "), " ]") + " ▌"
+					labels[index] = "◖ " + strings.TrimSuffix(strings.TrimPrefix(label, "[ "), " ]") + " ◗"
 				} else {
 					labels[index] = "[ " + label + " ]"
 				}
@@ -933,7 +912,7 @@ func carouselBoxes(index int) string {
 	for position, action := range carouselActions {
 		body := action.Glyph + " " + action.Label
 		if position == index {
-			boxes = append(boxes, "▐"+body+"▌")
+			boxes = append(boxes, "◖"+body+"◗")
 			continue
 		}
 		boxes = append(boxes, "["+body+"]")
@@ -1079,7 +1058,12 @@ func usageSpark(deltas []int64) string {
 	if len(deltas) == 0 {
 		return "…"
 	}
-	blocks := []rune("▁▂▃▄▅▆▇█")
+	// Scan-line ladder (Misc Technical U+23BA–U+23BD between _ and ¯) rather
+	// than block elements ▁…█ or braille: both of those ranges are WebGL
+	// "custom glyphs" in VS Code's terminal, drawn from its atlas instead of
+	// the font, and painted stale/blank cells on live refresh (2026-09-11).
+	// cmd/pfm/webgl_glyph_guard_test.go pins the banned ranges.
+	blocks := []rune("_⎽⎼⎻⎺¯")
 	busiest := deltas[0]
 	for _, delta := range deltas[1:] {
 		if delta > busiest {

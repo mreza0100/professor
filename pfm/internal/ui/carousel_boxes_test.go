@@ -18,7 +18,7 @@ func TestCarouselBoxesShowsEveryActionAtOnce(t *testing.T) {
 	if strings.Contains(boxes, "reload") {
 		t.Fatalf("carouselBoxes(0) = %q, contains removed reload action", boxes)
 	}
-	if strings.Count(boxes, "[")+strings.Count(boxes, "▐") != len(carouselActions) {
+	if strings.Count(boxes, "[")+strings.Count(boxes, "◖") != len(carouselActions) {
 		t.Fatalf("carouselBoxes(0) = %q, want one box per action", boxes)
 	}
 }
@@ -27,16 +27,16 @@ func TestCarouselBoxesShowsEveryActionAtOnce(t *testing.T) {
 // the filled box moving, while every action keeps its own box and label.
 func TestCarouselBoxesFillsOnlyTheCurrentAction(t *testing.T) {
 	for index, want := range map[int]string{
-		0: "▐▶ open▌",
-		1: "▐⚡ reboot▌",
-		3: "▐✖ kill▌",
-		4: "▐⏸ deactive▌",
+		0: "◖▶ open◗",
+		1: "◖⚡ reboot◗",
+		3: "◖✖ kill◗",
+		4: "◖⏸ deactive◗",
 	} {
 		boxes := carouselBoxes(index)
 		if !strings.Contains(boxes, want) {
 			t.Fatalf("carouselBoxes(%d) = %q, want it to fill %q", index, boxes, want)
 		}
-		if filled := strings.Count(boxes, "▐"); filled != 1 {
+		if filled := strings.Count(boxes, "◖"); filled != 1 {
 			t.Fatalf("carouselBoxes(%d) = %q, filled %d boxes, want 1", index, boxes, filled)
 		}
 		if light := strings.Count(boxes, "["); light != len(carouselActions)-1 {
