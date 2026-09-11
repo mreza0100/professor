@@ -41,6 +41,53 @@ func TestClaudeSpawnCarriesOutputStyleDefaultSettings(t *testing.T) {
 	}
 }
 
+// TestClaudeSpawnKeepsACallerSuppliedSettingsFlag is the regression for the
+// silently-discarded --settings bug: ShellCommand and argv used to append the
+// fleet's own --settings {"outputStyle":"default"} AFTER spawn.Args, and
+// --settings is single-value, so a caller who typed their own --settings
+// through pfm's launcher had it overridden by the fleet's pair with no
+// warning. Both renderers must now keep the caller's file and carry exactly
+// ONE --settings word, not the fleet's default payload.
+func TestClaudeSpawnKeepsACallerSuppliedSettingsFlag(t *testing.T) {
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	spawn := ClaudeSpawn{
+		Purpose: PurposeInteractive, Account: 42, Home: home, Machine: machine,
+		Args: []string{"--settings", "/tmp/mine.json"},
+	}
+
+	shell, err := spawn.ShellCommand()
+	if err != nil {
+		t.Fatalf("shell spawn: %v", err)
+	}
+	if !strings.Contains(shell, "'--settings' '/tmp/mine.json'") {
+		t.Fatalf("shell spawn %q lacks the caller's --settings value", shell)
+	}
+	if strings.Contains(shell, Quote(pfmengine.OutputStyleDefaultSettings)) {
+		t.Fatalf("shell spawn %q still carries the fleet's default settings payload", shell)
+	}
+	if got := strings.Count(shell, "'--settings'"); got != 1 {
+		t.Fatalf("shell spawn %q carries %d '--settings' words, want exactly 1", shell, got)
+	}
+
+	command, err := spawn.Command(context.Background())
+	if err != nil {
+		t.Fatalf("command spawn: %v", err)
+	}
+	if !containsFlagPair(command.Args, "--settings", "/tmp/mine.json") {
+		t.Fatalf("command argv %#v lacks the caller's --settings value", command.Args)
+	}
+	settingsCount := 0
+	for _, argument := range command.Args {
+		if argument == "--settings" {
+			settingsCount++
+		}
+	}
+	if settingsCount != 1 {
+		t.Fatalf("command argv %#v carries %d --settings words, want exactly 1", command.Args, settingsCount)
+	}
+}
+
 // A launch that already staged the professor prompt but somehow lost the
 // settings flag would double-apply a persona; the launcher-run door
 // (action.LauncherRun, the argv-preserving shim spawn) must carry the flag

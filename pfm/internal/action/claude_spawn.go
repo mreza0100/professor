@@ -144,7 +144,7 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
-	for _, argument := range pfmengine.MustLookup(pfmengine.Claude).LaunchArgs {
+	for _, argument := range pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
@@ -214,7 +214,7 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 func (spawn ClaudeSpawn) argv(prefs pfmconfig.ClaudePrefs) []string {
 	argv := make([]string, 0, len(spawn.Args)+8)
 	argv = append(argv, spawn.Args...)
-	argv = append(argv, pfmengine.MustLookup(pfmengine.Claude).LaunchArgs...)
+	argv = append(argv, pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args)...)
 	if spawn.Model != "" {
 		argv = append(argv, "--model", spawn.Model)
 	}

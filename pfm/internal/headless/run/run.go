@@ -620,7 +620,7 @@ func arguments(request Request) ([]string, error) {
 	// already refused every unregistered engine. These trail the caller's own
 	// Args so a caller-supplied --output-format (harvest's ask adapter passes
 	// its own) stays adjacent to the flags that came with it.
-	args = append(args, pfmengine.MustLookup(request.Engine).LaunchArgs...)
+	args = append(args, pfmengine.LaunchArgsFor(request.Engine, request.Args)...)
 	return args, nil
 }
 

@@ -50,6 +50,30 @@ func TestReloadAcceptsBareSameAccountRequest(t *testing.T) {
 	}
 }
 
+// TestReloadPaneArgumentReportsWhatTheCallerTyped is reloadSocketArgument's
+// sibling: the scheduler in runChatReloadWithRuntime reads this to decide
+// whether it, or the caller, named the pane. A caller-typed --pane must be
+// returned verbatim; its absence — or a trailing --pane with nothing after
+// it — must report "", never panic on an out-of-range index.
+func TestReloadPaneArgumentReportsWhatTheCallerTyped(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "absent", args: []string{"--sock", "/jail/tmux/cc-1"}, want: ""},
+		{name: "present", args: []string{"--sock", "/jail/tmux/cc-1", "--pane", "%3"}, want: "%3"},
+		{name: "trailing with no value", args: []string{"--sock", "/jail/tmux/cc-1", "--pane"}, want: ""},
+		{name: "no args at all", args: nil, want: ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := reloadPaneArgument(testCase.args); got != testCase.want {
+				t.Fatalf("reloadPaneArgument(%#v) = %q, want %q", testCase.args, got, testCase.want)
+			}
+		})
+	}
+}
+
 // TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami is the fix for
 // the detached-worker bug: the scheduler in runChatReloadWithRuntime resolves
 // the caller's pane once, while it still has ancestry or $TMUX to walk, and

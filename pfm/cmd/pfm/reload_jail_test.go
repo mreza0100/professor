@@ -227,6 +227,83 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	}
 }
 
+// TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves is the regression
+// for the scheduler's own hardcoded pane="": validateReloadArgs accepted a
+// caller-typed --pane, but runChatReloadWithRuntime's own call into
+// reloadTarget passed "" no matter what, so `pfm chat reload --sock <server>
+// --pane <live pane>` was refused with "has multiple panes — run reload
+// inside the chat instead" even though the caller had disambiguated it. The
+// scheduler must now read reloadPaneArgument(args) and pass it through, and —
+// since the caller's own args already carry a --pane — must NOT also append
+// its own, which would leave two --pane flags in the worker's argv.
+func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, `{
+  "version": 1,
+  "accounts": [
+    {"id": 1, "configDir": "`+filepath.Join(root, "account-1")+`"},
+    {"id": 2, "configDir": "`+filepath.Join(root, "account-2")+`"}
+  ]
+}`)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	socket := probeReloadSocket(t, "explicit-multi")
+	server := exec.Command(
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
+		"sleep 120",
+	)
+	server.Env = append(server.Environ(), "TMUX=")
+	if output, err := server.CombinedOutput(); err != nil {
+		t.Fatalf("start probe socket: %v: %s", err, output)
+	}
+	cleanupProbeReloadSocket(t, socket)
+	if output, err := exec.Command(
+		"tmux", "-S", socket, "new-window", "-d", "-n", "second", "sleep 120",
+	).CombinedOutput(); err != nil {
+		t.Fatalf("start second probe pane: %v: %s", err, output)
+	}
+	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-a", "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatalf("read probe panes: %v", err)
+	}
+	panes := strings.Fields(strings.TrimSpace(string(paneOutput)))
+	if len(panes) != 2 {
+		t.Fatalf("probe server has %d panes, want 2: %q", len(panes), paneOutput)
+	}
+	target := panes[1]
+
+	old := startReloadWorker
+	t.Cleanup(func() { startReloadWorker = old })
+	var workerArgs []string
+	startReloadWorker = func(command *exec.Cmd) error {
+		workerArgs = append([]string(nil), command.Args...)
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "reload", "2",
+		"--sock", socket, "--pane", target, "--1h", "on",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("explicit --sock/--pane on a multi-pane server was refused: rc=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "multiple panes") {
+		t.Fatalf("scheduler still hit the multi-pane refusal despite an explicit --pane: stderr=%q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "reload scheduled") {
+		t.Fatalf("schedule receipt = %q", stdout.String())
+	}
+	joined := strings.Join(workerArgs, "\x00")
+	count := strings.Count(joined, "\x00--pane\x00")
+	if count != 1 {
+		t.Fatalf("worker argv carries %d --pane flags, want exactly 1 (the caller's own): %q", count, workerArgs)
+	}
+	if !strings.Contains(joined, "\x00--pane\x00"+target) {
+		t.Fatalf("worker argv lost the caller's own --pane %s: %q", target, workerArgs)
+	}
+}
+
 // reloadPromptFixture is a raw-tty pane the worker can actually /exit and
 // respawn: it echoes every typed byte itself (like injectCLIUI in
 // inject_cli_jail_test.go) so capture-pane sees a live "❯ …" composer line,

@@ -239,10 +239,10 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 				return "", err
 			}
 			return fmt.Sprintf(
-				"✅ usage recovered — account %d is back to 5h %d%% · 7d %d%%. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n",
+				"✅ usage recovered — account %d is back to %s · %s. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n",
 				account,
-				five,
-				seven,
+				recoveredWindowPhrase("5h", cached.FiveHour, five, now),
+				recoveredWindowPhrase("7d", cached.SevenDay, seven, now),
 			), nil
 		}
 		return "", nil
@@ -740,6 +740,21 @@ func fileAge(path string, now time.Time) time.Duration {
 		return 100 * 365 * 24 * time.Hour
 	}
 	return now.Sub(info.ModTime())
+}
+
+// recoveredWindowPhrase states one window's standing in the recovery banner.
+// currentUtilization collapses a window whose resets_at has already passed to
+// the caller's fallback, and this banner's fallback is 0 — so a bare "5h 0%%"
+// here would assert a MEASURED zero when the truth is "the window rolled over
+// and we have not re-asked yet". That is the same fabrication windowPhrase
+// refuses on the warn line, and an expired window is precisely what drives the
+// recovery branch (it drags `maximum` under the warn threshold), so this is
+// the banner's likely reading, not a corner of it.
+func recoveredWindowPhrase(label string, window usageWindow, percent int, now time.Time) string {
+	if resetPassed(window.ResetsAt, now) {
+		return label + " — (reset passed · awaiting refetch)"
+	}
+	return fmt.Sprintf("%s %d%%", label, percent)
 }
 
 // windowPhrase is one window's clause in the hook's warn line. A window whose

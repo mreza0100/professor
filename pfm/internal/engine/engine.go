@@ -44,6 +44,8 @@ type Descriptor struct {
 	// LaunchArgs holds the argv words every launch of this engine carries,
 	// whichever door starts it (action.ClaudeSpawn, headless/run) — the argv
 	// twin of LaunchEnv, for flags rather than environment assignments.
+	// A flag the caller already spells for itself is dropped from this list
+	// rather than appended after it — see LaunchArgsFor.
 	LaunchArgs []string
 	// RootEnv is the PFM_* variable a test jail sets to relocate this engine's
 	// session store; DefaultRoots computes the production roots from $HOME.
@@ -152,4 +154,46 @@ func FromSocket(name string) (ID, bool) {
 		}
 	}
 	return "", false
+}
+
+// LaunchArgsFor returns id's LaunchArgs with every flag the caller already
+// states in callerArgs removed.
+//
+// The spawn doors append LaunchArgs AFTER the caller's own argv, and a
+// single-value flag's last occurrence wins: appending the fleet's own
+// --settings behind a user who typed `claude --settings ~/mine.json` would
+// silently discard the file they asked for, with no warning and no error.
+// Dropping ours instead leaves that launch exactly as it behaved before
+// LaunchArgs existed, and loses nothing anyone typed. A flag is matched by
+// name, so `--settings=X` counts as stated just as `--settings X` does.
+func LaunchArgsFor(id ID, callerArgs []string) []string {
+	launch := MustLookup(id).LaunchArgs
+	if len(launch) == 0 || len(callerArgs) == 0 {
+		return launch
+	}
+	stated := make(map[string]bool, len(callerArgs))
+	for _, argument := range callerArgs {
+		if !strings.HasPrefix(argument, "--") || argument == "--" {
+			continue
+		}
+		name, _, _ := strings.Cut(argument, "=")
+		stated[name] = true
+	}
+	kept := make([]string, 0, len(launch))
+	for index := 0; index < len(launch); index++ {
+		flag := launch[index]
+		value, hasValue := "", index+1 < len(launch) && !strings.HasPrefix(launch[index+1], "--")
+		if hasValue {
+			value = launch[index+1]
+			index++
+		}
+		if stated[flag] {
+			continue
+		}
+		kept = append(kept, flag)
+		if hasValue {
+			kept = append(kept, value)
+		}
+	}
+	return kept
 }

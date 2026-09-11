@@ -234,6 +234,94 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	}
 }
 
+// TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero is the regression for
+// the recovery-banner bug: five/seven come from currentUtilization(window,
+// now, 0), which returns the fallback 0 for a window whose resets_at has
+// already passed — "unknown, awaiting refetch", not "measured 0%". The old
+// banner rendered that as a truthful-looking "back to 5h 0% · 7d 0%", and an
+// expired window collapsing to 0 is exactly what drags `maximum` under
+// options.Warn and enters this branch in the first place, so it is the likely
+// reading, not a corner case. Reaching the recovery branch requires the
+// warned-<account> flag to already exist (TestEvaluateIgnoresWindowsPastTheir
+// Reset never sets it, which is why this survived); this test pre-arms it.
+func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".cc", "9")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Truncate(time.Second)
+	cacheDir := filepath.Join(root, "cache")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-arm the warned flag: without it, a low-utilization cache never
+	// enters the recovery branch at all — it is simply quiet.
+	if err := AtomicWrite(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	passed := now.Add(-90 * time.Minute)
+	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
+		Usage: Usage{
+			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
+			SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+		},
+		ConfigDir: configDir, FetchedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := Evaluate(context.Background(), Options{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		AccountDirs: map[string]int{configDir: 9}, CacheDir: cacheDir,
+		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message, "usage recovered") {
+		t.Fatalf("expected the recovery banner, got %q", message)
+	}
+	if strings.Contains(message, "0%") {
+		t.Fatalf("recovery banner asserted a measured 0%% for an expired window: %q", message)
+	}
+	if !strings.Contains(message, "reset passed") {
+		t.Fatalf("recovery banner did not say the expired window's reset passed: %q", message)
+	}
+
+	// Mirror case: a window whose reset is still in the future, at a genuine
+	// low percentage, must still render its real number rather than the
+	// "reset passed" phrase.
+	if err := AtomicWrite(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
+		Usage: Usage{
+			FiveHour: Window{Utilization: usageFloatPtr(5), ResetsAt: now.Add(2 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+		},
+		ConfigDir: configDir, FetchedAt: &now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	liveMessage, err := Evaluate(context.Background(), Options{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		AccountDirs: map[string]int{configDir: 9}, CacheDir: cacheDir,
+		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(liveMessage, "5h 5%") {
+		t.Fatalf("recovery banner for a live window lost its real percentage: %q", liveMessage)
+	}
+	if strings.Contains(liveMessage, "reset passed") {
+		t.Fatalf("recovery banner for a live window wrongly said reset passed: %q", liveMessage)
+	}
+}
+
 func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 	for _, testcase := range []struct {
 		name       string

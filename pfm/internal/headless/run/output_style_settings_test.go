@@ -31,3 +31,28 @@ func TestArgumentsCarriesOutputStyleDefaultSettings(t *testing.T) {
 		}
 	}
 }
+
+// TestArgumentsKeepsACallerSuppliedSettingsFlag is the regression for the
+// silently-discarded --settings bug: arguments() used to append LaunchArgs
+// AFTER request.Args, so a caller-supplied --settings (a headless caller
+// passing its own file through request.Args) lost to the fleet's own
+// --settings {"outputStyle":"default"} appended behind it. The caller's value
+// must now survive and the fleet's default payload must not appear at all.
+func TestArgumentsKeepsACallerSuppliedSettingsFlag(t *testing.T) {
+	args, err := arguments(Request{Engine: pfmengine.Claude, Args: []string{"--settings", "/tmp/mine.json"}})
+	if err != nil {
+		t.Fatalf("arguments() error = %v", err)
+	}
+	if !containsPair(args, "--settings", "/tmp/mine.json") {
+		t.Fatalf("Claude args %#v lack the caller's --settings value", args)
+	}
+	count := 0
+	for _, argument := range args {
+		if argument == "--settings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("Claude args %#v carry %d --settings words, want exactly 1", args, count)
+	}
+}

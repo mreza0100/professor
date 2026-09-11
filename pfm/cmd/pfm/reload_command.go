@@ -124,13 +124,14 @@ func runChatReloadWithRuntime(
 	resolved := runtime.Paths
 	tmux := reloadCommandTmux{}
 	callerSock := reloadSocketArgument(args)
+	callerPane := reloadPaneArgument(args)
 	// The scheduler resolves the target ONCE, here, while it still has a live
 	// tmux ancestor (or $TMUX) to walk. The worker below runs Setsid-detached
 	// with no such ancestor — reparented to init, invisible to
 	// resolve.NewWhoami's process walk — so the answer this call already has
 	// must be handed to the worker explicitly, never re-derived.
 	socketPath, pane, _, code := reloadTarget(
-		context.Background(), callerSock, "", resolved, runtime, tmux, stderr,
+		context.Background(), callerSock, callerPane, resolved, runtime, tmux, stderr,
 	)
 	if code != 0 {
 		return code
@@ -171,11 +172,16 @@ func runChatReloadWithRuntime(
 		// detached worker never has to re-run identity resolution to find it.
 		workerArgs = append(workerArgs, "--sock", socketPath)
 	}
-	// --pane always travels with the worker, whether or not the caller passed
-	// --sock: a caller-supplied --sock alone can still name a multi-pane
-	// server, and only THIS scheduler — with its live ancestry or $TMUX — knew
-	// which of those panes was actually asking.
-	workerArgs = append(workerArgs, "--pane", pane)
+	if callerPane == "" {
+		// --pane travels with the worker whether or not the caller passed
+		// --sock: a caller-supplied --sock alone can still name a multi-pane
+		// server, and only THIS scheduler — with its live ancestry or $TMUX —
+		// knew which of those panes was actually asking. A caller who named a
+		// pane itself already has one in `args`; appending a second would
+		// leave the worker's parser taking whichever came last, with no
+		// "specified twice" complaint of the kind --account makes.
+		workerArgs = append(workerArgs, "--pane", pane)
+	}
 	command := exec.Command(os.Args[0], workerArgs...)
 	command.Stdin = null
 	command.Stdout = log
@@ -400,6 +406,22 @@ func runChatReloadWorkerWithRuntime(
 func reloadSocketArgument(args []string) string {
 	for index := 0; index+1 < len(args); index++ {
 		if args[index] == "--sock" {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+// reloadPaneArgument reports a caller-supplied --pane, the sibling of
+// reloadSocketArgument. The scheduler reads it so that `--sock SERVER --pane
+// PANE` disambiguates a multi-pane server the way the flag's shape promises:
+// accepting the flag in validateReloadArgs and then resolving as though it
+// were absent would refuse that call with "has multiple panes" — accepting an
+// argument and silently dropping it is worse than the flat rejection this
+// validator used to give.
+func reloadPaneArgument(args []string) string {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "--pane" {
 			return args[index+1]
 		}
 	}
