@@ -294,7 +294,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 	model := NewModel(snapshot)
 	line := model.renderRow(snapshot.Rows[0], false, 118)
 	plain := ansi.Strip(line)
-	for _, want := range []string{"✦ PROFESSOR UPDATE ✦", "v0.61.2", "▐ Claude ▌", "[ Codex ]", "[ OpenCode ]", "guided upgrade"} {
+	for _, want := range []string{"✦ PROFESSOR UPDATE ✦", "v0.61.2", "◖ Claude ◗", "[ Codex ]", "[ OpenCode ]", "guided upgrade"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("update banner %q lacks %q", plain, want)
 		}
@@ -458,6 +458,69 @@ func TestHideAppliesImmediatelyWithoutEndingALiveChat(t *testing.T) {
 	}
 	if got := model.rows[0]; got.Kind != live.Kind || got.Socket != live.Socket {
 		t.Fatalf("hidden row was incorrectly deactivated: %#v", got)
+	}
+}
+
+// TestToggleKilledCarriesTheRowsPaneOnlyWhenItIsLive pins the other half of
+// the KillChange the applier now depends on: hiding a live chat must also end
+// it (manager.Kill's live gate), and the applier can only forward a pane it
+// actually received from toggleKilled. A resumable row has no pane to carry —
+// forwarding a stale or invented one would tell the applier a dead row is
+// live.
+func TestToggleKilledCarriesTheRowsPaneOnlyWhenItIsLive(t *testing.T) {
+	tests := []struct {
+		name string
+		row  compose.Row
+	}{
+		{
+			name: "live row",
+			row: compose.Row{
+				Kind:   compose.LiveClaude,
+				ID:     "11111111-1111-4111-8111-111111111111",
+				Socket: "cc-1800000000-1-1",
+				PaneID: "%3",
+				Name:   "live claude",
+			},
+		},
+		{
+			name: "resumable row",
+			row: compose.Row{
+				Kind: compose.ResumeClaude,
+				ID:   "44444444-4444-4444-8444-444444444444",
+				Name: "resume claude",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := fixtureSnapshot(120)
+			snapshot.Rows = []compose.Row{test.row}
+			snapshot.InitialCursorID = test.row.ID
+			var applied []KillChange
+			snapshot.ApplyKill = func(change KillChange) error {
+				applied = append(applied, change)
+				return nil
+			}
+			model := NewModel(snapshot)
+
+			model, _ = applyKey(t, model, controlKey('x'))
+			if len(applied) != 1 {
+				t.Fatalf("⌃X did not apply on the keypress: %#v", applied)
+			}
+			if applied[0].Socket != test.row.Socket || applied[0].PaneID != test.row.PaneID {
+				t.Fatalf(
+					"KillChange address = socket=%q pane=%q, want the row's own socket=%q pane=%q",
+					applied[0].Socket, applied[0].PaneID, test.row.Socket, test.row.PaneID,
+				)
+			}
+			isLiveRow := test.row.Kind == compose.LiveClaude
+			if isLiveRow && (applied[0].Socket == "" || applied[0].PaneID == "") {
+				t.Fatalf("a live row produced an empty live address: %#v", applied[0])
+			}
+			if !isLiveRow && (applied[0].Socket != "" || applied[0].PaneID != "") {
+				t.Fatalf("a resumable row produced a live address: %#v", applied[0])
+			}
+		})
 	}
 }
 

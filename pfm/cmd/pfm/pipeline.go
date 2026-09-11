@@ -299,15 +299,18 @@ func scanFleet(
 	return result, nil
 }
 
-// resolveRowEngine looks id up in a compose pass over CURRENT database state
+// resolveRowTarget looks id up in a compose pass over CURRENT database state
 // plus a live gather — the picker's own source of truth for what exists right
-// now — and reports the engine and rollout path of the row that carries it.
-// It finds exactly the ids the picker displays, including a live agent row
-// and a live Codex pane the index has not caught up with; an id nothing
-// composes returns "", "", which leaves an ordinary kill free to refuse it as
-// unindexed. Errors from the pass itself are swallowed the same way: a
-// failed vouch attempt falls through to that same refusal rather than
-// replacing the kill's own error.
+// now — and reports the engine, rollout path, and live tmux address (socket
+// name, pane id) of the row that carries it. It finds exactly the ids the
+// picker displays, including a live agent row and a live Codex pane the
+// index has not caught up with; an id nothing composes returns all empty
+// strings, which leaves an ordinary kill free to refuse it as unindexed.
+// Errors from the pass itself are swallowed the same way: a failed vouch
+// attempt falls through to that same refusal rather than replacing the
+// kill's own error. A row with no live socket returns an empty socket and
+// pane, which is how kill.Manager tells a hide of a resumable-only chat from
+// a hide of a live one — the latter also ends it.
 //
 // The rollout path lets kill.Manager resolve an UNINDEXED Codex lineage
 // member to its root through the file's own session_meta header
@@ -319,36 +322,36 @@ func scanFleet(
 // id for a kill has no business reconciling the whole filesystem index, and
 // a delta run can prune a transcript row whose file is not there YET — the
 // exact row a kill right after spawning a chat is racing to catch.
-func resolveRowEngine(
+func resolveRowTarget(
 	ctx context.Context,
 	database *store.Store,
 	id string,
 	stderr io.Writer,
 	runtimes ...commandRuntime,
-) (pfmengine.ID, string) {
+) (engine pfmengine.ID, rolloutPath, socket, paneID string) {
 	request := scanRequest{View: compose.AllView}
 	if len(runtimes) != 0 {
 		request.Runtime = &runtimes[0]
 	}
 	environment, err := resolveScanEnvironment(request)
 	if err != nil {
-		return "", ""
+		return "", "", "", ""
 	}
 	data, err := loadFleetData(ctx, database)
 	if err != nil {
-		return "", ""
+		return "", "", "", ""
 	}
 	live, err := gatherFleet(ctx, database, environment.paths, environment.config, data, false, printWarn(stderr), stderr)
 	if err != nil {
-		return "", ""
+		return "", "", "", ""
 	}
 	result := composeFleet(ctx, environment, request, data, live)
 	for _, row := range result.Output.Rows {
 		if row.ID == id {
-			return compose.EngineForKind(row.Kind), row.Path
+			return compose.EngineForKind(row.Kind), row.Path, row.Socket, row.PaneID
 		}
 	}
-	return "", ""
+	return "", "", "", ""
 }
 
 func scanFleetCached(

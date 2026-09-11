@@ -1232,6 +1232,7 @@ func (model *Model) toggleKilled() {
 		Engine: rowEngine(row.Kind),
 		Killed: !row.Killed,
 		Socket: row.Socket,
+		PaneID: row.PaneID,
 		Live:   isLive(row.Kind),
 		Name:   row.Name,
 	}

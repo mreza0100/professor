@@ -478,7 +478,10 @@ func initialCache1H(config pfmconfig.Config, account int) bool {
 }
 
 // reportKills is the receipt for hidden-state writes made while the picker was
-// open. Hiding never changes process lifecycle; deactive is a separate action.
+// open. Hiding a resumable-only chat changes list visibility only; hiding a
+// LIVE chat also ends it, through the same exit choreography `pfm chat kill`
+// runs — the receipt still just says "hidden" either way, since visibility
+// is the one outcome every ⌃X guarantees.
 func reportKills(changes []ui.KillChange, stderr io.Writer) {
 	hidden := 0
 	for _, change := range changes {
@@ -493,7 +496,10 @@ func reportKills(changes []ui.KillChange, stderr io.Writer) {
 }
 
 // killApplier performs a picker ⌃X hidden-state write the instant it is typed.
-// Hiding changes list visibility only; deactive owns server termination.
+// Hiding a resumable-only row changes list visibility only; hiding a row
+// carrying a live tmux address also ends it — kill.Manager runs the exit
+// choreography itself once it sees the address, so this applier only forwards
+// the row's own Socket/PaneID and never decides live-ness on its own.
 //
 // It reports failure by returning it, never by writing to stderr: Bubble Tea
 // owns the terminal for as long as the picker is open.
@@ -510,11 +516,16 @@ func killApplier(
 		if !change.Killed {
 			return manager.Unkill(ctx, change.ID)
 		}
-		// The picker was showing the row, so it vouches for the engine.
-		if _, err := manager.Kill(ctx, kill.Request{
-			ID:     change.ID,
+		request := kill.Request{
+			ID: change.ID,
+			// The picker was showing the row, so it vouches for the engine.
 			Engine: change.Engine,
-		}); err != nil {
+		}
+		if change.Socket != "" && change.PaneID != "" {
+			request.SocketName = change.Socket
+			request.PaneID = change.PaneID
+		}
+		if _, err := manager.Kill(ctx, request); err != nil {
 			return err
 		}
 		return nil
