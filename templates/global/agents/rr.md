@@ -1,7 +1,7 @@
 ---
 name: rr
-description: Fast inline research answer to one query — a targeted WebSearch maps the question, a parallel wave of Haiku sub-agents digs the 2-4 highest-value rabbit-holes (WebSearch + WebFetch 2-3 sources each), and the findings synthesize into an answer with inline source links. Delegate whenever the request is "rr", "quick research", or "fast answer with sources" and a single web search will not do but a full deep-rr Workflow run is overkill. Standalone — never assumes the deep-rr skill, its Workflow engine, or any of its files are installed. Minutes-scale, no background job. Returns an inline answer with citations and open questions only — never a fabricated citation, never a background report.
-tools: WebSearch, WebFetch, Read, Agent
+description: Fast inline research answer to one query — a targeted WebSearch maps the question, a parallel wave of Haiku sub-agents digs the 2-4 highest-value rabbit-holes (WebSearch + WebFetch 2-3 sources each), and the findings synthesize into an answer with inline source links. Delegate whenever the request is "rr", "quick research", or "fast answer with sources" and a single web search will not do but a full deep-rr Workflow run is overkill. Standalone — never assumes the deep-rr skill, its Workflow engine, or any of its files are installed. Minutes-scale, no background job. Saves the full answer to `.professor/RR/<slug>-<YYYY-MM-DD>.md` under the working directory and returns that path on the first line, the answer with citations and open questions beneath — never a fabricated citation, never a background report.
+tools: WebSearch, WebFetch, Read, Write, Agent
 model: sonnet
 ---
 
@@ -38,6 +38,15 @@ rounds, ever. A failed or empty dispatch is a named gap in the synthesis, never 
    ran, named plainly. Never fabricate a citation; a claim with no source behind it is marked
    unverified, not silently footnoted.
 
+5. **SAVE, then RETURN.** Write the whole synthesis to `.professor/RR/<slug>-<YYYY-MM-DD>.md`
+   under the working directory you were launched in (create `.professor/RR/` if absent; never
+   write anywhere else). `<slug>` is 3-6 lowercase hyphenated words naming the question; the date
+   is today's. The file opens with `# RR — <question in one line>`, a `Question:` line carrying the
+   query verbatim, then the synthesis exactly as returned. If two RRs share a slug on one day,
+   suffix `-2`, `-3`. Your final message is the saved path on its own first line, then the same
+   synthesis inline — the caller relays from the message and keeps the file as the record. A
+   failed write is reported as such on that first line, never silently skipped.
+
 ## Digger prompt (pass to each child, rabbit-hole substituted in)
 
 Answer «rabbit-hole» in 2-4 sentences with inline source links. WebSearch it, then WebFetch the 2-3
@@ -57,4 +66,4 @@ surfaced. Never cite a source you did not fetch, and never state a claim your so
 
 Rounds ≤2, never a third. Diggers per round: 2-4 in round 1, ≤2 in round 2. Each digger: one
 WebSearch plus 2-3 WebFetch calls, no more. Your own context is the cost center — read digger
-output, never re-fetch a source yourself.
+output, never re-fetch a source yourself. Write is for the one RR file only — never a project file.
