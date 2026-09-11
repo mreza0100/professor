@@ -12,6 +12,31 @@ import (
 	"hostops/pfm/internal/testjail"
 )
 
+// jailedZshCommand builds the zsh invocation these tests run their scripts in.
+//
+// Two things make it a JAIL rather than merely "zsh with a different HOME".
+// `-f` skips every user rc file, and ZDOTDIR is dropped from the environment.
+// Both are needed: zsh resolves .zshenv through $ZDOTDIR, which defaults to
+// $HOME but is INHERITED when it is already set, so overriding HOME alone
+// leaves the developer's OWN .zshenv sourced into the test while $HOME points
+// at the temp dir. An rc line that is fine on the real home but fails under
+// the temp one — a `. "$HOME/.cargo/env"` that is not there — then fails the
+// test for a reason that has nothing to do with the shim being tested, and the
+// failure names the developer's dotfile rather than anything this package owns.
+func jailedZshCommand(zsh, script, home string, extraEnv ...string) *exec.Cmd {
+	command := exec.Command(zsh, "-f", "-c", script)
+	environment := make([]string, 0, len(os.Environ())+1+len(extraEnv))
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "ZDOTDIR=") {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	environment = append(environment, "HOME="+home)
+	command.Env = append(environment, extraEnv...)
+	return command
+}
+
 func TestShimSyntaxAndResource(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
@@ -31,8 +56,7 @@ func TestShimSyntaxAndResource(t *testing.T) {
 	script := "source " + quoteZsh(shimPath) + "\n" +
 		"source " + quoteZsh(shimPath) + "\n" +
 		`"$HOME/.local/bin/pfm" --version` + "\n"
-	command := exec.Command(zsh, "-c", script)
-	command.Env = append(os.Environ(), "HOME="+home)
+	command := jailedZshCommand(zsh, script, home)
 	output, err := command.CombinedOutput()
 	if err != nil || string(output) != "pfm=--version\n" {
 		t.Fatalf("source shim twice: err=%v output=%q", err, output)
@@ -56,8 +80,7 @@ source ` + quoteZsh(shimPath) + `
 source ` + quoteZsh(shimPath) + `
 "$HOME/.local/bin/pfm"
 `
-	command := exec.Command(zsh, "-c", script)
-	command.Env = append(os.Environ(), "HOME="+home)
+	command := jailedZshCommand(zsh, script, home)
 	output, err := command.CombinedOutput()
 	if err != nil || string(output) != "shim-ok\n" {
 		t.Fatalf("resource shim with foreign read-only parameter: err=%v output=%q", err, output)

@@ -297,6 +297,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	id := ""
 	var engine pfmengine.ID
 	rolloutPath := ""
+	var socket, paneID string
 	if flags.NArg() == 1 {
 		id = flags.Arg(0)
 		// The index may not have caught up with the row the picker already
@@ -304,12 +305,16 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		// rollout file yet. A compose pass is the picker's own source of
 		// truth for what exists right now, so resolving against it vouches
 		// for exactly the ids the picker would let you ⌃X, and nothing else.
-		engine, rolloutPath = resolveRowEngine(ctx, database, id, stderr, runtime)
+		// The same pass hands back the row's live tmux address so a kill of
+		// a live-but-unindexed row still ends it, not just hides it.
+		engine, rolloutPath, socket, paneID = resolveRowTarget(ctx, database, id, stderr, runtime)
 	}
 	target, err := manager.Kill(ctx, kill.Request{
 		ID:          id,
 		Engine:      engine,
 		RolloutPath: rolloutPath,
+		SocketName:  socket,
+		PaneID:      paneID,
 		Self:        *self,
 		Exit:        *exit,
 		Environment: kill.Environment(),
@@ -405,6 +410,12 @@ func runInternal(
 	if len(args) != 0 && args[0] == "reload-intercept" {
 		return runReloadIntercept(os.Stdin, stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "exit-intercept" {
+		return runExitIntercept(os.Stdin, stderr, runtime)
+	}
+	if len(args) != 0 && args[0] == "exit-close" {
+		return runExitClose(os.Stdin, stderr)
+	}
 	if len(args) != 0 && args[0] == "compact-nudge" {
 		return runCompactNudge(os.Stdin, stdout, stderr, runtime)
 	}
@@ -449,7 +460,7 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 || args[0] != "kill-exit" {
-		fmt.Fprintln(stderr, "usage: pfm internal clear-kill|kill-exit|then|update-check|explore-deny|epic-inject [options]")
+		fmt.Fprintln(stderr, "usage: pfm internal clear-kill|exit-close|exit-intercept|kill-exit|then|update-check|explore-deny|epic-inject [options]")
 		return 2
 	}
 	flags := newFlagSet(

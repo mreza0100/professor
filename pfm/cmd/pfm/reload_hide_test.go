@@ -12,7 +12,7 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-// A --fresh --hide reload hides the conversation it left behind by recording
+// A --new --hide reload hides the conversation it left behind by recording
 // a PERMANENT kill for its id through the same manager `pfm chat kill <id>`
 // uses — never a /clear-style prompt baseline, which the very next prompt in
 // the reborn pane would undo. An id the index has not caught up with is still
@@ -81,5 +81,39 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 		if killed.BaselinePrompts != nil {
 			t.Fatalf("kill for %s carries prompt baseline %d — a hide is permanent, not a /clear baseline the reborn pane's first prompt undoes", id, *killed.BaselinePrompts)
 		}
+	}
+}
+
+// TestHideReloadedConversationNeverSpawnsTheExitFinisher pins the invariant
+// this change must not disturb: a --new --hide reload tombstones the
+// conversation it left behind through a kill.Request that carries no socket
+// or pane (hideReloadedConversation calls manager.Kill with only ID/Engine/
+// RolloutPath — never resolveRowTarget), so manager.Kill's own `live` gate
+// (SocketPath != "" && PaneID != "") can never see one either. The reborn
+// pane in the SAME socket/window this reload just repainted must keep
+// running, never get closed out from under the conversation now living
+// there.
+//
+// To prove the absence of a spawn without ever risking a REAL one, PATH is
+// cleared first: deps.DetachLauncher cannot resolve setsid OR nohup with an
+// empty PATH, so if hideReloadedConversation ever forwarded a live address,
+// manager.Kill's spawn attempt would fail loudly right here with a "detach
+// kill finisher" error — never silently, and never by actually launching a
+// detached process. Today's fixed code never reaches that call at all, so
+// this passes with no launcher on PATH and no error.
+func TestHideReloadedConversationNeverSpawnsTheExitFinisher(t *testing.T) {
+	root := jailTest(t)
+	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PATH", "")
+	ctx := context.Background()
+	runtime := commandRuntime{Paths: paths.Values{Home: filepath.Join(root, "home")}}
+
+	const id = "66666666-6666-4666-8666-666666666666"
+	var stderr bytes.Buffer
+	if _, err := hideReloadedConversation(ctx, runtime, pfmengine.Claude, id, "", &stderr); err != nil {
+		t.Fatalf(
+			"hide with no live address must never need a detach launcher: %v\nstderr=%s",
+			err, stderr.String(),
+		)
 	}
 }

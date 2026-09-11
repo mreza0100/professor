@@ -37,9 +37,9 @@ import (
 // verbatim into the `/reload` slash command's own description — the picker
 // shows the human exactly the flags this package's Run understands, never a
 // hand-maintained restatement that can drift from them.
-const Usage = "usage: pfm chat reload [--account N] [--1h on|off] [--fresh [--hide]] [--then \"prompt\"] [--sock socket]\n" +
+const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--1h on|off] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
 	"       with no --sock, the calling chat's own pane is detected automatically;\n" +
-	"       --hide (with --fresh) hides the conversation left behind from the picker"
+	"       --hide (with --new) hides the conversation left behind from the picker"
 
 type Pane struct {
 	ID          string
@@ -83,6 +83,14 @@ type Request struct {
 	CodexYolo   bool
 	Cache1H     bool
 	Then        string
+	// Model and Effort pin the reborn seat's tier — the same pair
+	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
+	// "" means "inherit whatever the CLI/account would have chosen on its
+	// own"; neither is validated here, only carried — claudeRun and codexRun
+	// validate against the engine's own roster right before rendering it,
+	// because only there is the engine known.
+	Model  string
+	Effort string
 	// Home and Machine are the Claude respawn's whole policy: the account's
 	// config dir, its autonomy posture and its system-prompt choice all come
 	// from them through action.ClaudeSpawn. A reload used to synthesize its
@@ -106,7 +114,9 @@ type Options struct {
 type Result struct {
 	Account int
 	Cache1H bool
-	Fresh   bool
+	// New reports whether the reborn seat started a brand-new session id
+	// (--new was requested, or no transcript existed yet to resume).
+	New bool
 }
 
 func (o *Options) defaults() {
@@ -319,7 +329,7 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 			)
 		}
 	}
-	return Result{Account: request.Account, Cache1H: request.Cache1H, Fresh: request.SessionID == ""}, nil
+	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
 }
 
 func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io.Writer) error {
@@ -475,6 +485,10 @@ func claudeRun(request Request) (string, error) {
 	if request.SessionID != "" {
 		arguments = []string{"--resume", request.SessionID}
 	}
+	effort, err := action.ClaudeEffort(request.Effort)
+	if err != nil {
+		return "", err
+	}
 	return action.ClaudeSpawn{
 		Purpose: action.PurposeResume,
 		Account: request.Account,
@@ -482,6 +496,8 @@ func claudeRun(request Request) (string, error) {
 		Args:    arguments,
 		Home:    request.Home,
 		Machine: request.Machine,
+		Model:   request.Model,
+		Effort:  effort,
 	}.ShellCommand()
 }
 
@@ -490,13 +506,17 @@ func engineRun(request Request) (string, error) {
 	case pfmengine.Claude:
 		return claudeRun(request)
 	case pfmengine.Codex:
-		return codexRun(request), nil
+		return codexRun(request)
 	default:
 		return "", nil
 	}
 }
 
-func codexRun(request Request) string {
+func codexRun(request Request) (string, error) {
+	effort, err := action.CodexEffort(request.Effort)
+	if err != nil {
+		return "", err
+	}
 	parts := []string{
 		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
 		"-u", "CLAUDECODE", "-u", "CLAUDE_CONFIG_DIR",
@@ -517,10 +537,17 @@ func codexRun(request Request) string {
 	} else {
 		parts = append(parts, "--sandbox", "workspace-write")
 	}
+	if request.Model != "" {
+		parts = append(parts, "--model", action.Quote(request.Model))
+	}
+	if effort != "" {
+		flag := action.CodexEffortArg(effort)
+		parts = append(parts, flag[0], action.Quote(flag[1]))
+	}
 	if request.SessionID != "" {
 		parts = append(parts, "resume", action.Quote(request.SessionID))
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, " "), nil
 }
 
 func deliverThen(ctx context.Context, request Request, options Options, tmux Tmux, proc Process, stderr io.Writer) error {

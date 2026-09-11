@@ -213,13 +213,13 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
 	}
-	var account, cacheOverride, sock, requestedPane, then string
-	fresh := false
+	var account, cacheOverride, sock, requestedPane, then, model, effort string
+	newSeat := false
 	hide := false
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--fresh":
-			fresh = true
+		case "--new":
+			newSeat = true
 		case "--hide":
 			hide = true
 		case "--then":
@@ -236,6 +236,20 @@ func runChatReloadWorkerWithRuntime(
 			}
 			index++
 			sock = args[index]
+		case "--model":
+			if index+1 >= len(args) {
+				fmt.Fprintln(stderr, "pfm chat reload: --model needs a model name")
+				return 2
+			}
+			index++
+			model = args[index]
+		case "--effort":
+			if index+1 >= len(args) {
+				fmt.Fprintln(stderr, "pfm chat reload: --effort needs a level, as in --effort high")
+				return 2
+			}
+			index++
+			effort = args[index]
 		case "--pane":
 			// Internal: only the scheduler in runChatReloadWithRuntime ever
 			// appends this. It is not in reload.Usage and never documented to
@@ -320,18 +334,18 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	// leftBehind keeps the conversation's id past the --fresh blanking below:
+	// leftBehind keeps the conversation's id past the --new blanking below:
 	// --hide acts on it, and only once Run has reported the reboot complete.
 	leftBehind := id
-	if fresh {
+	if newSeat {
 		// transcript is kept: it still supplies the CWD below. Only the
 		// resumed session id is dropped, so claudeRun/codexRun omit
-		// --resume/resume and Result.Fresh (SessionID == "") reports true.
+		// --resume/resume and Result.New (SessionID == "") reports true.
 		id = ""
 		if hide {
-			fmt.Fprintln(stdout, "pfm chat reload: --fresh --hide — the reborn chat starts a NEW conversation in this pane; the one left behind is hidden from the picker once the reboot completes")
+			fmt.Fprintln(stdout, "pfm chat reload: --new --hide — the reborn chat starts a NEW conversation in this pane; the one left behind is hidden from the picker once the reboot completes")
 		} else {
-			fmt.Fprintln(stdout, "pfm chat reload: --fresh — the reborn chat starts a NEW conversation in this pane (the old one stays resumable)")
+			fmt.Fprintln(stdout, "pfm chat reload: --new — the reborn chat starts a NEW conversation in this pane (the old one stays resumable)")
 		}
 	}
 	cwd, err := reload.TranscriptCWD(transcript)
@@ -371,13 +385,13 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintln(stdout, "pfm chat reload: --then queued — the follow-up is typed into the reborn chat once it reaches its prompt")
 	}
 	options := reload.Options{Home: resolved.Home, SIDDir: resolved.SIDDir, ClaudeRoots: resolved.Roots[pfmengine.Claude], Delay: reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500), Poll: reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000), ExitTries: reload.ParseIntEnv("PFM_RELOAD_EXIT_TRIES", 20), IdleTries: reload.ParseIntEnv("PFM_RELOAD_IDLE_TRIES", 120), ThenTries: reload.ParseIntEnv("PFM_RELOAD_THEN_TRIES", 900)}
-	result, err := reload.Run(context.Background(), reload.Request{Engine: engine, SocketPath: socketPath, Pane: pane, PanePID: paneState.PID, SessionID: id, Transcript: transcript, CWD: cwd, Account: acct, AccountIDs: selected.IDs, AccountHome: selected.CodexHome, CodexBinary: selected.CodexBinary, CodexYolo: selected.CodexYolo, Cache1H: cache, Then: then, Home: resolved.Home, Machine: runtime.Config}, options, tmux, reloadProc{procfs: gather.NewProcFS(resolved.ProcRoot)}, stderr)
+	result, err := reload.Run(context.Background(), reload.Request{Engine: engine, SocketPath: socketPath, Pane: pane, PanePID: paneState.PID, SessionID: id, Transcript: transcript, CWD: cwd, Account: acct, AccountIDs: selected.IDs, AccountHome: selected.CodexHome, CodexBinary: selected.CodexBinary, CodexYolo: selected.CodexYolo, Cache1H: cache, Then: then, Model: model, Effort: effort, Home: resolved.Home, Machine: runtime.Config}, options, tmux, reloadProc{procfs: gather.NewProcFS(resolved.ProcRoot)}, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	if result.Fresh {
-		if fresh {
+	if result.New {
+		if newSeat {
 			fmt.Fprintf(stdout, "pfm chat reload: rebooted FRESH as requested: %s %s\n", filepath.Base(socketPath), pane)
 		} else {
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
@@ -385,7 +399,7 @@ func runChatReloadWorkerWithRuntime(
 	} else {
 		fmt.Fprintf(stdout, "pfm chat reload: respawned in place: %s %s\n", filepath.Base(socketPath), pane)
 	}
-	if fresh && hide {
+	if newSeat && hide {
 		// Only now: the old chat has /exited and the reborn one owns the
 		// pane. A reload that failed returned above, so a live chat is never
 		// hidden by the command that failed to replace it.
@@ -430,21 +444,21 @@ func reloadPaneArgument(args []string) string {
 
 func validateReloadArgs(args []string) error {
 	account := false
-	fresh := false
+	newSeat := false
 	hide := false
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--fresh":
-			if fresh {
-				return errors.New("fresh specified twice")
+		case "--new":
+			if newSeat {
+				return errors.New("new specified twice")
 			}
-			fresh = true
+			newSeat = true
 		case "--hide":
 			if hide {
 				return errors.New("hide specified twice")
 			}
 			hide = true
-		case "--then", "--sock", "--pane":
+		case "--then", "--sock", "--pane", "--model", "--effort":
 			// --pane is worker-only plumbing (see reloadTarget): accepted here
 			// because this same validator runs on the worker's expanded argv,
 			// but it is deliberately absent from reload.Usage and
@@ -484,8 +498,8 @@ func validateReloadArgs(args []string) error {
 			account = true
 		}
 	}
-	if hide && !fresh {
-		return errors.New("--hide needs --fresh — a reload that resumes the same conversation cannot hide it")
+	if hide && !newSeat {
+		return errors.New("--hide needs --new — a reload that resumes the same conversation cannot hide it")
 	}
 	return nil
 }
@@ -516,13 +530,17 @@ func reloadArgumentHint(argument string) string {
 	case "account", "acct", "seat", "profile":
 		suggestion = "did you mean --account N?"
 	case "fresh", "new", "restart", "reset":
-		suggestion = "did you mean --fresh?"
+		suggestion = "did you mean --new?"
 	case "hide", "kill", "close", "forget":
-		suggestion = "did you mean --hide? (beside --fresh: hides the conversation left behind)"
+		suggestion = "did you mean --hide? (beside --new: hides the conversation left behind)"
 	case "then", "prompt", "continue":
 		suggestion = "did you mean --then \"prompt\"?"
 	case "sock", "socket", "chat", "target":
 		suggestion = "did you mean --sock socket? (omit it and the calling chat is detected automatically)"
+	case "model":
+		suggestion = "did you mean --model NAME?"
+	case "effort", "level", "reasoning", "thinking":
+		suggestion = "did you mean --effort LEVEL?"
 	}
 	if suggestion == "" {
 		suggestion = "an account is passed as --account N, and every other setting has its own flag"
@@ -538,9 +556,9 @@ func positiveAccount(value string) (int, bool) {
 func reloadRequestedAccount(args []string) int {
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--fresh", "--hide":
+		case "--new", "--hide":
 			continue
-		case "--then", "--sock", "--pane", "--1h":
+		case "--then", "--sock", "--pane", "--1h", "--model", "--effort":
 			index++
 			continue
 		case "--account":
@@ -967,7 +985,7 @@ func resolveReloadCodexPaneBinding(
 }
 
 // hideReloadedConversation records a permanent kill for the conversation a
-// `--fresh --hide` reload left behind, so the picker stops listing it as a
+// `--new --hide` reload left behind, so the picker stops listing it as a
 // resumable row. It runs only AFTER reload.Run reported the reboot complete —
 // a failed reload leaves the OLD chat live in the pane, and a live chat must
 // never be hidden by the command that failed to replace it. The kill goes

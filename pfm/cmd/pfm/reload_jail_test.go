@@ -334,7 +334,7 @@ while True:
 `
 
 // TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD is the
-// regression for T1: `--fresh` must blank the resumed session id (so the
+// regression for T1: `--new` must blank the resumed session id (so the
 // respawned Claude never carries `--resume`) while the transcript-derived
 // CWD still reaches the respawned pane untouched. It drives the worker
 // through a REAL tmux pane end to end — cmd/pfm's worker owns no Tmux
@@ -395,7 +395,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	}
 	// The crumb's own filename supplies the session id (SessionFromCrumb
 	// strips the extension off the transcript basename); the transcript
-	// FILE supplies the cwd the worker must keep even under --fresh.
+	// FILE supplies the cwd the worker must keep even under --new.
 	transcript := filepath.Join(t.TempDir(), "44444444-4444-4444-8444-444444444444.jsonl")
 	if err := os.WriteFile(transcript, []byte(`{"cwd":"`+targetCWD+`"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := runChatReloadWorkerWithRuntime(
-		[]string{"--sock", socket, "--fresh", "--account", "1"}, &stdout, &stderr, runtime,
+		[]string{"--sock", socket, "--new", "--account", "1"}, &stdout, &stderr, runtime,
 	)
 	if code != 0 {
 		t.Fatalf("fresh reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())

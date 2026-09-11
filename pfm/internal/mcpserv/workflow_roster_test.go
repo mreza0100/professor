@@ -8,7 +8,6 @@ import (
 func TestChatMCPAdvertisesEveryNativeWorkflowTool(t *testing.T) {
 	tools := ToolNames()
 	for _, name := range []string{
-		"chat_branch",
 		"chat_goal",
 	} {
 		if !slices.Contains(tools, name) {
@@ -35,6 +34,18 @@ func TestChatMCPRosterNeverAdvertisesRetiredGroupTools(t *testing.T) {
 		if slices.Contains(tools, name) {
 			t.Errorf("chat MCP tool roster still advertises retired tool %q", name)
 		}
+	}
+}
+
+// TestChatMCPRosterNeverAdvertisesChatBranch pins the retired conversation
+// fork's absence. The CLI `pfm chat branch` is untouched and remains the way
+// to fork a conversation; what is retired is the MCP tool that let a model
+// fork one on its own initiative. Named explicitly, per the reasoning on the
+// group-tool roster above: a tool that merely vanished from the advertised
+// list would also pass if it came back under a new name.
+func TestChatMCPRosterNeverAdvertisesChatBranch(t *testing.T) {
+	if slices.Contains(ToolNames(), "chat_branch") {
+		t.Error("chat MCP tool roster still advertises retired tool \"chat_branch\"")
 	}
 }
 

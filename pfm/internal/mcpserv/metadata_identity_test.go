@@ -192,44 +192,6 @@ func TestChatNewDefaultsToRequestScopedCallerCWD(t *testing.T) {
 	}
 }
 
-func TestChatBranchUsesRequestScopedCodexCaller(t *testing.T) {
-	service := metadataIdentityService(t)
-	var calls [][]string
-	service.backend.dispatch = func(_ context.Context, args []string, stdout, _ io.Writer) int {
-		calls = append(calls, append([]string(nil), args...))
-		_, _ = io.WriteString(stdout, "Branched thread-a into detached Codex fork.\n")
-		return 0
-	}
-	protocol := connectInMemory(t, service.Server())
-	branched := callToolWithMeta[ActionOutput](
-		t, protocol.clientSession, "chat_branch", mcp.Meta{"threadId": "thread-a"},
-		map[string]any{"name": "review fork"},
-	)
-	if branched.Status != "ok" || branched.Code != 0 ||
-		!strings.Contains(branched.Message, "detached Codex fork") {
-		t.Fatalf("request-scoped chat_branch = %+v", branched)
-	}
-	want := [][]string{{
-		"chat", "branch", "--engine", "cx", "--session-id", "thread-a",
-		"--cwd", "/work/alpha", "--name", "review fork",
-	}}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("chat_branch dispatch calls = %q, want %q", calls, want)
-	}
-
-	missing := callToolWithMeta[ActionOutput](
-		t, protocol.clientSession, "chat_branch", nil,
-		map[string]any{"name": "must not launch"},
-	)
-	if missing.Status != "not_found" || missing.Code != inject.CodeUnknown ||
-		!strings.Contains(missing.Message, "no _meta.threadId") {
-		t.Fatalf("metadata-free chat_branch = %+v", missing)
-	}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("metadata-free chat_branch dispatched unexpectedly: %q", calls)
-	}
-}
-
 func TestChatGoalUsesRequestIdentity(t *testing.T) {
 	service := metadataIdentityService(t)
 	protocol := connectInMemory(t, service.Server())

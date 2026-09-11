@@ -55,6 +55,48 @@ var codexEfforts = map[string]struct{}{
 	"minimal": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {}, "max": {}, "ultra": {},
 }
 
+// ClaudeEffort validates effort against claudeEfforts and returns it
+// lower-cased, ready for ClaudeSpawn.Effort or a Claude argv. "" is not an
+// effort — it passes through unchanged and unvalidated, meaning "let the CLI
+// choose". Every caller that carries a Claude effort — PlanClaude here and
+// the reload door in internal/reload — validates through this ONE roster, so
+// the accepted set can never drift between a fresh launch and a reboot of an
+// existing one.
+func ClaudeEffort(effort string) (string, error) {
+	if effort == "" {
+		return "", nil
+	}
+	lower := strings.ToLower(effort)
+	if _, known := claudeEfforts[lower]; !known {
+		return "", fmt.Errorf("unknown Claude effort %q (want low, medium, high, xhigh or max)", effort)
+	}
+	return lower, nil
+}
+
+// CodexEffort is ClaudeEffort's Codex twin, validated against codexEfforts —
+// a materially different roster (Codex also accepts "minimal" and "ultra"),
+// so the two engines each keep their own accepted set even though both route
+// through this same pair of functions.
+func CodexEffort(effort string) (string, error) {
+	if effort == "" {
+		return "", nil
+	}
+	lower := strings.ToLower(effort)
+	if _, known := codexEfforts[lower]; !known {
+		return "", fmt.Errorf("unknown Codex effort %q (want minimal, low, medium, high, xhigh, max or ultra)", effort)
+	}
+	return lower, nil
+}
+
+// CodexEffortArg renders one already-validated, lower-cased Codex effort as
+// the `-c model_reasoning_effort="<value>"` pair Codex's CLI expects — the
+// exact two argv words PlanCodex and the reload door both hand to
+// codexCommandWithAccount / their own command-line assembly, so the flag's
+// spelling lives in one place.
+func CodexEffortArg(effort string) []string {
+	return []string{"-c", `model_reasoning_effort="` + effort + `"`}
+}
+
 // HeadlessPlan is the pure result: the command the tmux session runs, and
 // whether the prompt travelled on it.
 type HeadlessPlan struct {
@@ -169,17 +211,16 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if _, found := machine.Account(request.PrimaryAccount); !found {
 		return HeadlessPlan{}, fmt.Errorf("primary account %d is not in the configured roster", request.PrimaryAccount)
 	}
-	if request.Effort != "" {
-		if _, known := claudeEfforts[strings.ToLower(request.Effort)]; !known {
-			return HeadlessPlan{}, fmt.Errorf("unknown Claude effort %q (want low, medium, high, xhigh or max)", request.Effort)
-		}
+	effort, err := ClaudeEffort(request.Effort)
+	if err != nil {
+		return HeadlessPlan{}, err
 	}
 	arguments := []string{"--name", request.Name}
 	if request.Model != "" {
 		arguments = append(arguments, "--model", request.Model)
 	}
-	if request.Effort != "" {
-		arguments = append(arguments, "--effort", strings.ToLower(request.Effort))
+	if effort != "" {
+		arguments = append(arguments, "--effort", effort)
 	}
 	if request.Prompt != "" {
 		arguments = append(arguments, request.Prompt)
@@ -204,17 +245,16 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
 		return HeadlessPlan{}, fmt.Errorf("Codex account %d is not in the configured roster", request.PrimaryAccount)
 	}
-	if request.Effort != "" {
-		if _, known := codexEfforts[strings.ToLower(request.Effort)]; !known {
-			return HeadlessPlan{}, fmt.Errorf("unknown Codex effort %q (want minimal, low, medium, high, xhigh, max or ultra)", request.Effort)
-		}
+	effort, err := CodexEffort(request.Effort)
+	if err != nil {
+		return HeadlessPlan{}, err
 	}
 	arguments := make([]string, 0, 4)
 	if request.Model != "" {
 		arguments = append(arguments, "--model", request.Model)
 	}
-	if request.Effort != "" {
-		arguments = append(arguments, "-c", `model_reasoning_effort="`+strings.ToLower(request.Effort)+`"`)
+	if effort != "" {
+		arguments = append(arguments, CodexEffortArg(effort)...)
 	}
 	return HeadlessPlan{
 		Run:    codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),

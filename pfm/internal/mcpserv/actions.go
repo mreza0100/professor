@@ -117,7 +117,8 @@ func (service *Service) chatNew(ctx context.Context, request *mcp.CallToolReques
 	} else {
 		// Canonical dir: a chat spawned over MCP is born in its CALLER's
 		// project directory, not wherever the MCP server process happens to
-		// sit — the same request-scoped identity chat_branch forks from. An
+		// sit — the same request-scoped identity every caller-bound tool
+		// resolves from. An
 		// unresolvable caller keeps the explicit-only behaviour (no --cwd)
 		// rather than guessing a home.
 		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))

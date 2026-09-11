@@ -306,10 +306,6 @@ type SaveInput struct {
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
 }
 
-type BranchInput struct {
-	Name string `json:"name,omitempty" jsonschema:"optional name for the detached fork"`
-}
-
 type GoalInput struct {
 	Target string `json:"target,omitempty" jsonschema:"target chat; defaults to the requesting chat"`
 	Goal   string `json:"goal" jsonschema:"already-compiled inline /goal body, one line and at most 4000 characters"`

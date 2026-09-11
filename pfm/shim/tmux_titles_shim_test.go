@@ -38,10 +38,8 @@ func runCxServerWithFakePfm(t *testing.T, pfmScript string) (calls string, stder
 	}
 
 	script := "source " + quoteZsh(shimPath) + "\n_cx_server probe-shim-sock /tmp 'sleep 1'\n"
-	command := exec.Command(zsh, "-c", script)
-	command.Env = append(
-		os.Environ(),
-		"HOME="+home,
+	command := jailedZshCommand(
+		zsh, script, home,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	var errorOutput strings.Builder

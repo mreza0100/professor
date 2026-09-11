@@ -32,7 +32,7 @@ const (
 const selfCompactDescription = "The ONLY answer to \"compact yourself\", \"give yourself a compact\", \"self-compact\", or \"compact at this milestone\" — this tool and nothing else, never a hand-typed /compact and never a reboot of the pane: it compacts the requesting chat in place after its active turn settles and KEEPS the session (crons, sub-agents, and the pane all survive). Inspect your current screen, author a single-line focus, and give exactly ONE post-compact steer in `then` — one string, never a list — that must not start with /compact; the waiter types it into the reborn chat so it resumes unattended. Compaction DISCARDS context: if the caller keeps durable state of its own — a ledger, a scratch prompt, a state file, a chat-specific memory — it MUST write everything it wants to survive into that state BEFORE calling this, because the focus line and the one steer are the only things that cross the boundary. END THE TURN IMMEDIATELY after this call returns: run no further tool, start no further work, just report that compaction is queued. The steer is delivered by a waiter that identifies the compaction turn by watching this pane, so a caller that keeps working after calling this makes its own turn indistinguishable from the compaction and the steer lands beside the compaction instead of after it."
 
 var chatToolNames = []string{
-	"chat_branch", "chat_capture", "chat_find", "chat_goal", "chat_inject",
+	"chat_capture", "chat_find", "chat_goal", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_reload", "chat_resolve",
 	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
@@ -126,9 +126,6 @@ func (service *Service) register() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mutating := &mcp.ToolAnnotations{ReadOnlyHint: false}
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_branch", Description: "Fork the requesting Claude/Codex conversation into a new detached chat without changing the caller's pane.", Annotations: mutating,
-	}, service.chatBranch)
-	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_ls",
 		Description: "List live and resumable Claude/Codex chats as structured rows.",
 		Annotations: readOnly,
@@ -192,7 +189,7 @@ func (service *Service) register() {
 		Name: "chat_name", Description: "Name a live chat through the canonical pfm chat name dispatcher.", Annotations: mutating,
 	}, service.chatName)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_kill", Description: "Kill a chat through the canonical pfm chat kill dispatcher.", Annotations: mutating,
+		Name: "chat_kill", Description: "Hide a chat through the canonical pfm chat kill dispatcher — a live target (open tmux socket and pane) is also ended, not just hidden; a resumable-only target stays a store write.", Annotations: mutating,
 	}, service.chatKill)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name: "chat_unkill", Description: "Unkill a chat through the canonical pfm chat unkill dispatcher.", Annotations: mutating,

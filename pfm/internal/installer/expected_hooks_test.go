@@ -279,3 +279,44 @@ func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
 		}
 	}
 }
+
+// TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept pins the one
+// place a typo could silently break the /exit terminal-close pipeline: the
+// two hooks ride DIFFERENT events on purpose — exit-intercept has to see
+// the typed prompt before the model does (UserPromptSubmit), while
+// exit-close has to run only once the chat has actually ended (SessionEnd).
+// Swapping either event would either fire the closer on every prompt or
+// never let the intercept catch "e"/"/e" before the model sees it.
+func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
+	home := filepath.Join("neutral", "home")
+	templates := claudeHookTemplates(home)
+
+	if got := commandByName(templates, "exit-intercept"); got != home+"/.local/bin/pfm internal exit-intercept" {
+		t.Fatalf("exit-intercept command=%q", got)
+	}
+	if got := commandByName(templates, "exit-close"); got != home+"/.local/bin/pfm internal exit-close" {
+		t.Fatalf("exit-close command=%q", got)
+	}
+
+	foundIntercept, foundClose := false, false
+	for _, template := range templates {
+		switch template.Name {
+		case "exit-intercept":
+			foundIntercept = true
+			if template.Event != "UserPromptSubmit" || template.Matcher != "" {
+				t.Fatalf("exit-intercept template=%#v, want UserPromptSubmit with an empty matcher", template)
+			}
+		case "exit-close":
+			foundClose = true
+			if template.Event != "SessionEnd" || template.Matcher != "" {
+				t.Fatalf("exit-close template=%#v, want SessionEnd with an empty matcher", template)
+			}
+		}
+	}
+	if !foundIntercept {
+		t.Fatal("claudeHookTemplates dropped the exit-intercept hook")
+	}
+	if !foundClose {
+		t.Fatal("claudeHookTemplates dropped the exit-close hook")
+	}
+}
