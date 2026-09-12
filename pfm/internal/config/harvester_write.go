@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// writeAtomic is the harvester's config writer (harvester.go), kept verbatim:
+// writeAtomic is the harvester's config writer (harvester.go, migration.go), kept verbatim:
 // the harvester is out of the atomicfile migration by decision, so this file
 // stays in the C6 baseline. Every other config write goes through atomicfile.
 func writeAtomic(path string, content []byte) error {

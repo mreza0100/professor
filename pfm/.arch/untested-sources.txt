@@ -91,7 +91,6 @@ internal/gather/types.go
 internal/harvest/archive.go
 internal/harvest/cache.go
 internal/harvest/detect.go
-internal/harvest/identifiers.go
 internal/harvest/images.go
 internal/harvest/local.go
 internal/harvest/media.go
