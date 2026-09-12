@@ -761,7 +761,7 @@ func TestLimitsSamplerReadsCachePayloadTheHookWroteWithoutFetching(t *testing.T)
 
 	// Plant the shared cache file the way a running host already does today:
 	// through the hook's own writer (usagehook.Evaluate -> refresh ->
-	// atomicWrite, hook.go:280-284/300-304), before any LimitsSampler runs.
+	// atomicfile.Write), before any LimitsSampler runs.
 	if _, err := usagehook.Evaluate(context.Background(), usagehook.Options{
 		Home: home, ConfigDir: configDir, Endpoint: hookServer.URL, Client: hookServer.Client(),
 	}); err != nil {

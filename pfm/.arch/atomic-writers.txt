@@ -1,5 +1,5 @@
 internal/archive/archive.go
-internal/config/config.go
+internal/config/harvester_write.go
 internal/dream/apply/files.go
 internal/dream/corpus/write.go
 internal/dream/dream.go

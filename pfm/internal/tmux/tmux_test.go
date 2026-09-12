@@ -37,3 +37,19 @@ func TestCommandAddressesTheSocketAndClearsTMUX(t *testing.T) {
 		t.Fatalf("default binary = %q, want tmux", defaulted.Args[0])
 	}
 }
+
+// TestCommandRunsAConfiguredBinaryAsGiven pins that only the default goes
+// through the dependency registry: a caller's configured binary is executed
+// exactly as configured, never swapped for a registry-resolved (and
+// process-cached) path.
+func TestCommandRunsAConfiguredBinaryAsGiven(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "tmux-configured"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path, _, _ := Invocation("tmux-configured", "/sockets/cc-1")
+	if path != "tmux-configured" {
+		t.Fatalf("configured binary = %q, want it as given", path)
+	}
+}

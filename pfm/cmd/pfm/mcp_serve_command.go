@@ -164,7 +164,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 	// accidentally reach.
 	options := mcpDaemonOptions{Version: version, Endpoint: "http://" + address}
 	if chatEnabled {
-		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime))
+		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, false))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm mcp serve: configure chat: %v\n", err)
 			return 1

@@ -169,20 +169,20 @@ Each derived artifact names its source and the command that regenerates or verif
 | Id | Asserts | Broken state reports |
 | --- | --- | --- |
 | C1 / C2 | no source file over 800 lines and no test file over 1,000 beyond `.arch/ceiling-{src,test}.txt` | `FAIL new: <file>` |
-| C3 | `cmd/pfm` non-test lines ≤ `CMD_BUDGET` (lowered as each extraction lands) | `FAIL cmd/pfm = N > budget B` |
-| C4 | no `exec.Command`, `sql.Open`, `os.WriteFile` or `os.Rename` in `cmd/pfm` beyond baseline | `FAIL new: <file> xN` |
-| C5 | no concrete tmux runner outside `internal/tmux` | `FAIL new: <file>` |
-| C6 | no named atomic-write helper outside `internal/atomicfile` | `FAIL new: <file>` |
+| C3 | `cmd/pfm` non-test lines ≤ `CMD_BUDGET` (lowered as each extraction lands) | `FAIL cmd/pfm = N > budget B`; `ERROR` when no `cmd/pfm` source is listed |
+| C4 | no `exec.Command`, `sql.Open`, `os.WriteFile` or `os.Rename` in `cmd/pfm` beyond baseline | `FAIL new: <file> xN`; `ERROR` when no `cmd/pfm` source is listed |
+| C5 | no file outside `internal/tmux` resolves the tmux binary (`deps.Executable("tmux")`) or assembles the `-S` socket argv itself | `FAIL new: <file>` |
+| C6 | no named atomic-write helper, and no inline `os.CreateTemp` + `os.Rename`, outside `internal/atomicfile` | `FAIL new: <file>` |
 | C7 | no `sql.Open` outside `internal/sqlitedb` | `FAIL new: <file>` |
 | C8 | no negation-named directory (`*util*`, `helpers`, `common`, `misc`, `shared`) | `FAIL new: <dir>` |
 | C9 | every package has a `// Package` doc comment | `FAIL new: <dir>` |
 | C10 | `internal/mcpserv` never calls `backend.dispatch(` (argv into main) | `FAIL new: <file:line>` |
 | C11 | `"fleet.db"` is spelled at most once in Go source | `FAIL "fleet.db" spelled N times` |
-| C12 | every package and `*.md` that `pfm/CLAUDE.md` cites exists | `FAIL dangling: <names>` |
+| C12 | every package, `*.md` and `PFM_*` name that `pfm/CLAUDE.md` cites exists — a `PFM_*` name only when production code uses it beyond declaring it | `FAIL new: <names>` |
 | C13 | every source file has a same-stem `_test.go`, beyond `.arch/untested-sources.txt` | `FAIL new: <file>` |
 | C14 | every dispatched top-level command appears in usage (structural once `command_table.go` lands) | `FAIL dispatched but not in usage: <cmd>` |
 | C15 | every `pfm internal` entry appears in its usage (structural once `hooks.Table` lands) | `FAIL N dispatched, missing from usage: <entries>` |
-| C16 | no `os.Getenv("PFM_…")` outside `internal/paths` beyond baseline | `FAIL new: <file>` |
+| C16 | no `PFM_*` env read outside `internal/paths` beyond baseline — a literal `Getenv("PFM_…")` or one through a constant holding a `PFM_*` name | `FAIL <file> (new N)` |
 
 The body below is the exact script that produced § Metrics. § Migration step 1 commits it as `pfm/scripts/arch-check.sh` together with its `--measure` baselines. It needs bash, git and POSIX tools, and no Go toolchain.
 
@@ -310,7 +310,8 @@ Hops are reported as the pair source-only · orientation.
 - step 6's scan half, as `internal/fleet`. Codex pane reconciliation moved with it, because `fleet.Scan` runs it. `config.Runtime` became the one runtime shape (`commandRuntime` is an alias), and the account projections became `config` methods;
 - step 4(a)'s first verbs: target resolution, `last`, `status` and `read` in `internal/chat`. MCP `chat_last` and `chat_status` call `chat.Verbs` typed (C10 10 → 8).
 - step 4(a)'s rest and 4(d)'s `mcpSharedOperations`: `chat.List`, `chat.Find` and `chat.NameResolver`. MCP `chat_ls`, `chat_find` and `chat_read` call `ChatVerbs`, and inject's roster rung is one resolver for the CLI and MCP. `capture`, `whoami` and `resolve` already called `inject` and `resolve` typed, so they needed no move. An index pass refuses an engine with no index source instead of skipping it.
-- step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers, plus the harvester's `config.writeAtomic` and `harvest/cache.go`, which are held out of this wave.
+- step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers, plus the harvester's writer (`config.writeAtomic`, kept verbatim in `config/harvester_write.go`) and `harvest/cache.go`, which are held out of this wave.
+- step 2's `internal/sqlitedb` and `internal/tmux`: every SQLite open goes through `OpenStore`, `OpenReadOnly` or `OpenReadWrite` (C7 7 → 0), and the tmux builders in kill, inject, resolve, reap, spawn, action, agentopen, reload, launch and the chat commands call `tmux.Command`. C5 keeps `gather/tmuxprobe.go` (its own socket addressing) and `dream/seat/host.go` (dream isolation). The ratchet runs in the C locale and inside the fence (`dev.sh verify pfm`).
 
 The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 

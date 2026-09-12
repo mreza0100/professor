@@ -187,6 +187,19 @@ func SocketPath(socket string) (string, error) {
 	return filepath.Join(resolved.TmuxDir, socket), nil
 }
 
+// SocketUnder is the path of the tmux socket named socket under values'
+// TmuxDir. socket must be one bare name — an absolute path, a nested path or a
+// ".." that would dial a server outside the tmux directory is refused.
+func (values Values) SocketUnder(socket string) (string, error) {
+	if values.TmuxDir == "" {
+		return "", fmt.Errorf("tmux directory is empty")
+	}
+	if socket == "" || socket == "." || socket == ".." || filepath.IsAbs(socket) || filepath.Base(socket) != socket {
+		return "", fmt.Errorf("socket %q must be one relative tmux socket name", socket)
+	}
+	return filepath.Join(values.TmuxDir, socket), nil
+}
+
 // FirstRoot is the engine's first configured root, or "" with none — the root
 // a single-root consumer (recovery, heal, the dreamer's rollout locator) reads.
 func (values Values) FirstRoot(id pfmengine.ID) string {

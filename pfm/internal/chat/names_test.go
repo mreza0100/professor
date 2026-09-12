@@ -25,7 +25,7 @@ func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
 		{ID: "claude-id", Name: name, Kind: compose.LiveClaude, Socket: "cc-1-2-3", PaneID: "%1"},
 		{ID: "codex-id", Name: name, Kind: compose.LiveCodex, Socket: "cx-1-2-3", PaneID: "%2"},
 	}
-	target, code, detail, err := seatTarget(liveSeats(rows, string(pfmengine.Codex)), name)
+	target, code, detail, err := seatTarget(resolvedPaths(t), liveSeats(rows, string(pfmengine.Codex)), name)
 	resolved, resolveErr := paths.Resolve()
 	if resolveErr != nil {
 		t.Fatal(resolveErr)
@@ -34,7 +34,7 @@ func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
 		target.SocketPath != filepath.Join(resolved.TmuxDir, "cx-1-2-3") || target.Pane != "%2" {
 		t.Fatalf("seatTarget(codex)=(%+v,%d,%q,%v), want the Codex seat", target, code, detail, err)
 	}
-	if _, code, detail, err := seatTarget(liveSeats(rows, ""), name); err != nil || code != inject.CodeAmbiguous || detail == "" {
+	if _, code, detail, err := seatTarget(resolvedPaths(t), liveSeats(rows, ""), name); err != nil || code != inject.CodeAmbiguous || detail == "" {
 		t.Fatalf("seatTarget(any engine)=(%d,%q,%v), want the collision refused as ambiguous", code, detail, err)
 	}
 }
@@ -56,7 +56,7 @@ func TestLiveSeatsNeverAnswerForAKilledOrResumableRow(t *testing.T) {
 	if name, found := resolve.ResolveRosterSeat(seats, resolve.Identity{ID: "resume-only"}); found || name != "" {
 		t.Fatalf("sender name (resumable) = (%q,%t), want not found", name, found)
 	}
-	if _, code, _, err := seatTarget(liveSeats(rows, ""), "LUNA:ORCHESTRATOR (old)"); err != nil || code != inject.CodeUnknown {
+	if _, code, _, err := seatTarget(resolvedPaths(t), liveSeats(rows, ""), "LUNA:ORCHESTRATOR (old)"); err != nil || code != inject.CodeUnknown {
 		t.Fatalf("killed seat by name = code %d err %v, want a roster miss", code, err)
 	}
 }
@@ -77,5 +77,35 @@ func TestNameResolverReportsAScanFailureNotAMiss(t *testing.T) {
 	}
 	if _, found, err := resolver.SenderName(context.Background(), resolve.Identity{ID: "x", Session: "cc-x"}); err == nil || found {
 		t.Fatalf("SenderName over an unreadable fleet = found %t err %v, want the error", found, err)
+	}
+}
+
+func resolvedPaths(t *testing.T) paths.Values {
+	t.Helper()
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+// TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly pins where a roster seat
+// is dialed: under the resolver's own tmux directory (the one its scan read),
+// not whatever the process environment resolves to, and never outside it — a
+// socket that is not one bare name is refused, not joined.
+func TestSeatTargetAddressesTheRuntimesTmuxDirectoryOnly(t *testing.T) {
+	testjail.Fleet(t)
+	values := paths.Values{TmuxDir: filepath.Join(t.TempDir(), "runtime-tmux")}
+	seat := func(socket string) []compose.Row {
+		return []compose.Row{{ID: "id", Name: "seat", Kind: compose.LiveClaude, Socket: socket, PaneID: "%1"}}
+	}
+	target, code, _, err := seatTarget(values, seat("cc-1-2-3"), "seat")
+	if err != nil || code != 0 || target.SocketPath != filepath.Join(values.TmuxDir, "cc-1-2-3") {
+		t.Fatalf("seatTarget = (%+v, %d, %v); want the socket under the runtime's tmux dir", target, code, err)
+	}
+	for _, socket := range []string{"../escape", "/tmp/elsewhere", "nested/name"} {
+		if _, code, _, err := seatTarget(values, seat(socket), "seat"); err == nil || code != inject.CodeUndelivered {
+			t.Fatalf("seatTarget(socket %q) = (%d, %v); want it refused as undeliverable", socket, code, err)
+		}
 	}
 }

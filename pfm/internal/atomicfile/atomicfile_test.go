@@ -1,6 +1,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,5 +58,29 @@ func TestWriteFailureLeavesTheOldFileAndNoScratch(t *testing.T) {
 	}
 	if kept, _ := os.ReadFile(filepath.Join(target, "keep")); string(kept) != "kept" {
 		t.Fatalf("the old content was disturbed: %q", kept)
+	}
+}
+
+// TestWriteFailureReportsAScratchItCouldNotRemove pins that cleanup is not
+// swallowed: when the publish fails and the scratch file cannot be removed
+// either, the error names both — the caller learns a ".<name>.tmp-*" file was
+// left behind instead of being told only that the rename failed.
+func TestWriteFailureReportsAScratchItCouldNotRemove(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "occupied")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "keep"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("unlink denied")
+	restore := removeScratch
+	removeScratch = func(string) error { return denied }
+	t.Cleanup(func() { removeScratch = restore })
+
+	err := Write(target, []byte("new"), 0o600)
+	if err == nil || !errors.Is(err, denied) || !strings.Contains(err.Error(), ".occupied.tmp-") {
+		t.Fatalf("Write = %v; want the replace failure joined with the unremoved scratch path", err)
 	}
 }

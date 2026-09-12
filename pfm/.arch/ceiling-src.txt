@@ -4,7 +4,7 @@ cmd/pfm/headless_command.go 824
 cmd/pfm/reload_command.go 1083
 cmd/pfm/update_project.go 889
 internal/compose/compose.go 1312
-internal/config/config.go 1720
+internal/config/config.go 1714
 internal/dream/apply/apply.go 1016
 internal/dream/dream.go 1088
 internal/dream/seat/runner.go 857

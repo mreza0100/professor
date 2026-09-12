@@ -182,7 +182,7 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 
 // CodexPaneBound answers whether one live Codex pane (socket, paneID) has a
 // fleet-recorded thread binding — kill.Manager.CodexPaneBinding is the
-// authoritative writer, advanced by pipeline.reconcileCodexPanes on every
+// authoritative writer, advanced by fleet.ReconcileCodexPanes on every
 // gather pass. Consulting it here is what lets a rollout-less live-process
 // scan follow a pane through /clear instead of matching the pane's own
 // process birth time back to whichever thread it started with, forever.

@@ -3,6 +3,7 @@ package sqlitedb
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -75,5 +76,39 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 	}
 	if got := pragma(t, readWrite, "journal_mode"); got != "delete" {
 		t.Fatalf("owner's journal_mode = %q, want its own rollback journal kept", got)
+	}
+}
+
+// TestOpenersReachAPathWithURICharacters pins that a path is a path, not URI
+// text: a home or PFM_SHARED_DB directory holding "?", "#" or "%41" must open
+// that very file — never a truncated or percent-decoded neighbor, which would
+// read as an empty database.
+func TestOpenersReachAPathWithURICharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "odd?dir#%41", "store.db")
+	store, err := OpenStore(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Exec("CREATE TABLE marker (id TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("OpenStore did not create the named file: %v", err)
+	}
+	for name, open := range map[string]func(string, time.Duration) (*sql.DB, error){
+		"read-only": OpenReadOnly, "read-write": OpenReadWrite,
+	} {
+		database, err := open(path, time.Second)
+		if err != nil {
+			t.Fatalf("%s open: %v", name, err)
+		}
+		var count int
+		if err := database.QueryRow("SELECT count(*) FROM marker").Scan(&count); err != nil {
+			t.Fatalf("%s handle does not see the store's table: %v", name, err)
+		}
+		_ = database.Close()
 	}
 }

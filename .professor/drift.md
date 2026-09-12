@@ -442,3 +442,8 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   drops its dangling `PLAN.md`/`CUTOVER.md`/`check/`/`legacy/`/`PFM_DB_SCRIPT` pointers, replaces the
   package table with the `go list` doc map, and names the façades and the ratchet. pfm is this repo's
   own engine, so the `templates/project/scripts/dev.sh` twin carries no ratchet.
+- Project: `pfm/CLAUDE.md` + `pfm/scripts/arch-check.sh` — the ratchet runs in the C locale (the
+  baselines are byte-ordered), C3/C4 report ERROR when no `cmd/pfm` source is listed, C12 counts a
+  `PFM_*` name only when production code uses it beyond declaring it, and C16 also catches env reads
+  through a `"PFM_*"` constant. The dead `PFM_CODEX_AVAILABLE` knob is gone from the doc and the tree;
+  K3 names `internal/chat` as the typed verbs, with the remaining MCP argv verbs counted by C10.

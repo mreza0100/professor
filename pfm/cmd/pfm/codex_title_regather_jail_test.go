@@ -42,7 +42,7 @@ func codexJailPanePID(t *testing.T, tmuxTmpDir, socket string) int {
 // newID, plus a rollout-less live Codex process (the shared app-server
 // shape) parented to the pane's real pid, identified ONLY through
 // kill.Manager.CodexPaneBound — the pane's own fleet-recorded binding, read
-// fresh on every gatherFleet call. It sets TMUX_TMPDIR/PFM_TMUX_DIR so any
+// fresh on every fleet.Gather call. It sets TMUX_TMPDIR/PFM_TMUX_DIR so any
 // caller resolving paths.Values fresh from the environment (scanFleet,
 // streamFleetRefreshesWith — neither takes a runtime override) finds this
 // real tmux server, registers both rollouts in pfm's own store, and advances
@@ -125,11 +125,11 @@ func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, conte
 
 // T4 — a reconcile pass that moves a binding must not compose from the
 // gather it moved the binding OUT from under: scanFleet's own regather
-// (pipeline.go, the block after reconcileCodexPanes returns true).
+// (pipeline.go, the block after fleet.ReconcileCodexPanes returns true).
 //
 // Before the reconcile pass runs, the pane's binding is still the PRE-clear
 // thread (oldID); the pane's own screen has already moved to the bare
-// successor id (newID), so reconcileCodexPanes moves the binding to newID
+// successor id (newID), so fleet.ReconcileCodexPanes moves the binding to newID
 // and clear-kills oldID. A compose from the FIRST gather renders oldID live
 // (stale) and newID merely resumable; only a second gather, taken after the
 // binding moved, resolves the same rollout-less process to newID.

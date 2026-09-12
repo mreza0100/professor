@@ -101,7 +101,6 @@ func TestRefreshCadenceCapsAndNilClockNeverBacksOff(t *testing.T) {
 // already-scheduled multi-minute timer.
 func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 	jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 
 	database, err := store.Open()
 	if err != nil {

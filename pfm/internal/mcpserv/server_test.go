@@ -212,7 +212,6 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv(paths.EnvCodexRoot, codex)
 	t.Setenv(paths.EnvTmuxDir, tmux)
 	t.Setenv(paths.EnvProcRoot, proc)
-	t.Setenv("PFM_CODEX_AVAILABLE", "0")
 	return root
 }
 
@@ -728,7 +727,6 @@ func (jail *stdioJail) environment() []string {
 		paths.EnvCodexRoot+"="+jail.codex,
 		paths.EnvTmuxDir+"="+jail.tmuxDir,
 		paths.EnvProcRoot+"="+jail.proc,
-		"PFM_CODEX_AVAILABLE=0",
 		// A jailed daemon has no tmux server, no session id and no ancestry to
 		// recover a handle from, so it derives NO sender — and pfm refuses to
 		// deliver an unsigned message rather than hand the recipient an

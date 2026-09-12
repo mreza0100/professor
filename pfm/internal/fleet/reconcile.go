@@ -80,16 +80,6 @@ func CodexRolloutFingerprintsSkippable(codex []gather.LiveCodex) bool {
 	return true
 }
 
-// CodexRenamerFor returns the tmux driver ReconcileCodexPanes re-applies a
-// chat's name through after a clear. It is a variable so a test can substitute
-// a driver: renaming is the one step of the pass that has to talk to a live
-// Codex composer, so before this seam existed the step had NO automated
-// coverage — and neither did anything sequenced after it. That is exactly
-// where the missing cx_names record hid.
-var CodexRenamerFor = func(runtime pfmconfig.Runtime) spawn.Tmux {
-	return spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir}
-}
-
 // ReconcileCodexPanes is the clear-detection pass itself, run every gather
 // pass: for each live Codex pane it reads the pane's own status line, hands
 // every pane at once to DecideCodexPanes, and applies that ruling — advance
@@ -116,6 +106,22 @@ func ReconcileCodexPanes(
 	runtime pfmconfig.Runtime,
 	warn Warn,
 ) bool {
+	return ReconcileCodexPanesWith(ctx, database, live, runtime, spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir}, warn)
+}
+
+// ReconcileCodexPanesWith is ReconcileCodexPanes re-applying names through
+// renamer. Renaming is the one step of the pass that has to talk to a live
+// Codex composer, so a test hands its own driver here: before this seam the
+// step had NO automated coverage — and neither did anything sequenced after
+// it. That is exactly where the missing cx_names record hid.
+func ReconcileCodexPanesWith(
+	ctx context.Context,
+	database *store.Store,
+	live gather.Snapshot,
+	runtime pfmconfig.Runtime,
+	renamer spawn.Tmux,
+	warn Warn,
+) bool {
 	changed := false
 	manager, err := kill.New(database, KillDependencies(runtime))
 	if err != nil {
@@ -128,7 +134,6 @@ func ReconcileCodexPanes(
 		return changed
 	}
 	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
-	renamer := CodexRenamerFor(runtime)
 
 	_, actions := ObserveCodexPanes(ctx, database, manager, capturer, live, runtime, cxNames, warn)
 	for _, action := range actions {

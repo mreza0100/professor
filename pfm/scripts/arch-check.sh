@@ -15,6 +15,9 @@
 # raising a count. A genuinely new exception is a hand edit to .arch/, visible
 # in review. With no baseline, --measure writes today's tree as the first one.
 set -uo pipefail
+# The committed baselines are in byte order; sort, comm and grep must agree with
+# them whatever locale the caller's shell carries.
+export LC_ALL=C
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
 BASE="$PFM/.arch"
 CEIL_SRC="${CEIL_SRC:-800}"; CEIL_TEST="${CEIL_TEST:-1000}"
@@ -100,15 +103,17 @@ while read -r f; do n=$(wc -l < "$f"); [ "$n" -gt "$CEIL_TEST" ] && echo "$f $n"
 ratchet_counts C2-ceiling-test ceiling-test "$T/c2" "$CEIL_SLACK"
 
 # C3 cmd/pfm is dispatch: its non-test line total may not exceed .arch/cmd-budget.txt.
-n=$(grep '^cmd/pfm/' "$T/src.list" | xargs cat | wc -l | tr -d ' ')
-if [ "$MODE" = --measure ]; then mkdir -p "$BASE"; [ -f "$BASE/cmd-budget.txt" ] && [ "$(cat "$BASE/cmd-budget.txt")" -lt "$n" ] && n=$(cat "$BASE/cmd-budget.txt"); echo "$n" > "$BASE/cmd-budget.txt"; say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
+grep '^cmd/pfm/' "$T/src.list" > "$T/cmd.list"
+n=$(xargs cat < "$T/cmd.list" | wc -l | tr -d ' ')
+if [ ! -s "$T/cmd.list" ]; then say C3-cmd-budget ERROR "no cmd/pfm sources listed — the enumerator did not run"
+elif [ "$MODE" = --measure ]; then mkdir -p "$BASE"; [ -f "$BASE/cmd-budget.txt" ] && [ "$(cat "$BASE/cmd-budget.txt")" -lt "$n" ] && n=$(cat "$BASE/cmd-budget.txt"); echo "$n" > "$BASE/cmd-budget.txt"; say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
 elif [ ! -f "$BASE/cmd-budget.txt" ]; then say C3-cmd-budget ERROR "baseline .arch/cmd-budget.txt missing"
 elif [ "$n" -gt "$(cat "$BASE/cmd-budget.txt")" ]; then say C3-cmd-budget FAIL "cmd/pfm = $n > budget $(cat "$BASE/cmd-budget.txt")"
 else say C3-cmd-budget PASS "cmd/pfm = $n <= budget $(cat "$BASE/cmd-budget.txt")"; fi
 
 # C4 primitives inside cmd/pfm (exec, SQL, raw fs writes) — each belongs to a package.
-grep '^cmd/pfm/' "$T/src.list" > "$T/cmd.list"
-if g "$T/raw" "$T/cmd.list" -nE 'exec\.Command|sql\.Open\(|os\.(WriteFile|Rename)\('; then count_by_file "$T/raw" > "$T/c4"; ratchet_counts C4-cmd-primitives cmd-primitives "$T/c4"
+if [ ! -s "$T/cmd.list" ]; then say C4-cmd-primitives ERROR "no cmd/pfm sources listed — the enumerator did not run"
+elif g "$T/raw" "$T/cmd.list" -nE 'exec\.Command|sql\.Open\(|os\.(WriteFile|Rename)\('; then count_by_file "$T/raw" > "$T/c4"; ratchet_counts C4-cmd-primitives cmd-primitives "$T/c4"
 else say C4-cmd-primitives ERROR "grep could not read cmd/pfm sources"; fi
 
 # C5 one tmux runner: outside internal/tmux/, a file that builds its own tmux
@@ -161,7 +166,20 @@ else
     [ -d "internal/$p" ] || [ -d "$p" ] || echo "$p" >> "$T/c12"
   done
   for f in $(grep -oE '`?[A-Z][A-Z_]+\.md`?' CLAUDE.md | tr -d '`' | sort -u); do [ -e "$f" ] || [ -e "../$f" ] || echo "$f" >> "$T/c12"; done
-  for v in $(grep -oE 'PFM_[A-Z_]+' CLAUDE.md | sort -u); do grep -q "\"$v\"" $(cat "$T/src.list") || echo "$v" >> "$T/c12"; done
+  # A PFM_* name counts as read only when production code uses it beyond
+  # declaring it: the literal on a line that is not `name = "PFM_X"`, or the
+  # declared constant's name on some other line. A constant only tests set is
+  # a dead knob, not a read.
+  for v in $(grep -oE 'PFM_[A-Z_]+' CLAUDE.md | sort -u); do
+    grep -h "\"$v\"" $(cat "$T/src.list") > "$T/uses"
+    decl='^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[:space:]]*)?=[[:space:]]*"'"$v"'"'
+    if grep -vqE "$decl" "$T/uses"; then continue; fi
+    read=""
+    for name in $(grep -oE '^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*' "$T/uses" | awk '{print $NF}' | sort -u); do
+      grep -hw "$name" $(cat "$T/src.list") | grep -vq "\"$v\"" && { read=1; break; }
+    done
+    [ -n "$read" ] || echo "$v" >> "$T/c12"
+  done
   ratchet C12-claude-pointers claude-dangling "$T/c12"
 fi
 
@@ -187,9 +205,15 @@ else
   ratchet C15-internal-usage internal-usage-missing "$T/c15"
 fi
 
-# C16 PFM_* environment reads stay inside internal/paths.
+# C16 PFM_* environment reads stay inside internal/paths — spelled as a literal
+# or through any constant that holds a "PFM_*" name (paths.EnvHome, a local
+# fooEnv), since a read through a name is still a read.
 grep -v '^internal/paths/' "$T/src.list" > "$T/nopaths.list"
-if g "$T/raw" "$T/nopaths.list" -nE 'Getenv\("PFM_|LookupEnv\("PFM_'; then count_by_file "$T/raw" > "$T/c16"; ratchet_counts C16-env-outside-paths env-outside-paths "$T/c16"
-else say C16-env-outside-paths ERROR "grep could not read sources"; fi
+if g "$T/decl" "$T/src.list" -ohE '\b[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[:space:]]*)?=[[:space:]]*"PFM_[A-Z0-9_]+"'; then
+  names=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*' "$T/decl" | sort -u | paste -sd'|' -)
+  envread='(Getenv|LookupEnv)\("PFM_'; [ -n "$names" ] && envread="$envread|(Getenv|LookupEnv)\\(([A-Za-z_]+\\.)?($names)\\)"
+  if g "$T/raw" "$T/nopaths.list" -nE "$envread"; then count_by_file "$T/raw" > "$T/c16"; ratchet_counts C16-env-outside-paths env-outside-paths "$T/c16"
+  else say C16-env-outside-paths ERROR "grep could not read sources"; fi
+else say C16-env-outside-paths ERROR "grep could not read the PFM_* name declarations"; fi
 
 exit $rc

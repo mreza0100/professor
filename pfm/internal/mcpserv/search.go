@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"hostops/pfm/internal/chat"
@@ -9,9 +10,11 @@ import (
 )
 
 // find is chat_find: chat.Find under the tool's candidate limit (default 10,
-// maximum 50), projected onto the wire candidate. SelfID names the asking
-// session the search left out, so an empty answer is never mistaken for one
-// that looked everywhere.
+// maximum 50), projected onto the wire candidate. Only the stdio server knows
+// its caller ambiently (its process runs inside the asking chat), so only it
+// leaves the asking session out; SelfID names what was left out, so an answer
+// is never mistaken for one that looked everywhere. A search that matched
+// nothing is an answer (count 0), not a tool failure.
 func (current *backend) find(ctx context.Context, input FindInput) (FindOutput, error) {
 	if current.chat == nil {
 		return FindOutput{}, fmt.Errorf("chat_find verb is not configured")
@@ -23,10 +26,12 @@ func (current *backend) find(ctx context.Context, input FindInput) (FindOutput, 
 	if limit < 1 || limit > 50 {
 		return FindOutput{}, fmt.Errorf("limit must be between 1 and 50")
 	}
-	matches, err := current.chat.Find(ctx, chat.FindRequest{
-		Excerpt: input.Excerpt, IncludeSelf: input.IncludeSelf,
-	})
-	if err != nil {
+	self := ""
+	if !input.IncludeSelf && current.allowAmbientIdentity {
+		self = chat.AskingSession()
+	}
+	matches, err := current.chat.Find(ctx, chat.FindRequest{Excerpt: input.Excerpt, Self: self})
+	if err != nil && !errors.Is(err, chat.ErrNoExcerptMatch) {
 		return FindOutput{}, fmt.Errorf("chat_find: %w", err)
 	}
 	if len(matches) > limit {
@@ -41,10 +46,7 @@ func (current *backend) find(ctx context.Context, input FindInput) (FindOutput, 
 	}
 	output := FindOutput{
 		Candidates: candidates, Count: len(candidates),
-		Needles: chat.ExcerptNeedles(input.Excerpt),
-	}
-	if !input.IncludeSelf {
-		output.SelfID = chat.AskingSession()
+		Needles: chat.ExcerptNeedles(input.Excerpt), SelfID: self,
 	}
 	return output, nil
 }

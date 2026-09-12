@@ -26,7 +26,6 @@ import (
 // "openID's scan requested ReadOnly".
 func TestChatOpenScansReadOnly(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
 
 	project := filepath.Join(root, "work", "project")

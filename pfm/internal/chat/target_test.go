@@ -3,11 +3,15 @@ package chat
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/headless"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/testjail"
 )
@@ -149,7 +153,34 @@ func TestSeatIdentityIsOnlyTheLastRung(t *testing.T) {
 		t.Fatalf("SeatIdentity() under a Claude session = %+v", identity)
 	}
 	t.Setenv(resolve.ClaudeSessionEnv, "")
+	// SeatIdentity folds a scan error into "no seat"; prove the scan ran, so
+	// this case is "no live socket hosts the thread", not "could not look".
+	if _, err := Rows(ctx, io.Discard, nil); err != nil {
+		t.Fatalf("fleet scan failed, so the next case would pass vacuously: %v", err)
+	}
 	if identity, found := SeatIdentity(ctx, nil); found {
 		t.Fatalf("SeatIdentity() for a thread no live socket hosts = %+v", identity)
+	}
+}
+
+// TestTargetReportsAScanThatCouldNotLook drives the law through a real scan:
+// with the fleet's index database unopenable, Target returns a *TargetError
+// carrying the failure, not ErrUnknownChat — and a healthy scan that finds
+// nothing is the ErrUnknownChat answer.
+func TestTargetReportsAScanThatCouldNotLook(t *testing.T) {
+	testjail.Fleet(t)
+	ctx := context.Background()
+	if _, err := Target(ctx, "ghost", nil); !errors.Is(err, ErrUnknownChat) {
+		t.Fatalf("Target(ghost) on a healthy fleet = %v, want ErrUnknownChat", err)
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	_, err := Target(ctx, "ghost", nil)
+	var failure *TargetError
+	if !errors.As(err, &failure) || errors.Is(err, ErrUnknownChat) || failure.Name != "ghost" {
+		t.Fatalf("Target(ghost) with an unopenable index = %v, want a *TargetError that is not ErrUnknownChat", err)
 	}
 }

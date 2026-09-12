@@ -176,7 +176,7 @@ func (manager *Manager) KillCleared(
 // the only unambiguous way to identify the pane's CURRENT thread without
 // guessing from a shared cwd or a process birth time that never moves —
 // AdvanceCodexPane is the sole writer, kept current by
-// pipeline.reconcileCodexPanes on every gather pass.
+// fleet.ReconcileCodexPanes on every gather pass.
 func (manager *Manager) CodexPaneBinding(
 	ctx context.Context,
 	socket, pane string,
@@ -211,7 +211,7 @@ func (manager *Manager) CodexPaneBound(ctx context.Context) store.CodexPaneBound
 // SeedCodexPane this replaces, the binding MOVES on every pass: the pane's
 // status line is the only thing that knows a /clear happened (#1), and a
 // changed binding — previous non-empty, new different — IS that signal
-// (pipeline.reconcileCodexPanes, #3). changed is false only when the pane's
+// (fleet.ReconcileCodexPanes, #3). changed is false only when the pane's
 // observed thread already matches the stored binding.
 func (manager *Manager) AdvanceCodexPane(
 	ctx context.Context,
@@ -236,7 +236,7 @@ func (manager *Manager) AdvanceCodexPane(
 
 // KillClearedCodex records a prompt-baseline kill on the visible lineage root
 // for an already indexed Codex thread. It never guesses an id: the caller
-// (pipeline.reconcileCodexPanes) supplies the previous pane binding. Retirement
+// (fleet.ReconcileCodexPanes) supplies the previous pane binding. Retirement
 // must succeed before that binding advances, so failures remain retryable.
 func (manager *Manager) KillClearedCodex(
 	ctx context.Context,

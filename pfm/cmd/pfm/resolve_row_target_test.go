@@ -15,7 +15,7 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-// TestResolveRowTargetReturnsTheComposedRowsLiveAddress pins resolveRowTarget
+// TestResolveRowTargetReturnsTheComposedRowsLiveAddress pins fleet.ResolveRow
 // (renamed from resolveRowEngine) as the single place runKill's plain id path
 // gets a row's live socket and pane from: hiding a live chat now also ends it
 // (kill.Manager.Kill's `live` gate), and that gate only fires when THIS

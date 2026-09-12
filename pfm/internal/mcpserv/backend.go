@@ -242,7 +242,7 @@ func (current *backend) callerForRequest(
 		caller.detail = fmt.Sprintf("MCP _meta.threadId %q matched %d live Codex tmux seats", threadID, count)
 		return caller, nil
 	}
-	socketPath, err := socketPathUnder(current.paths.TmuxDir, match.Socket)
+	socketPath, err := current.paths.SocketUnder(match.Socket)
 	if err != nil {
 		caller.detail = fmt.Sprintf("MCP _meta.threadId %q has an invalid tmux socket: %v", threadID, err)
 		return caller, nil
@@ -268,19 +268,4 @@ func containsControl(value string) bool {
 		}
 	}
 	return false
-}
-
-func socketPathUnder(root, socket string) (string, error) {
-	if root == "" {
-		return "", fmt.Errorf("tmux directory is empty")
-	}
-	if socket == "" || socket == "." || filepath.IsAbs(socket) || filepath.Base(socket) != socket {
-		return "", fmt.Errorf("socket must be one relative tmux socket name")
-	}
-	path := filepath.Join(root, filepath.Clean(socket))
-	relative, err := filepath.Rel(root, path)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("socket escapes tmux directory")
-	}
-	return path, nil
 }

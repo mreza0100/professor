@@ -64,7 +64,7 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []chat.FindRequest{{Excerpt: "a literal chat name", IncludeSelf: true}}; !reflect.DeepEqual(verbs.finds, want) {
+	if want := []chat.FindRequest{{Excerpt: "a literal chat name"}}; !reflect.DeepEqual(verbs.finds, want) {
 		t.Fatalf("Find calls = %+v, want %+v", verbs.finds, want)
 	}
 	if find.Count != 2 || find.Candidates[0].ID != "one" || find.Candidates[0].Date != "2026-01-02" ||

@@ -260,7 +260,7 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 // itself has open right now may claim to be that process's current
 // conversation. A rollout-less session resolved through the state-store
 // resolver still gets a RolloutPath — the resolver's answer, for display and
-// lineage — but it must never be marked held, because observeCodexPanes uses
+// lineage — but it must never be marked held, because fleet.ObserveCodexPanes uses
 // RolloutHeld to decide whether this identity is allowed to override the
 // pane's own screen (pipeline.go). Blanket-true here would silently restore
 // the defect this field exists to prevent.

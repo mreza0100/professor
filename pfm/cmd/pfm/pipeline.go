@@ -22,7 +22,6 @@ import (
 
 const (
 	testFreshSocketEnv = "PFM_TEST_FRESH_SOCKET"
-	codexAvailableEnv  = "PFM_CODEX_AVAILABLE"
 	// fleetRefreshInterval is the cadence while somebody is driving the picker.
 	// One pass is expensive on a real fleet — a tmux fork+exec PER LIVE
 	// SOCKET (measured ~50 on this box) plus a whole store read and a
@@ -455,7 +454,7 @@ func streamFleetRefreshesWith(
 				// No live Codex PID's FDLinks-observed rollout moved since
 				// the previous poll, AND every one of them already has an
 				// answer procfs alone can stand behind (a held rollout, or a
-				// conflict/error state observeCodexPanes overrides
+				// conflict/error state fleet.ObserveCodexPanes overrides
 				// regardless of pane text) — nothing a capture-pane could
 				// tell reconciliation that procfs has not already settled.
 				// A rollout-LESS Codex process (DetectCodexThreads' normal
@@ -599,7 +598,7 @@ func sendRefresh(
 // persisting. Zero (and anything non-positive) is never a real account — it
 // is the zero value ui.Outcome carries before a picker has ever reported a
 // deliberate choice — so it means "nothing to save", not "save account 0".
-// Treating it as a real value sent it straight into writePrimaryAccount's
+// Treating it as a real value sent it straight into fleet.SetPrimaryAccount's
 // roster check, which rejected it and aborted the whole `pfm ls` run before
 // the picker's actual selection ever executed. A cancelled
 // picker (Esc/⌃C) never writes either: a ⌃S account switch is only a

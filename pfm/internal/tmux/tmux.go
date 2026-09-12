@@ -13,8 +13,8 @@ import (
 )
 
 // Command is one tmux invocation on the server at socketPath (tmux -S).
-// binary "" means the registered tmux; any binary resolves through
-// deps.Executable. TMUX is set, empty: a command run from inside a chat must
+// binary "" means the registered tmux (deps.Executable); a configured binary
+// runs exactly as given. TMUX is set, empty: a command run from inside a chat must
 // never nest into the caller's own server, and a defined $TMUX is also what
 // makes tmux return control characters in a format string verbatim rather
 // than as "_".
@@ -30,7 +30,7 @@ func Command(ctx context.Context, binary, socketPath string, arguments ...string
 // (spawn's durable systemd scope).
 func Invocation(binary, socketPath string, arguments ...string) (string, []string, []string) {
 	if binary == "" {
-		binary = "tmux"
+		binary = deps.Executable("tmux")
 	}
-	return deps.Executable(binary), append([]string{"-S", socketPath}, arguments...), append(os.Environ(), "TMUX=")
+	return binary, append([]string{"-S", socketPath}, arguments...), append(os.Environ(), "TMUX=")
 }

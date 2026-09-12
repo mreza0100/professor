@@ -37,11 +37,13 @@ type TranscriptMatch struct {
 	Hits, Needles         int
 }
 
-// FindRequest asks which transcripts hold an excerpt. The asking session's
-// own transcript (AskingSession) is left out unless IncludeSelf.
+// FindRequest asks which transcripts hold an excerpt. Self is the asking
+// session's id, whose own transcript is left out (an excerpt copied from it
+// always matches it); the surface supplies it — AskingSession where its
+// process runs inside the asking chat — and "" leaves nothing out.
 type FindRequest struct {
-	Excerpt     string
-	IncludeSelf bool
+	Excerpt string
+	Self    string
 }
 
 // Find is the shared excerpt search behind `pfm chat find`, `pfm chat read
@@ -60,10 +62,7 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 	if len(files) == 0 {
 		return nil, ErrNoTranscriptRegistry
 	}
-	self := ""
-	if !request.IncludeSelf {
-		self = AskingSession()
-	}
+	self := request.Self
 	var matches []TranscriptMatch
 	for _, path := range files {
 		id := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -105,8 +104,8 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 }
 
 // AskingSession is the Claude session this process runs in
-// (CLAUDE_CODE_SESSION_ID), or "" outside one — the transcript Find leaves out
-// unless asked, since an excerpt copied from it always matches it.
+// (CLAUDE_CODE_SESSION_ID), or "" outside one — the Self a surface whose
+// process is the asking chat hands Find.
 func AskingSession() string {
 	return os.Getenv("CLAUDE_CODE_SESSION_ID")
 }

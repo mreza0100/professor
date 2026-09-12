@@ -1472,7 +1472,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 		return false, fmt.Errorf("encode config %s: %w", config.Path, err)
 	}
 	content = append(content, '\n')
-	if err := writeAtomic(config.Path, content); err != nil {
+	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1486,7 +1486,7 @@ func RemoveMCPAuthToken(config Config) (bool, error) {
 	if err != nil || !changed {
 		return changed, err
 	}
-	if err := writeAtomic(config.Path, content); err != nil {
+	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1556,7 +1556,7 @@ func WriteDefault(path, home string, projectRoots []string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("encode defaults: %w", err)
 	}
-	return writeAtomic(path, content)
+	return atomicfile.Write(path, content, 0o600)
 }
 
 // Marshal encodes a resolved config as strict JSON. The redaction option is
@@ -1711,10 +1711,4 @@ func redactJSON(value any) {
 			redactJSON(child)
 		}
 	}
-}
-
-// writeAtomic replaces a config file through atomicfile. Every config file
-// pfm writes is private to the user: 0600.
-func writeAtomic(path string, content []byte) error {
-	return atomicfile.Write(path, content, 0o600)
 }

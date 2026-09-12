@@ -89,7 +89,6 @@ func metadataIdentityService(t *testing.T) *Service {
 	t.Setenv(paths.EnvCodexRoot, jail.codex)
 	t.Setenv(paths.EnvTmuxDir, jail.tmuxDir)
 	t.Setenv(paths.EnvProcRoot, jail.proc)
-	t.Setenv("PFM_CODEX_AVAILABLE", "0")
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

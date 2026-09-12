@@ -5,18 +5,23 @@
 package atomicfile
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 )
 
+// removeScratch deletes an unpublished scratch file; a variable so a test can
+// make the removal fail and watch the failure surface.
+var removeScratch = os.Remove
+
 // Write replaces path with content in one rename: a scratch file beside path
 // (".<name>.tmp-*", so the rename never crosses a filesystem) is written, given
 // mode's permission bits, synced and closed, then renamed over path. A missing
 // parent directory is created 0o700; a caller that wants a wider directory
 // creates it first.
-func Write(path string, content []byte, mode fs.FileMode) error {
+func Write(path string, content []byte, mode fs.FileMode) (err error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("write %s: create directory: %w", path, err)
@@ -28,8 +33,11 @@ func Write(path string, content []byte, mode fs.FileMode) error {
 	scratchPath := scratch.Name()
 	published := false
 	defer func() {
-		if !published {
-			_ = os.Remove(scratchPath)
+		if published {
+			return
+		}
+		if removeErr := removeScratch(scratchPath); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("write %s: remove scratch %s: %w", path, scratchPath, removeErr))
 		}
 	}()
 	if err := scratch.Chmod(mode.Perm()); err != nil {

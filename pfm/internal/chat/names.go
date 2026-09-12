@@ -34,11 +34,25 @@ func (resolver NameResolver) ResolveName(
 	if err != nil {
 		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
 	}
-	return seatTarget(liveSeats(rows, requiredEngine), name)
+	values, err := resolver.paths()
+	if err != nil {
+		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
+	}
+	return seatTarget(values, liveSeats(rows, requiredEngine), name)
 }
 
-// seatTarget is ResolveName over an already-read roster of live seats.
-func seatTarget(seats []compose.Row, name string) (inject.Target, int, string, error) {
+// paths is the runtime's resolved paths — the ones its scan read — or the
+// environment's when the resolver carries no runtime.
+func (resolver NameResolver) paths() (paths.Values, error) {
+	if resolver.Runtime != nil {
+		return resolver.Runtime.Paths, nil
+	}
+	return paths.Resolve()
+}
+
+// seatTarget is ResolveName over an already-read roster of live seats; the
+// seat's socket is addressed under values' tmux directory.
+func seatTarget(values paths.Values, seats []compose.Row, name string) (inject.Target, int, string, error) {
 	chat, found, err := Match(seats, name)
 	if err != nil {
 		var ambiguous *resolve.RosterAmbiguityError
@@ -50,7 +64,7 @@ func seatTarget(seats []compose.Row, name string) (inject.Target, int, string, e
 	if !found {
 		return inject.Target{}, inject.CodeUnknown, "", nil
 	}
-	socketPath, err := paths.SocketPath(chat.Socket)
+	socketPath, err := values.SocketUnder(chat.Socket)
 	if err != nil {
 		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("roster seat %q socket: %w", chat.Name, err)
 	}

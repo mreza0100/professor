@@ -25,7 +25,7 @@ import (
 // under tmuxTmpDir — gather.CommandTmux's own addressing (-L socket plus
 // TMUX_TMPDIR, landing the socket at tmuxTmpDir/tmux-<uid>/socket) — with
 // one pane that paints statusLine and holds. A codex pane's identity lives
-// on its own screen and nowhere else, so reconcileCodexPanes must read a
+// on its own screen and nowhere else, so fleet.ReconcileCodexPanes must read a
 // REAL capture, not a mock.
 // statusLine is printf's OWN format string (raw, run through a shell), so it
 // must escape a literal "%" as "%%" and a newline as "\\n", exactly the way
@@ -824,7 +824,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 // the thread the pane was already bound to. That guess is not what the
 // process is doing now; the pane's own screen already moved on to a bare,
 // unnamed thread id B (the post-/clear shape). RolloutHeld: false is what
-// tells observeCodexPanes the guess must never enter processThreads and
+// tells fleet.ObserveCodexPanes the guess must never enter processThreads and
 // overrule the screen — before the fix this guess overwrote identity.ThreadID
 // back onto A, so the binding could never advance and nothing was ever
 // killed. Model: TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding
@@ -1163,16 +1163,13 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	previousRenamer := fleet.CodexRenamerFor
-	fleet.CodexRenamerFor = func(commandRuntime) spawn.Tmux { return fakeCodexRenamer{name: chatName} }
-	t.Cleanup(func() { fleet.CodexRenamerFor = previousRenamer })
-
 	var stderr bytes.Buffer
-	fleet.ReconcileCodexPanes(
+	fleet.ReconcileCodexPanesWith(
 		context.Background(),
 		database,
 		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
+		fakeCodexRenamer{name: chatName},
 		fleet.PrintWarn(&stderr),
 	)
 

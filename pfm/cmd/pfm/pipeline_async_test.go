@@ -147,7 +147,6 @@ func (runner *immediateIndexRunner) Run(
 
 func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
 	jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +235,6 @@ func (runner *slowIndexRunner) Run(
 
 func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 	jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -562,7 +560,7 @@ func TestInternalPrimarySetGetDispatch(t *testing.T) {
 
 // TestPrimaryWritebackIgnoresTheUnsetSentinel fixtures the crash `pfm ls`
 // hit live: 0 is ui.Outcome's zero value for PrimaryAccount, never a real
-// account (accounts start at 1), so it must never reach writePrimaryAccount
+// account (accounts start at 1), so it must never reach fleet.SetPrimaryAccount
 // — which correctly rejects it, but aborting the whole `pfm ls` run over a
 // value nobody chose is the bug. A cancelled picker and a no-op reselect of
 // the already-current account must skip the write for the same reason: there
@@ -597,7 +595,7 @@ func TestPrimaryWritebackIgnoresTheUnsetSentinel(t *testing.T) {
 }
 
 // TestPrimaryWritebackSentinelNeverHitsTheRosterCheck proves the failure mode
-// end to end: routing the unset sentinel through writePrimaryAccount (what
+// end to end: routing the unset sentinel through fleet.SetPrimaryAccount (what
 // runLS did before primaryWriteback existed) reproduces the exact live
 // error, "primary account 0 is not in the configured roster" — and confirms
 // primaryWriteback's whole point is keeping that call from ever happening.

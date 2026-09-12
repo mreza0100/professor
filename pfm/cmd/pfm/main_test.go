@@ -406,7 +406,6 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 
 func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")

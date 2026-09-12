@@ -32,7 +32,7 @@ func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory for %s: %w", path, err)
 	}
-	database, err := sql.Open(driverName, path)
+	database, err := sql.Open(driverName, fileURI(path, ""))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database %s: %w", path, err)
 	}
@@ -80,11 +80,26 @@ func OpenReadWrite(path string, busy time.Duration) (*sql.DB, error) {
 }
 
 func openForeign(path, mode string, busy time.Duration) (*sql.DB, error) {
-	database, err := sql.Open(driverName, fmt.Sprintf("file:%s?%s_pragma=busy_timeout(%d)", path, mode, busy.Milliseconds()))
+	database, err := sql.Open(driverName, fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database %s: %w", path, err)
 	}
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
 	return database, nil
+}
+
+// uriPath escapes the characters SQLite's URI parser (and the driver's own
+// split at the first "?") would read as syntax, so a directory holding "?",
+// "#" or "%" opens the file it names.
+var uriPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
+// fileURI is the one DSN shape: a file: URI over the escaped path, with the
+// query appended when there is one.
+func fileURI(path, query string) string {
+	uri := "file:" + uriPath.Replace(path)
+	if query != "" {
+		uri += "?" + query
+	}
+	return uri
 }

@@ -10,6 +10,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 func TestHeadlessCompatibilityAliasExposesPublicHelp(t *testing.T) {
@@ -174,5 +175,26 @@ func TestUnknownChatIsRc4WithAMachineShape(t *testing.T) {
 	}
 	if status["state"] != "not-found" {
 		t.Fatalf("status = %v", status)
+	}
+}
+
+// TestScanFailureIsRc2NeverUnknownChat is the other half of that rule: when
+// the fleet scan cannot look (its index database cannot open), a read verb
+// exits 2 with the failure — never rc 4 and a "not-found" row that would tell
+// the caller the chat does not exist.
+func TestScanFailureIsRc2NeverUnknownChat(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	for _, args := range [][]string{{"chat", "status", "ghost", "--json"}, {"chat", "last", "ghost"}} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr)
+		if code != 2 || strings.Contains(stderr.String(), "no chat named") || strings.Contains(stdout.String(), "not-found") {
+			t.Fatalf("%v with a broken index = %d stdout=%q stderr=%q; want rc 2 naming the failure", args, code, stdout.String(), stderr.String())
+		}
 	}
 }

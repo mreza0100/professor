@@ -19,7 +19,6 @@ import (
 // as a substring filter over each row's Project OR its CWD.
 func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	indexResumableChat(t, root, "alpha-project", "11111111-1111-4111-8111-111111111112")
 	indexResumableChat(t, root, "beta-project", "22222222-2222-4222-8222-222222222223")
 
@@ -50,7 +49,6 @@ func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 // Truncated says outright that Count < Matched.
 func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	indexResumableChat(t, root, "one-project", "33333333-3333-4333-8333-333333333334")
 	indexResumableChat(t, root, "two-project", "44444444-4444-4444-8444-444444444445")
 	indexResumableChat(t, root, "three-project", "55555555-5555-4555-8555-555555555556")

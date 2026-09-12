@@ -70,7 +70,7 @@ func findTranscript(excerptPath string, runtimes ...commandRuntime) (pfmchat.Tra
 	if err != nil {
 		return pfmchat.TranscriptMatch{}, nil, err
 	}
-	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: string(content)})
+	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: string(content), Self: pfmchat.AskingSession()})
 	if err != nil {
 		return pfmchat.TranscriptMatch{}, nil, err
 	}

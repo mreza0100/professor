@@ -25,7 +25,7 @@ func callChatTool[T any](t *testing.T, name string, arguments any) T {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := mcpserv.NewConfigured("test", io.Discard, mcpRuntime(commandRuntime{Paths: resolved}))
+	service, err := mcpserv.NewConfigured("test", io.Discard, mcpRuntime(commandRuntime{Paths: resolved}, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,6 @@ func TestMCPFindNamesTheSessionItLeftOut(t *testing.T) {
 // (last_n 20): the shared extraction used to default to the CLI's single turn.
 func TestMCPReadDefaultsToTwentyTurns(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	const id = "e5555555-5555-4555-8555-555555555555"
 	project := filepath.Join(root, "work", "read-default")
 	directory := filepath.Join(root, "claude", "read-default")

@@ -73,6 +73,10 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 		best.First != "2026-01-01T00:00:00Z" || best.Last != "2026-01-02T00:00:00Z" {
 		t.Fatalf("best match = %+v, want both needles and its timestamp range", best)
 	}
+	if matches, err := Find(ctx, nil, FindRequest{Excerpt: first + "\n" + second, Self: "both"}); err != nil ||
+		len(matches) != 1 || matches[0].ID != "one" {
+		t.Fatalf("Find(Self: both) = %+v, %v; want the asking session's transcript left out", matches, err)
+	}
 	if _, err := Find(ctx, nil, FindRequest{Excerpt: "a sentence no transcript here holds"}); !errors.Is(err, ErrNoExcerptMatch) {
 		t.Fatalf("Find(absent) = %v, want ErrNoExcerptMatch", err)
 	}

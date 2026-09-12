@@ -33,7 +33,7 @@ func assertRecordedKill(t *testing.T, database *store.Store, id string, killedAt
 // request.Exit. It now spawns on request.Exit OR a resolved live address
 // (manager.go's `live := target.SocketPath != "" && target.PaneID != ""`),
 // so a caller that resolves a row's socket/pane through the compose pass
-// (runKill's resolveRowTarget, the UI's toggleKilled) gets the same
+// (runKill's fleet.ResolveRow, the UI's toggleKilled) gets the same
 // choreography as an explicit --exit — without ever having to ask for it.
 func TestKillSpawnsTheExitFinisherWheneverTheTargetIsLive(t *testing.T) {
 	const id = "60606060-6060-4060-8060-606060606060"

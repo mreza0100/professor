@@ -83,7 +83,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 	if len(pfmchat.ExcerptNeedles(target)) == 0 {
 		return resumeTarget{}, false, nil
 	}
-	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: target})
+	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: target, Self: pfmchat.AskingSession()})
 	if err != nil {
 		if errors.Is(err, pfmchat.ErrNoExcerptMatch) || errors.Is(err, pfmchat.ErrNoTranscriptRegistry) {
 			return resumeTarget{}, false, nil
