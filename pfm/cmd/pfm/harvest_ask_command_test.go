@@ -9,6 +9,7 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/paths"
 )
 
@@ -165,7 +166,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 		"load-bearing local evidence",
 		`"status": "unavailable"`,
 		`"input": "` + missing + `"`,
-		`"error": "refusing to read an unresolvable path"`,
+		`"error": "The requested document was not found. Use findWorks, select a result, and fetch it again."`,
 	} {
 		if !strings.Contains(string(prepared), want) {
 			t.Errorf("prepared files omitted %q:\n%s", want, prepared)
@@ -301,7 +302,36 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	}
 }
 
+func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	home := t.TempDir()
+	receiptDir := filepath.Join(home, "receipts")
+	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path, _, err := writeHarvestAskReceipt(home, receiptDir, 0, "10.1234/public.boundary", harvest.Result{
+		Source:    "10.1234/public.boundary",
+		Path:      "/private/cache/html/document.md",
+		Method:    "scihub",
+		Rungs:     []string{"direct", "mirror:https://mirror.secret.example"},
+		Error:     "GET https://mirror.secret.example/private: provider internals",
+		ErrorKind: "connect",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"input": "10.1234/public.boundary"`) || strings.Contains(text, "mirror.secret.example") || strings.Contains(text, "/private/cache/") || strings.Contains(text, `"method"`) || strings.Contains(text, `"rungs"`) {
+		t.Fatalf("ask receipt leaked private harvest details: %s", text)
+	}
+}
+
 func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	home := t.TempDir()
 	source := filepath.Join(home, "plain.txt")
 	if err := os.WriteFile(source, []byte("plain harvest remains plain\n"), 0o600); err != nil {
@@ -311,10 +341,13 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 	if code := runHarvest([]string{source, "--json"}, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}}); code != 0 {
 		t.Fatalf("plain harvest code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{`"source": "` + source + `"`, "\"content\": \"plain harvest remains plain\\n\"", `"method": "local"`} {
+	for _, want := range []string{`"source": "` + source + `"`, "\"content\": \"plain harvest remains plain\\n\""} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("plain JSON omitted %q:\n%s", want, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), `"method"`) || strings.Contains(stdout.String(), `"rungs"`) {
+		t.Fatalf("plain JSON exposed private acquisition fields:\n%s", stdout.String())
 	}
 }
 

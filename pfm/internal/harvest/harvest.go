@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/html"
 )
 
 // FetchWithOptions routes local files, URLs, and scholarly identifiers.
@@ -110,7 +112,8 @@ func canonicalNegativeKey(media, source string) string {
 	if media == "" {
 		media = "fetch"
 	}
-	if doi := DOIFrom(source); doi != "" {
+	if ClassifyIdentifier(source) == IdentifierDOI {
+		doi := DOIFrom(source)
 		return media + ":doi:" + strings.ToLower(doi)
 	}
 	return media + ":" + source
@@ -174,6 +177,9 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	if isPubMedSearchURL(source) {
 		return Result{Source: source, Error: fmt.Sprintf("%s is a PubMed search/results URL, not an article — use the `findWorks` tool (or `search`) to get candidate works, each with a fetch handle.", source)}
 	}
+	if providerResult, handled := h.fetchProviderRecord(ctx, source, options); handled {
+		return providerResult
+	}
 	// Cache is looked up by the eventual kind for stable type partitioning. A URL
 	// extension gives us an early key; response sniffing may move it to another
 	// partition after the fetch.
@@ -210,9 +216,15 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	lastErrorKind := ""
 	lastChallenge := false
 	lastContentChars := 0
+	var providerFailure *Result
 	emptyPDFConvert := false
 	var emptyPDFBody []byte
 	wrongPDF := false
+	landingFollowed := false
+	landingHops := 0
+	if hops, ok := ctx.Value(bibliographicLandingHopKey{}).(int); ok {
+		landingHops = hops
+	}
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case "pdf", "docx", "xlsx", "pptx", "csv", "zip", "tar", "7z", "rar":
@@ -297,6 +309,18 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		if !usableContent(converted, kind) {
 			continue
 		}
+		if kind == "html" && isBibliographicLanding(converted) {
+			if !landingFollowed && landingHops < 1 {
+				landingFollowed = true
+				if linked := bibliographicDocumentURL(body, source); linked != "" && linked != source {
+					followCtx := context.WithValue(ctx, bibliographicLandingHopKey{}, landingHops+1)
+					if result := h.fetchURLWithPolicy(followCtx, linked, options, false); result.Error == "" {
+						return result
+					}
+				}
+			}
+			continue
+		}
 		// The HTML ladder escalates thin extraction results. A short page is
 		// commonly a JS shell or bot wall even when the HTTP status is 200;
 		// plain text and converted binary documents are not subject to this
@@ -341,7 +365,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			// original HTML-source kind for cache/type semantics.
 			kind := "html"
 			converted, convErr := stripJinaEnvelope(string(body)), error(nil)
-			if convErr == nil && usableContent(converted, kind) {
+			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) {
 				return h.storeResult(source, kind, "jina", converted, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -354,7 +378,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := stripDefuddleEnvelope(string(body))
-			if usableContent(converted, "html") && contentChars(converted) > lastContentChars {
+			if usableContent(converted, "html") && contentChars(converted) > lastContentChars && !isBibliographicLanding(converted) {
 				return h.storeResult(source, "html", "defuddle-reader", converted, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -409,7 +433,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 						// "the wall won".
 						converterOutage = true
 						log.Printf("harvest: browser rung conversion failed for %s: %v", source, convErr)
-					} else if usableContent(converted, "html") &&
+					} else if usableContent(converted, "html") && !isBibliographicLanding(converted) &&
 						contentChars(converted) > lastContentChars && contentChars(converted) >= 500 {
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
@@ -433,9 +457,21 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		}
 		if allowOAPivot && metaDOI != "" && !strings.EqualFold(metaDOI, DOIFrom(source)) {
 			if result := h.fetchOA(ctx, metaDOI, rungs, options); result.Error == "" {
+				if isShadowProviderMethod(result.Method) {
+					return h.storeResultAlias(source, source, result, result.Rungs, options)
+				}
 				return result
-			} else if len(result.Rungs) > len(rungs) {
-				rungs = result.Rungs
+			} else {
+				if len(result.Rungs) > len(rungs) {
+					rungs = result.Rungs
+				}
+				if hasProviderDiagnostic(result.Error) {
+					copy := result
+					providerFailure = &copy
+					lastStatus = result.HTTPStatus
+					lastErrorKind = result.ErrorKind
+					lastChallenge = result.Challenge
+				}
 			}
 		}
 	}
@@ -444,9 +480,21 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// broad discovery traffic.
 	if doi := DOIFrom(source); allowOAPivot && doi != "" {
 		if result := h.fetchOA(ctx, doi, rungs, options); result.Error == "" {
+			if isShadowProviderMethod(result.Method) {
+				return h.storeResultAlias(source, source, result, result.Rungs, options)
+			}
 			return result
-		} else if len(result.Rungs) > len(rungs) {
-			rungs = result.Rungs
+		} else {
+			if len(result.Rungs) > len(rungs) {
+				rungs = result.Rungs
+			}
+			if hasProviderDiagnostic(result.Error) {
+				copy := result
+				providerFailure = &copy
+				lastStatus = result.HTTPStatus
+				lastErrorKind = result.ErrorKind
+				lastChallenge = result.Challenge
+			}
 		}
 	}
 	// Any public source may have a legal Wayback snapshot, not only a DOI
@@ -528,6 +576,9 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	}
 	if lastErr != nil && strings.Contains(strings.ToLower(lastErr.Error()), "private") {
 		message = lastErr.Error()
+	}
+	if providerFailure != nil {
+		message += " " + providerFailure.Error
 	}
 	message = withRungs(message, rungs)
 	return Result{Source: source, HTTPStatus: lastStatus, Error: message, ErrorKind: lastErrorKind, Challenge: lastChallenge, Chars: lastContentChars, ContentChars: lastContentChars, Rungs: rungs}
@@ -634,6 +685,80 @@ func usableContent(content, kind string) bool {
 		return len(strings.TrimSpace(content)) >= 1
 	}
 	return true
+}
+
+func isBibliographicLanding(content string) bool {
+	if !hasTextHeading(content, "abstract") {
+		return false
+	}
+	metadata := hasTextHeading(content, "fingerprint") || hasTextHeading(content, "cite this") || strings.Contains(strings.ToLower(content), "research output")
+	if !metadata {
+		return false
+	}
+	for _, heading := range []string{"introduction", "background", "methods", "materials and methods", "methods and materials", "results", "discussion", "conclusion", "references"} {
+		if hasTextHeading(content, heading) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasTextHeading(content, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimLeft(line, "#* ")
+		line = strings.TrimSpace(strings.Trim(line, ":"))
+		if strings.EqualFold(line, want) {
+			return true
+		}
+	}
+	return false
+}
+
+type bibliographicLandingHopKey struct{}
+
+func bibliographicDocumentURL(body []byte, baseRaw string) string {
+	doc, err := html.Parse(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+	var found string
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if found != "" {
+			return
+		}
+		if node.Type == html.ElementNode && node.Data == "a" {
+			href := strings.TrimSpace(nodeAttr(node, "href"))
+			if href != "" {
+				class := strings.ToLower(nodeAttr(node, "class"))
+				label := strings.ToLower(strings.TrimSpace(nodeText(node)))
+				parsed, parseErr := url.Parse(href)
+				if parseErr == nil {
+					path := strings.ToLower(parsed.Path)
+					extension := filepath.Ext(path)
+					isDocument := strings.Contains(class, "document-link") || strings.Contains(path, "/files/") || strings.Contains(label, "full text") || strings.Contains(label, "manuscript")
+					supported := extension == ".pdf" || extension == ".doc" || extension == ".docx" || extension == ".epub" || extension == ".odt" || extension == ".rtf" || extension == ".txt"
+					if isDocument && (supported || strings.Contains(class, "document-link")) {
+						base, baseErr := url.Parse(baseRaw)
+						if baseErr == nil {
+							resolved := base.ResolveReference(parsed)
+							resolved.Fragment = ""
+							if (resolved.Scheme == "http" || resolved.Scheme == "https") && assertFetchable(resolved.String(), false) == nil {
+								found = resolved.String()
+							}
+						}
+					}
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil && found == ""; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	return found
 }
 
 func (h *Harvester) storeResult(source, kind, method, content string, bytes int64, statusCode int, rungs []string, options FetchOptions) Result {

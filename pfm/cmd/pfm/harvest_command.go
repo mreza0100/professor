@@ -103,7 +103,7 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	}
 	results := make([]harvest.Result, 0, len(sources))
 	for _, source := range sources {
-		result := harvester.FetchWithOptions(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly})
+		result := harvester.FetchPublic(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly})
 		results = append(results, result)
 		if !*jsonOutput {
 			fmt.Fprintln(stdout, renderHarvestCLI(result, *sizeOnly))
@@ -188,7 +188,7 @@ func runHarvestAsk(args []string, stdout, stderr io.Writer, runtime commandRunti
 	labels := make([]string, 0, len(sources))
 	receiptDir := ""
 	for index, source := range sources {
-		result := harvester.FetchWithOptions(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: true})
+		result := harvester.FetchPublic(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: true})
 		path := result.Path
 		if result.Error == "" && path != "" {
 			path, err = filepath.Abs(path)
@@ -278,7 +278,7 @@ func writeHarvestAskReceipt(home, receiptDir string, index int, source string, r
 		Status string         `json:"status"`
 		Input  string         `json:"input"`
 		Result harvest.Result `json:"result"`
-	}{Status: "unavailable", Input: source, Result: result}, "", "  ")
+	}{Status: "unavailable", Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
 	if err != nil {
 		return "", receiptDir, fmt.Errorf("encode receipt: %w", err)
 	}
@@ -292,7 +292,7 @@ func writeHarvestAskReceipt(home, receiptDir string, index int, source string, r
 // harvestRuntime is harvester.config.json resolved into the MCP adapter's
 // runtime — the ONE bridge between machine config and the harvester. Local
 // callers (CLI, stdio, loopback daemon) keep the unconfined local-read surface
-// subject to harvest.DenyLocalPath; the external gateway confines to the cache.
+// subject to harvest.DenyLocalPath; the external gateway confines to exported artifacts.
 func harvestRuntime(runtime commandRuntime) harvestmcp.Runtime {
 	harvester := runtime.Config.Harvester
 	return harvestmcp.Runtime{
@@ -307,6 +307,11 @@ func harvestRuntime(runtime commandRuntime) harvestmcp.Runtime {
 		GoogleBooksAPIKey:     harvester.Scholarly.GoogleBooksAPIKey,
 		CoreAPIKey:            harvester.Scholarly.CoreAPIKey,
 		SemanticScholarAPIKey: harvester.Scholarly.SemanticScholarAPIKey,
+		SciHubURL:             harvester.Scholarly.SciHubURL,
+		AnnasURL:              harvester.Scholarly.AnnasURL,
+		SciDBURL:              harvester.Scholarly.SciDBURL,
+		LibGenURL:             harvester.Scholarly.LibGenURL,
+		GoogleScholarURL:      harvester.Scholarly.GoogleScholarURL,
 		Browser:               harvester.Fetch.Browser,
 		PDFOCR:                harvester.Convert.PDFOCR,
 		PDFLayout:             harvester.Convert.PDFLayout,
@@ -325,5 +330,5 @@ func renderHarvestCLI(result harvest.Result, sizeOnly bool) string {
 	if sizeOnly {
 		return fmt.Sprintf("source: %s\nsize: %d tokens / chars: %d / path: %s / cache_status: %s", result.Source, result.Tokens, result.Chars, result.Path, result.CacheStatus)
 	}
-	return fmt.Sprintf("# %s\ncache_status: %s / method: %s / bytes: %d / tokens: %d / path: %s\n\n%s", result.Source, result.CacheStatus, result.Method, result.Bytes, result.Tokens, result.Path, strings.TrimSpace(result.Content))
+	return fmt.Sprintf("# %s\ncache_status: %s / bytes: %d / tokens: %d / path: %s\n\n%s", result.Source, result.CacheStatus, result.Bytes, result.Tokens, result.Path, strings.TrimSpace(result.Content))
 }

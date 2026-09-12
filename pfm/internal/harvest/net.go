@@ -19,6 +19,8 @@ import (
 
 const defaultUA = "Mozilla/5.0 (compatible; harvester/1.0)"
 
+var errResponseTooLarge = errors.New("response exceeds byte limit")
+
 // The Python oracle's curl_cffi DEFAULT_CHROME is chrome146. Keep the UA and
 // client-hint values coupled to the exact tls-client Chrome_146 profile below.
 const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
@@ -28,6 +30,9 @@ const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/53
 func errorKind(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, errResponseTooLarge) {
+		return "too_large"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"

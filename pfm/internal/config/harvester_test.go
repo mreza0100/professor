@@ -33,6 +33,7 @@ func TestHarvesterDefaultsWhenFileAbsent(t *testing.T) {
 	if h.Exists || h.Enabled || h.External.Enabled || h.External.Port != DefaultHarvesterExternalPort ||
 		h.External.Host != "127.0.0.1" || !h.Search.Enabled || h.Cache.TTL != 24*time.Hour ||
 		h.Cache.NegativeTTL != 120*time.Second || h.Cache.NegativeTransientTTL != 15*time.Second ||
+		h.Scholarly != (HarvesterScholarly{}) ||
 		h.Output.MaxInlineChars != 50000 || h.Cache.Dir != "" {
 		t.Fatalf("defaults = %+v", h)
 	}
@@ -53,7 +54,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
   "external": {"enabled": true, "host": "0.0.0.0", "port": 19000, "publicURL": "https://harvester.example.com/",
                "auth": {"passphrase": "open sesame", "staticToken": "tok"}, "stateDir": "~/state"},
   "search": {"enabled": true, "searxngURL": "http://127.0.0.1:8888/", "braveApiKey": "brave"},
-  "scholarly": {"contactEmail": "ops@example.com", "googleBooksApiKey": "g", "coreApiKey": "c", "semanticScholarApiKey": "s"},
+	  "scholarly": {"contactEmail": "ops@example.com", "googleBooksApiKey": "g", "coreApiKey": "c", "semanticScholarApiKey": "s", "sciHubURL": "  https://mirror.example/base  ", "annasURL": "https://annas.example", "sciDBURL": "https://scidb.example", "libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example"},
   "fetch": {"browser": true, "userAgent": "UA/1", "proxyURL": "http://proxy.example:3128"},
   "convert": {"pdfOcr": true, "pdfLayout": true},
   "cache": {"dir": "~/cache", "ttlSeconds": 60, "negativeTtlSeconds": 5, "negativeTransientTtlSeconds": 2},
@@ -75,7 +76,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	if h.Search.SearXNGURL != "http://127.0.0.1:8888" || h.Search.BraveAPIKey != "brave" {
 		t.Fatalf("search = %+v", h.Search)
 	}
-	if h.Scholarly != (HarvesterScholarly{ContactEmail: "ops@example.com", GoogleBooksAPIKey: "g", CoreAPIKey: "c", SemanticScholarAPIKey: "s"}) {
+	if h.Scholarly != (HarvesterScholarly{ContactEmail: "ops@example.com", GoogleBooksAPIKey: "g", CoreAPIKey: "c", SemanticScholarAPIKey: "s", SciHubURL: "https://mirror.example/base", AnnasURL: "https://annas.example", SciDBURL: "https://scidb.example", LibGenURL: "https://libgen.example", GoogleScholarURL: "https://scholar.example"}) {
 		t.Fatalf("scholarly = %+v", h.Scholarly)
 	}
 	if !h.Fetch.Browser || h.Fetch.UserAgent != "UA/1" || h.Fetch.ProxyURL != "http://proxy.example:3128" {
@@ -97,6 +98,64 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	}
 }
 
+func TestHarvesterSciHubURLRoundTripsWithoutChangingSiblingSettings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	writeFile(t, filepath.Join(dir, HarvesterFileName), `{
+  "enabled": true,
+  "search": {"enabled": false, "searxngURL": "http://127.0.0.1:8888"},
+	  "scholarly": {"contactEmail": "ops@example.com", "sciHubURL": " https://mirror.example/scihub ", "annasURL": " https://annas.example ", "sciDBURL": "https://scidb.example", "libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example"},
+  "fetch": {"userAgent": "fixture-agent"},
+  "cache": {"ttlSeconds": 77},
+  "output": {"maxInlineChars": 321}
+}`, 0o600)
+	got, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Harvester.Scholarly.SciHubURL != "https://mirror.example/scihub" ||
+		got.Harvester.Scholarly.AnnasURL != "https://annas.example" ||
+		got.Harvester.Scholarly.SciDBURL != "https://scidb.example" ||
+		got.Harvester.Scholarly.LibGenURL != "https://libgen.example" ||
+		got.Harvester.Scholarly.GoogleScholarURL != "https://scholar.example" {
+		t.Fatalf("SciHubURL = %q, want trimmed configured URL", got.Harvester.Scholarly.SciHubURL)
+	}
+	if got.Harvester.Search.Enabled || got.Harvester.Search.SearXNGURL != "http://127.0.0.1:8888" ||
+		got.Harvester.Scholarly.ContactEmail != "ops@example.com" || got.Harvester.Fetch.UserAgent != "fixture-agent" ||
+		got.Harvester.Cache.TTL != 77*time.Second || got.Harvester.Output.MaxInlineChars != 321 {
+		t.Fatalf("unrelated settings changed: %+v", got.Harvester)
+	}
+	if got.Source("harvester.scholarly.sciHubURL") != SourceFile {
+		t.Fatalf("SciHub source = %q, want %q", got.Source("harvester.scholarly.sciHubURL"), SourceFile)
+	}
+	marshaled, err := MarshalHarvester(got.Harvester, false)
+	if err != nil {
+		t.Fatalf("MarshalHarvester() error = %v", err)
+	}
+	var shape struct {
+		Search    map[string]any `json:"search"`
+		Scholarly map[string]any `json:"scholarly"`
+	}
+	if err := json.Unmarshal(marshaled, &shape); err != nil {
+		t.Fatalf("MarshalHarvester JSON = %v", err)
+	}
+	if shape.Scholarly["sciHubURL"] != "https://mirror.example/scihub" {
+		t.Fatalf("marshaled sciHubURL = %#v", shape.Scholarly["sciHubURL"])
+	}
+	for key, want := range map[string]string{
+		"annasURL": "https://annas.example", "sciDBURL": "https://scidb.example",
+		"libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example",
+	} {
+		if shape.Scholarly[key] != want {
+			t.Fatalf("marshaled %s = %#v, want %q", key, shape.Scholarly[key], want)
+		}
+	}
+	if shape.Search["searxngURL"] != "http://127.0.0.1:8888" || shape.Search["enabled"] != false {
+		t.Fatalf("marshaled sibling settings changed: %#v", shape.Search)
+	}
+}
+
 func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 	cases := map[string]struct {
 		content string
@@ -108,6 +167,11 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 		"external url path":     {`{"external":{"publicURL":"https://h.example.com/mcp"}}`, 0o600, "without a path"},
 		"searxng query":         {`{"search":{"searxngURL":"http://127.0.0.1:8888/?x=1"}}`, 0o600, "query or fragment"},
 		"searxng scheme":        {`{"search":{"searxngURL":"ftp://127.0.0.1"}}`, 0o600, "http or https"},
+		"scihub scheme":         {`{"scholarly":{"sciHubURL":"ftp://mirror.example"}}`, 0o600, "http or https"},
+		"scihub relative":       {`{"scholarly":{"sciHubURL":"mirror.example/path"}}`, 0o600, "http or https"},
+		"scihub userinfo":       {`{"scholarly":{"sciHubURL":"https://user:pass@mirror.example"}}`, 0o600, "must not carry userinfo"},
+		"scihub query":          {`{"scholarly":{"sciHubURL":"https://mirror.example/?token=x"}}`, 0o600, "query or fragment"},
+		"scihub fragment":       {`{"scholarly":{"sciHubURL":"https://mirror.example/#pdf"}}`, 0o600, "query or fragment"},
 		"negative ttl":          {`{"cache":{"ttlSeconds":-1}}`, 0o600, "0 or more"},
 		"zero inline":           {`{"output":{"maxInlineChars":0}}`, 0o600, "at least 1"},
 		"relative cache dir":    {`{"cache":{"dir":"cache"}}`, 0o600, "must be absolute"},
@@ -125,6 +189,38 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 				t.Fatalf("Load() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestHarvesterScholarlyProviderURLsRejectUnsafeComponents(t *testing.T) {
+	for _, field := range []string{"annasURL", "sciDBURL", "libGenURL", "googleScholarURL"} {
+		for name, value := range map[string]string{
+			"scheme":   "ftp://mirror.example",
+			"userinfo": "https://user:pass@mirror.example",
+			"query":    "https://mirror.example/?token=x",
+			"fragment": "https://mirror.example/#pdf",
+		} {
+			t.Run(field+"/"+name, func(t *testing.T) {
+				dir := t.TempDir()
+				content := `{"scholarly":{"` + field + `":"` + value + `"}}`
+				writeFile(t, filepath.Join(dir, HarvesterFileName), content, 0o600)
+				if _, err := Load(filepath.Join(dir, FileName), filepath.Join(dir, "home"), nil); err == nil {
+					t.Fatalf("Load accepted unsafe %s=%q", field, value)
+				}
+			})
+		}
+	}
+}
+
+func TestHarvesterSciHubURLWhitespaceOnlyDisablesFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, HarvesterFileName), `{"scholarly":{"sciHubURL":"   "}}`, 0o600)
+	got, err := Load(filepath.Join(dir, FileName), filepath.Join(dir, "home"), nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Harvester.Scholarly.SciHubURL != "" {
+		t.Fatalf("SciHubURL = %q, want empty disabled value", got.Harvester.Scholarly.SciHubURL)
 	}
 }
 

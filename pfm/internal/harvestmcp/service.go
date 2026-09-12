@@ -58,6 +58,11 @@ type Runtime struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
+	SciHubURL             string
+	AnnasURL              string
+	SciDBURL              string
+	LibGenURL             string
+	GoogleScholarURL      string
 
 	Browser   bool
 	PDFOCR    bool
@@ -114,6 +119,10 @@ func NewConfigured(version string, runtime Runtime) (*Service, error) {
 	resolver := &harvest.Resolver{
 		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
 		CoreAPIKey: runtime.CoreAPIKey, SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
+		AnnasURL:         runtime.AnnasURL,
+		SciDBURL:         runtime.SciDBURL,
+		LibGenURL:        runtime.LibGenURL,
+		GoogleScholarURL: runtime.GoogleScholarURL,
 	}
 	service := &Service{server: server, harvester: h, resolver: resolver, runtime: runtime, worker: worker}
 	service.register()
@@ -188,6 +197,11 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		GoogleBooksAPIKey:     runtime.GoogleBooksAPIKey,
 		CoreAPIKey:            runtime.CoreAPIKey,
 		SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
+		SciHubURL:             runtime.SciHubURL,
+		AnnasURL:              runtime.AnnasURL,
+		SciDBURL:              runtime.SciDBURL,
+		LibGenURL:             runtime.LibGenURL,
+		GoogleScholarURL:      runtime.GoogleScholarURL,
 		SearXNGURL:            runtime.SearXNGURL,
 		BraveAPIKey:           runtime.BraveAPIKey,
 		DisableSearch:         runtime.DisableSearch,
@@ -464,42 +478,20 @@ func (service *Service) register() {
 }
 
 const codeTick = "`"
-const fetchDescription = `Convert one or many **sources** (` + codeTick + `sources` + codeTick + `, a list of 1–50) to clean Markdown, in input order, each cached on disk (type-partitioned: ` + codeTick + `html/` + codeTick + `, ` + codeTick + `pdf/` + codeTick + `, ` + codeTick + `png/` + codeTick + `, …).
+const fetchDescription = `Retrieve 1–50 documents and convert them to Markdown, preserving input order.
 
-A *source* is either a **location** (where something lives) or an **identity** (what the thing is — you need not know where to find it). Harvester resolves both and hands back the content.
+Pass a URL, local path, file:// path, DOI, ISBN, PMID, PMCID, or a harvest: handle returned by findWorks or searchCache. Identifiers resolve through the configured document services. For a title or fuzzy description, use findWorks first and choose a candidate.
 
-**Locations — fetched directly to document markdown:**
-- Web URL / local path / ` + codeTick + `file://` + codeTick + ` → web page, PDF, DOCX, XLSX, PPTX, CSV, or JSON.
-- HTML via trafilatura. Image references stay as URLs in the markdown — ` + codeTick + `fetch` + codeTick + ` never downloads image binaries and never OCRs; to VIEW one, pass its URL to ` + codeTick + `fetchImage` + codeTick + `, which returns a local path to read with vision. PDF via pymupdf4llm (extensionless URLs like ` + codeTick + `arxiv.org/pdf/…` + codeTick + ` are header-sniffed; a scanned PDF whose text layer is empty gets one automatic OCR pass). DOCX/XLSX/PPTX via Docling, CSV/EPUB via MarkItDown, JSON pretty-printed. Credential/secret files are refused.
-- An IMAGE → use the ` + codeTick + `fetchImage` + codeTick + ` tool. An ARCHIVE (.zip/.tar/.7z/.rar) → use the ` + codeTick + `archive` + codeTick + ` tool. ` + codeTick + `fetch` + codeTick + ` will redirect you if you pass one here.
+Supported documents include HTML, PDF, DOCX, XLSX, PPTX, EPUB, CSV, JSON, and plain text. Scanned PDFs get an OCR attempt when extraction is empty. Images belong in fetchImage; compressed archives belong in archive. Secret files and private service addresses are refused.
 
-**Identities — resolved to a free, legal copy, then converted:**
-- **DOI** — ` + codeTick + `10.xxxx/…` + codeTick + `, ` + codeTick + `doi:…` + codeTick + `, or a ` + codeTick + `doi.org` + codeTick + ` URL.
-- **Book by ISBN** — ` + codeTick + `isbn:9780262300988` + codeTick + ` (or a bare ISBN) → a free OA/public-domain copy.
-- **PMID / PMCID** — a bare PubMed ID (e.g. 30220343) or a PMC accession (PMC1234567) → resolved via Europe PMC/PMC.
-Harvester runs the legal open-access chain — for papers: OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, Crossref, CORE, DOAJ (+ Unpaywall when scholarly.contactEmail is set in harvester.config.json; arXiv/ar5iv & OSF/SocArXiv resolve by DOI prefix); for books: OAPEN, DOAB, Internet Archive, HathiTrust (full view), Project Gutenberg — returning the first copy that yields real content. Only API-sanctioned sources; no shadow libraries.
-**Have only a TITLE?** Titles are ambiguous, so ` + codeTick + `fetch` + codeTick + ` won't guess — call the **` + codeTick + `findWorks` + codeTick + ` tool first (it lists candidate works), then fetch the one you choose by its DOI/URL.
+Each item returns content, size, cache status, and a path to its COMPLETE exported artifact. The inline body may be truncated; read the returned path for the rest. Acquisition details remain internal. Set size_only to return sizes and path without an inline body, or refresh to retrieve a fresh copy. A failing item reports an actionable error while the remaining items continue.`
+const findDescription = `Find scholarly papers and books by title or bibliographic query. Returns ranked candidates with title, authors, year, kind, access status, and a fetch handle. This tool does not download documents.
 
-**Wall-bypass — when ANY URL is blocked, it goes down the rabbit hole:** httpx → Chrome-fingerprint impersonation (tls-client) → Jina Reader → defuddle.md → real browser (opt-in: Patchright + system Chrome behind ` + codeTick + `fetch.browser` + codeTick + ` in harvester.config.json; passes passive Cloudflare managed challenges, never solves interactive CAPTCHAs) → then it extracts the DOI from the page/URL (or a ` + codeTick + `citation_pdf_url` + codeTick + ` meta tag) and runs the open-access chain → Wayback Machine. So a paywalled or bot-blocked publisher link still returns the open copy when one legally exists. Hard IP-reputation blocks need a residential exit — the server says so plainly.
-
-**Sibling tools:** ` + codeTick + `search` + codeTick + ` (open-web search → URLs to fetch), ` + codeTick + `findWorks` + codeTick + ` (a title → candidate works to choose from), ` + codeTick + `fetchImage` + codeTick + ` (an image → a local path to read with vision), ` + codeTick + `archive` + codeTick + ` (browse a .zip/.tar/.7z/.rar), ` + codeTick + `searchCache` + codeTick + ` (search what you already fetched).
-
-Returns the content of every source in the SAME order. Each result: a short header (source, cache_status, method, bytes, tokens, fetched_at, cache path) then the content — content past the inline cap is truncated with a note, but the cache path always holds the COMPLETE text. A failing source yields a descriptive per-item error naming what to try next; the rest still return. Set ` + codeTick + `size_only: true` + codeTick + ` to get just {size, chars, path} per source (full content still cached) — probe a source's size, then slice the cached path from disk.`
-const findDescription = `Find scholarly papers and books by TITLE or free-text query — the scholarly counterpart of WebSearch. Returns a RANKED LIST of candidate works (papers + books), each with a ready-to-use ` + codeTick + `fetch:` + codeTick + ` handle; it does NOT download anything.
-
-Use it whenever you have a TITLE or a fuzzy description rather than a URL / DOI / ISBN — ` + codeTick + `fetch` + codeTick + ` deliberately won't guess which work a title means, so ` + codeTick + `findWorks` + codeTick + ` shows the matches and you choose. Each result lists: title · authors · year · kind (paper|book) · source · free-access status · a ` + codeTick + `fetch:` + codeTick + ` handle (a DOI, an ` + codeTick + `isbn:` + codeTick + ` string, or a direct URL). Then call ` + codeTick + `fetch` + codeTick + ` with the handle of the one you want.
-
-Two-step pattern, exactly like WebSearch → WebFetch: **findWorks → fetch**. (Papers come from OpenAlex; books from Open Library + Project Gutenberg.)`
-const searchDescription = `Search the open web — a stronger, privacy-respecting replacement for the built-in WebSearch. Returns ranked results (title · URL · snippet · engine); pick the URLs you want and retrieve them with ` + codeTick + `fetch` + codeTick + `.
-
-Backed by a self-hosted **SearXNG** that aggregates 200+ engines (less single-engine/SEO bias than a plain Google search), with the **Brave** Search API as fallback. It returns links + snippets to TRIAGE, not full content — that's ` + codeTick + `fetch` + codeTick + `'s job (search → fetch, like findWorks → fetch).
-
-**Multilingual:** set ` + codeTick + `lang` + codeTick + ` (e.g. ` + codeTick + `zh` + codeTick + `, ` + codeTick + `ja` + codeTick + `, ` + codeTick + `pt-BR` + codeTick + `) to route the query to that language's native engines — the way to reach Chinese / Japanese / Brazilian / etc. web results that an English search never surfaces. Optionally restrict to specific ` + codeTick + `engines` + codeTick + `.`
-const imageDescription = `Fetch one or many images and return their LOCAL FILE PATHS to read with your vision — figures, photos, charts, scanned pages. Each ` + codeTick + `sources` + codeTick + ` item is an image URL or a local image path; the bytes are saved under ` + codeTick + `<cache>/<ext>/` + codeTick + ` and the path returned in order — open that path with your vision to read the figure/photo. Images are NOT OCR'd or turned into text — you OPEN the returned path with your vision to see the content (a chart or photo carries information no caption can). Use this instead of ` + codeTick + `fetch` + codeTick + ` whenever the thing is a picture; ` + codeTick + `fetch` + codeTick + ` returns document markdown (image refs left as URLs) and will point you here for an image.`
-const archiveDescription = `Safely browse a single archive — ` + codeTick + `.zip` + codeTick + ` / ` + codeTick + `.tar(.gz/.bz2/.xz)` + codeTick + ` / ` + codeTick + `.7z` + codeTick + ` / ` + codeTick + `.rar` + codeTick + ` — given by URL or local path.
-
-Two-step, like ` + codeTick + `findWorks` + codeTick + ` → ` + codeTick + `fetch` + codeTick + `: call with NO ` + codeTick + `member` + codeTick + ` to get the SAFE member listing (names + sizes; nothing is extracted to disk). Then call again with one ` + codeTick + `member` + codeTick + ` name from that listing to fetch just that member, converted to Markdown. Path-traversal and symlink members are refused, member-count/size caps are enforced, and the archive is never auto-extracted. Use this instead of ` + codeTick + `fetch` + codeTick + ` for any archive.`
-const cacheDescription = `Search every page already cached on disk for a regex ` + codeTick + `pattern` + codeTick + `, returning WHICH cached pages match — source URL, match count, a sample line, and the cached ` + codeTick + `md_path` + codeTick + ` — not their text. Recall what you have already fetched without re-crawling; to read a match's content, ` + codeTick + `fetch` + codeTick + ` the source again (served from cache) or read ` + codeTick + `md_path` + codeTick + ` directly from disk.`
+Choose a candidate and pass its fetch value unchanged to fetch. The value can be an identifier or an opaque harvest: handle; handles select the discovered version without exposing its retrieval location.`
+const searchDescription = `Search the web and return ranked titles, URLs, and snippets. Pick a result URL and pass it to fetch for the document. Set lang to a language or locale such as zh, ja, or pt-BR; engines optionally restricts the configured search engines.`
+const imageDescription = `Fetch 1–50 image URLs, local image paths, or harvest: handles and return local artifact paths in input order. Open the paths with vision to inspect figures, photos, charts, and scanned pages. Images are preserved as images; this tool does not OCR them.`
+const archiveDescription = `Browse a ZIP, TAR (including compressed TAR), 7z, or RAR archive by URL, local path, or harvest: handle. Omit member for a safe listing of names and sizes. Then supply one listed member to extract and convert that member. Path traversal and symlink members are refused, and member count and size limits apply.`
+const cacheDescription = `Search cached document bodies with a regular expression. Returns matching documents with an opaque fetch handle, match count, sample line, and md_path to the COMPLETE exported text. Pass the handle to fetch or read md_path. This searches existing documents only; it does not search the web.`
 
 func defaultJSON(value string) json.RawMessage { return json.RawMessage(value) }
 
@@ -527,7 +519,7 @@ func fetchInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "object", Required: []string{"sources"},
 		Properties: map[string]*jsonschema.Schema{
-			"sources":   arraySchema("1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL / local path / file://; DOI; ISBN; PMID / PMCID. Use a DIFFERENT tool for a TITLE (findWorks), an IMAGE (fetchImage), or an archive (archive). A failing item returns a descriptive per-item error and the rest still return.", 1, 50),
+			"sources":   arraySchema("1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL / local path / file://; DOI; ISBN; PMID / PMCID; harvest: handle. Use a DIFFERENT tool for a TITLE (findWorks), an IMAGE (fetchImage), or an archive (archive). A failing item returns a descriptive per-item error and the rest still return.", 1, 50),
 			"refresh":   {Type: "boolean", Description: "Force a fresh fetch: bypass the cache entirely, re-download, overwrite the cached artifact, and return the NEW content.", Default: defaultJSON("false")},
 			"size_only": {Type: "boolean", Description: "When true, fetch and cache the full content but return NO body—just {size, chars, path}; full content remains cached at path.", Default: defaultJSON("false")},
 		},
@@ -572,7 +564,7 @@ func cacheInputSchema() *jsonschema.Schema {
 }
 
 type FetchInput struct {
-	Sources  []string `json:"sources" jsonschema:"1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL/local path/file:// for web pages and documents; DOI (bare, doi: prefix, or doi.org URL); ISBN; PMID/PMCID. Use findWorks for a TITLE, fetchImage for an IMAGE, and archive for ZIP/TAR/7z/RAR. A failing item returns a descriptive per-item error and the rest still return."`
+	Sources  []string `json:"sources" jsonschema:"1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL/local path/file:// or harvest: handle for documents; DOI (bare, doi: prefix, or doi.org URL); ISBN; PMID/PMCID. Use findWorks for a TITLE, fetchImage for an IMAGE, and archive for ZIP/TAR/7z/RAR. A failing item returns a descriptive per-item error and the rest still return."`
 	Refresh  bool     `json:"refresh,omitempty" jsonschema:"Force a fresh fetch: bypass the cache entirely, re-download, overwrite the cached artifact, and return the NEW content. Normally cached web pages and documents older than a day are refreshed automatically; images and archives stay cached until refresh."`
 	SizeOnly bool     `json:"size_only,omitempty" jsonschema:"When true, fetch and cache the full content but return NO body—just {size, chars, path}, where size is an estimated token count and chars is the raw character count. The full content remains at path."`
 }
@@ -603,13 +595,13 @@ type FetchItem struct {
 	Source      string   `json:"source"`
 	Content     string   `json:"content,omitempty"`
 	CacheStatus string   `json:"cache_status,omitempty"`
-	Method      string   `json:"method,omitempty"`
+	Method      string   `json:"-"`
 	Bytes       int64    `json:"bytes,omitempty"`
 	Tokens      int      `json:"tokens,omitempty"`
 	Chars       int      `json:"chars,omitempty"`
 	Path        string   `json:"path,omitempty"`
 	Error       string   `json:"error,omitempty"`
-	Rungs       []string `json:"rungs,omitempty"`
+	Rungs       []string `json:"-"`
 	FetchedAt   string   `json:"fetched_at,omitempty"`
 }
 type FetchOutput struct {
@@ -620,7 +612,7 @@ type FindOutput struct {
 }
 type SearchOutput struct {
 	Results []harvest.SearchResult `json:"results"`
-	Backend string                 `json:"backend,omitempty"`
+	Backend string                 `json:"-"`
 }
 type ImageItem struct {
 	Source string `json:"source"`
@@ -664,7 +656,7 @@ func (service *Service) fetch(ctx context.Context, _ *mcp.CallToolRequest, input
 				return
 			}
 			defer func() { <-semaphore }()
-			fetched := service.harvester.FetchWithOptions(ctx, source, harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly})
+			fetched := service.harvester.FetchPublic(ctx, source, harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly})
 			items[index] = fetchItem(fetched)
 			contents[index] = service.describeFetch(source, fetched, input.SizeOnly)
 		}(index, source)
@@ -689,7 +681,13 @@ func (service *Service) findWorks(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 	candidates, err := service.resolver.FindWorks(ctx, input.Query, input.Limit)
 	if err != nil {
-		return nil, FindOutput{}, err
+		fmt.Fprintf(os.Stderr, "harvester findWorks: %v\n", err)
+		return nil, FindOutput{}, errors.New("Work discovery failed. Retry later or fetch an exact identifier.")
+	}
+	candidates, err = service.harvester.PublicCandidates(candidates)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "harvester export candidates: %v\n", err)
+		return nil, FindOutput{}, errors.New("Could not prepare the discovered works for retrieval. Retry later.")
 	}
 	lines := renderFind(input.Query, candidates)
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: lines}}}, FindOutput{Candidates: candidates}, nil
@@ -705,19 +703,18 @@ func (service *Service) search(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if input.Count < 1 || input.Count > maxSearchResults {
 		return nil, SearchOutput{}, fmt.Errorf("count must be between 1 and %d", maxSearchResults)
 	}
-	results, backend, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{
+	results, _, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{
 		SearXNGURL: service.runtime.SearXNGURL, BraveAPIKey: service.runtime.BraveAPIKey, DisableSearch: service.runtime.DisableSearch,
 		Lang: input.Lang, Engines: input.Engines, Count: input.Count,
 	})
-	if err != nil && backend == "error" {
-		// Every configured backend failed: render each backend's own error so
-		// the caller sees WHAT broke, never a generic "unreachable".
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}}, IsError: true}, SearchOutput{Backend: backend}, nil
-	}
 	if err != nil {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}, SearchOutput{Backend: backend}, nil
+		fmt.Fprintf(os.Stderr, "harvester search: %v\n", err)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}}, IsError: true}, SearchOutput{}, nil
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, backend)}}}, SearchOutput{Results: results, Backend: backend}, nil
+	for index := range results {
+		results[index].Engine = ""
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}}}, SearchOutput{Results: results}, nil
 }
 
 func (service *Service) fetchImage(ctx context.Context, _ *mcp.CallToolRequest, input ImageInput) (*mcp.CallToolResult, ImageOutput, error) {
@@ -762,8 +759,17 @@ func (service *Service) archive(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if strings.TrimSpace(input.Source) == "" {
 		return nil, ArchiveOutput{}, errors.New("source must not be empty")
 	}
-	result, err := service.harvester.Archive(ctx, input.Source, input.Member)
-	if err != nil {
+	resolved, resolveErr := service.harvester.ResolvePublicSource(input.Source)
+	result := harvest.Result{Source: input.Source}
+	var err error
+	if resolveErr != nil {
+		result.Error, result.ErrorKind = resolveErr.Error(), "policy"
+		err = resolveErr
+	} else {
+		result, err = service.harvester.Archive(ctx, resolved, input.Member)
+	}
+	result = service.harvester.PublicResult(input.Source, result, false)
+	if err != nil || result.Error != "" {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
 	}
 	if input.Member == "" {
@@ -787,9 +793,10 @@ func (service *Service) searchCache(_ context.Context, _ *mcp.CallToolRequest, i
 	if input.IgnoreCase != nil {
 		ignore = *input.IgnoreCase
 	}
-	cacheHits, err := service.harvester.SearchCache(input.Pattern, limit, ignore)
+	cacheHits, err := service.harvester.SearchCachePublic(input.Pattern, limit, ignore)
 	if err != nil {
-		return nil, CacheOutput{}, err
+		fmt.Fprintf(os.Stderr, "harvester searchCache: %v\n", err)
+		return nil, CacheOutput{}, errors.New("Cache search failed. Check the expression or retry later.")
 	}
 	hits := make([]CacheHit, 0, len(cacheHits))
 	for _, hit := range cacheHits {
@@ -815,7 +822,7 @@ func (service *Service) fetchPrompt(ctx context.Context, request *mcp.GetPromptR
 		return nil, errors.New("URL is required")
 	}
 	source := request.Params.Arguments["url"]
-	fetched := service.harvester.Fetch(ctx, source)
+	fetched := service.harvester.FetchPublic(ctx, source, harvest.FetchOptions{})
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Contents of %s", source),
 		Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{
@@ -825,12 +832,12 @@ func (service *Service) fetchPrompt(ctx context.Context, request *mcp.GetPromptR
 }
 
 func fetchItem(result harvest.Result) FetchItem {
-	return FetchItem{Source: result.Source, Content: result.Content, CacheStatus: result.CacheStatus, Method: result.Method, Bytes: result.Bytes, Tokens: result.Tokens, Chars: result.Chars, Path: result.Path, Error: result.Error, Rungs: result.Rungs}
+	return FetchItem{Source: result.Source, Content: result.Content, CacheStatus: result.CacheStatus, Bytes: result.Bytes, Tokens: result.Tokens, Chars: result.Chars, Path: result.Path, Error: result.Error}
 }
 
 func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	if result.Error != "" {
-		return "# " + source + "\nERROR: " + result.Error
+		return "# " + source + "\nERROR: " + harvest.PublicFailureMessage(result)
 	}
 	// Size probes never kill an empty extraction behind a zero-sized success;
 	// this wording is part of the Python scheduler contract.
@@ -851,7 +858,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	if stripped == "" {
 		message := ""
 		if result.ErrorKind != "" || result.Challenge || status >= 400 {
-			message = harvest.FailureMessage(source, status, result.ErrorKind, result.Challenge)
+			message = harvest.PublicFailureMessage(result)
 		}
 		if message == "" {
 			message = fmt.Sprintf("Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.", source)
@@ -862,7 +869,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	lowerBody := strings.ToLower(stripped)
 	challenge := strings.Contains(lowerBody, "cloudflare") || strings.Contains(lowerBody, "captcha") || strings.Contains(lowerBody, "verify you are human")
 	if len([]rune(stripped)) < 500 && (status >= 400 || challenge) {
-		return "# " + source + "\nERROR: " + harvest.FailureMessage(source, status, result.ErrorKind, challenge)
+		return "# " + source + "\nERROR: " + harvest.PublicFailureMessage(harvest.Result{HTTPStatus: status, ErrorKind: result.ErrorKind, Challenge: challenge})
 	}
 	fetchedAt := "unknown"
 	if value := meta["fetched_at"]; value != "" {
@@ -872,16 +879,12 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	if value, err := strconv.Atoi(meta["token_count"]); err == nil {
 		tokens = value
 	}
-	header := fmt.Sprintf("# %s\ncache_status: %s / method: %s / bytes: %d / tokens: %d / fetched_at: %s / path: %s", source, result.CacheStatus, result.Method, result.Bytes, tokens, fetchedAt, result.Path)
-	if rungs := meta["rungs"]; rungs != "" {
-		header += " / rungs: " + rungs
-	} else if len(result.Rungs) > 1 {
-		header += " / rungs: " + strings.Join(result.Rungs, ", ")
-	}
+	header := fmt.Sprintf("# %s\ncache_status: %s / bytes: %d / tokens: %d / fetched_at: %s / path: %s", source, result.CacheStatus, result.Bytes, tokens, fetchedAt, result.Path)
+
 	cap := service.inlineCap()
 	if cap > 0 && len([]rune(body)) > cap {
 		runes := []rune(body)
-		body = string(runes[:cap]) + fmt.Sprintf("\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]", cap, len(runes), result.Path, cap)
+		body = string(runes[:cap]) + fmt.Sprintf("\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]", cap, max(result.Chars, len(runes)), result.Path, cap)
 	}
 	return header + "\n\n" + body
 }
@@ -934,7 +937,6 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 		if candidate.Year != 0 {
 			values = append(values, strconv.Itoa(candidate.Year))
 		}
-		values = append(values, candidate.Source)
 		if candidate.Free != "" {
 			values = append(values, candidate.Free)
 		}
@@ -967,32 +969,20 @@ func renderArchiveListing(source string, members []harvest.Member) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// renderSearchFailure names each configured backend's failure. A policy
-// refusal (a refused redirect) and a network/HTTP failure read differently
-// because they ARE different: the text is the backend's own error.
+// Detailed backend errors are logged internally; callers receive actionable failure classes.
 func renderSearchFailure(err error) string {
-	lines := []string{"Web search failed — every configured backend returned an error:"}
-	for _, line := range strings.Split(err.Error(), "\n") {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, "- "+line)
-		}
-	}
-	lines = append(lines, "Backends are configured in harvester.config.json (search.searxngURL, search.braveApiKey).")
-	return strings.Join(lines, "\n")
+	return "Web search failed. " + harvest.PublicFailureMessage(harvest.Result{Error: err.Error()})
 }
 
-func renderSearch(query string, results []harvest.SearchResult, backend string) string {
+func renderSearch(query string, results []harvest.SearchResult, _ string) string {
 	if len(results) == 0 {
-		return fmt.Sprintf("No results for %q (via %s). Try different terms or a broader query.", query, backend)
+		return fmt.Sprintf("No results for %q. Try different terms or a broader query.", query)
 	}
-	lines := []string{fmt.Sprintf("%d result(s) for %q (via %s) — fetch the ones you want by URL:", len(results), query, backend), ""}
+	lines := []string{fmt.Sprintf("%d result(s) for %q — fetch the ones you want by URL:", len(results), query), ""}
 	for index, result := range results {
 		lines = append(lines, fmt.Sprintf("%d. %s", index+1, valueOr(result.Title, "(untitled)")), "   "+result.URL)
 		if result.Snippet != "" {
 			lines = append(lines, "   "+result.Snippet)
-		}
-		if result.Engine != "" {
-			lines = append(lines, "   ["+result.Engine+"]")
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -1006,7 +996,14 @@ func valueOr(value, fallback string) string {
 }
 
 func (service *Service) fetchOneImage(ctx context.Context, source string) ImageItem {
-	result := service.harvester.FetchImage(ctx, source)
+	resolved, err := service.harvester.ResolvePublicSource(source)
+	result := harvest.Result{Source: source}
+	if err != nil {
+		result.Error, result.ErrorKind = err.Error(), "policy"
+	} else {
+		result = service.harvester.FetchImage(ctx, resolved)
+	}
+	result = service.harvester.PublicResult(source, result, true)
 	return ImageItem{Source: source, Path: result.Path, Bytes: result.Bytes, Error: result.Error}
 }
 

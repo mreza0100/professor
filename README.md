@@ -188,7 +188,7 @@ timed out · 6 message not delivered`.
   through MCP. `pfm harvest ask -p "…" <sources...>` feeds the full cached artifacts—not clipped
   terminal previews—to the configured Claude or Codex ask engine; failed sources remain visible as
   explicit receipts instead of disappearing from the answer corpus. `pfm harvest --ask -p "…"`
-  is the equivalent compatibility spelling.
+  is the equivalent compatibility spelling. Optional scholarly providers extend retrieval, and exported artifacts keep acquisition metadata private; see [Harvester configuration](pfm/HARVESTER.md).
 - **Crash-safety by construction.** `reap`, `archive`, `heal`, and `install` all default to a dry
   run, and the dry run **is** the apply's preview — identical classification either way, only the
   actions differ. `heal` backs up the store before it deletes a row. A probe that could not run is

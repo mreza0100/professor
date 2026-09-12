@@ -1,0 +1,259 @@
+package harvest
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const publicTestDOI = "10.1234/public.boundary"
+
+func setHarvestTestJail(t *testing.T) {
+	t.Helper()
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+}
+
+func TestFetchPublicResolvesDOIIdentityAndISBNNamedLocalFile(t *testing.T) {
+	setHarvestTestJail(t)
+	cacheDir := t.TempDir()
+	h := mustNew(t, Options{CacheDir: cacheDir})
+	article := strings.Repeat("cached DOI article body ", 30)
+	cachedPath, err := h.cache.save(publicTestDOI, "html", "oa:fixture", article, []string{"oa:fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, source := range []string{publicTestDOI, "https://doi.org/" + publicTestDOI} {
+		got := h.FetchPublic(context.Background(), source, FetchOptions{})
+		if got.Error != "" {
+			t.Fatalf("FetchPublic(%q) error = %q", source, got.Error)
+		}
+		if got.Source != source || got.Path == cachedPath || got.Content == "" {
+			t.Fatalf("FetchPublic(%q) = %#v; want public exported artifact", source, got)
+		}
+		if strings.Contains(got.Content, "oa:fixture") || strings.Contains(got.Content, cacheDir) {
+			t.Fatalf("FetchPublic(%q) exposed private provenance: %q", source, got.Content)
+		}
+	}
+
+	localRoot := t.TempDir()
+	localPath := filepath.Join(localRoot, "9780306406157.txt")
+	if err := os.WriteFile(localPath, []byte("local ISBN-named evidence\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	localHarvester := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{localRoot}})
+	local := localHarvester.FetchPublic(context.Background(), localPath, FetchOptions{})
+	if local.Error != "" || !strings.Contains(local.Content, "local ISBN-named evidence") {
+		t.Fatalf("FetchPublic(%q) = %#v; want the existing local file", localPath, local)
+	}
+}
+
+func TestFetchPublicSelectedURLsWithSameDOIKeepTheirOwnArtifact(t *testing.T) {
+	setHarvestTestJail(t)
+	withPublicDNSForSciHubTest(t)
+	seen := []string{}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		seen = append(seen, r.URL.String())
+		body := "%PDF-1.7\n"
+		switch r.URL.Path {
+		case "/repository-a/10.1234/public.boundary.pdf":
+			body += "repository-a\n%%EOF"
+		case "/repository-b/10.1234/public.boundary.pdf":
+			body += "repository-b\n%%EOF"
+		default:
+			return response(r, http.StatusNotFound, "text/plain", "missing"), nil
+		}
+		return response(r, http.StatusOK, "application/pdf", body), nil
+	})}
+	h := mustNew(t, Options{
+		CacheDir:  t.TempDir(),
+		Client:    client,
+		Chrome:    client,
+		Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, body []byte) (string, error) { return string(body), nil }),
+	})
+	for _, tc := range []struct {
+		url, marker string
+	}{
+		{"https://repository.test/repository-a/10.1234/public.boundary.pdf", "repository-a"},
+		{"https://repository.test/repository-b/10.1234/public.boundary.pdf", "repository-b"},
+	} {
+		handle, err := h.PublicHandle(tc.url)
+		if err != nil {
+			t.Fatalf("PublicHandle(%q): %v", tc.url, err)
+		}
+		got := h.FetchPublic(context.Background(), handle, FetchOptions{})
+		if got.Error != "" || !strings.Contains(got.Content, tc.marker) {
+			t.Fatalf("FetchPublic(%q) = %#v; want %q", handle, got, tc.marker)
+		}
+	}
+	if len(seen) != 2 || seen[0] != "https://repository.test/repository-a/10.1234/public.boundary.pdf" || seen[1] != "https://repository.test/repository-b/10.1234/public.boundary.pdf" {
+		t.Fatalf("selected URL requests = %#v; want each exact repository URL", seen)
+	}
+}
+
+func TestPublicResultKeepsCompleteArtifactAndFetchedAtWithoutProvenance(t *testing.T) {
+	setHarvestTestJail(t)
+	cacheDir := t.TempDir()
+	h := mustNew(t, Options{CacheDir: cacheDir, MaxInlineChars: 32})
+	privatePath := filepath.Join(cacheDir, CacheKey("10.1234/private", "html"))
+	if err := os.MkdirAll(filepath.Dir(privatePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "**Source:** https://mirror.secret.example/private\n---\n\n" + strings.Repeat("article body ", 20) + "TAIL_SENTINEL"
+	raw := "---\nurl: https://mirror.secret.example/private\nfetched_at: 2025-01-02T03:04:05Z\nsource: harvester\nmethod: scihub\nrungs: direct, mirror\n---\n\n" + body
+	if err := os.WriteFile(privatePath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := h.PublicResult("10.1234/private", Result{
+		Source: "10.1234/private", Kind: "html", Path: privatePath, Method: "scihub", Rungs: []string{"direct", "mirror"}, CacheStatus: "hit",
+	}, false)
+	if got.Error != "" {
+		t.Fatalf("PublicResult() error = %q", got.Error)
+	}
+	if got.Method != "" || len(got.Rungs) != 0 || strings.Contains(got.Content, "mirror.secret.example") || strings.Contains(got.Content, cacheDir) {
+		t.Fatalf("public result leaked private fields: %#v", got)
+	}
+	if len(got.Content) >= len(body) || strings.Contains(got.Content, "TAIL_SENTINEL") {
+		t.Fatalf("inline content was not capped: %q", got.Content)
+	}
+	complete, err := os.ReadFile(got.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeText := string(complete)
+	if !strings.Contains(completeText, "TAIL_SENTINEL") || strings.Contains(completeText, "mirror.secret.example") || !strings.Contains(completeText, "fetched_at: 2025-01-02T03:04:05Z") {
+		t.Fatalf("public artifact was incomplete or rewrote metadata: %q", completeText)
+	}
+
+	sizeOnly := h.PublicResult("10.1234/private", Result{Source: "10.1234/private", Kind: "html", Path: privatePath}, true)
+	if sizeOnly.Error != "" || sizeOnly.Content != "" || sizeOnly.Bytes == 0 || sizeOnly.Path == "" {
+		t.Fatalf("size-only public result = %#v", sizeOnly)
+	}
+}
+
+func TestPublicFailuresDistinguishOutageFromMissingWithoutRawProviderDetails(t *testing.T) {
+	setHarvestTestJail(t)
+	for _, tc := range []struct {
+		name, kind, want string
+	}{
+		{"outage", "connect", "connection failed"},
+		{"missing", "missing", "not found"},
+		{"challenge", "challenge", "access challenge"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := PublicFailure("10.1234/public.boundary", Result{
+				Source: "https://mirror.secret.example/private", Error: "GET https://mirror.secret.example/private: provider internals", ErrorKind: tc.kind,
+			})
+			if !strings.Contains(strings.ToLower(got.Error), tc.want) || strings.Contains(got.Error, "mirror.secret.example") || strings.Contains(got.Error, "provider internals") {
+				t.Fatalf("public failure = %#v; want safe %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPublicSourceAndHandleBoundariesRejectPrivateOrSymlinkNamespaces(t *testing.T) {
+	setHarvestTestJail(t)
+	cacheDir := t.TempDir()
+	h := mustNew(t, Options{CacheDir: cacheDir})
+	privateDir := filepath.Join(cacheDir, ".private")
+	if err := os.MkdirAll(filepath.Join(privateDir, "handles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	badHandle := publicHandlePrefix + strings.Repeat("0", publicHandleHexLen)
+	badPath := filepath.Join(privateDir, "handles", strings.Repeat("0", publicHandleHexLen)+".json")
+	data, err := json.Marshal(publicHandleRecord{Target: "http://127.0.0.1/private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.ResolvePublicSource(badHandle); err == nil {
+		t.Fatal("private stored handle target was accepted")
+	}
+	if _, err := h.ResolvePublicSource(filepath.Join(cacheDir, ".private", "handles", "missing.md")); err == nil {
+		t.Fatal("private handle namespace was accepted as a public document")
+	}
+
+	if err := os.Mkdir(filepath.Join(cacheDir, "public"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(privateDir, filepath.Join(cacheDir, "public", "private-alias")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.ResolvePublicSource(filepath.Join(cacheDir, "public", "private-alias")); err == nil {
+		t.Fatal("public symlink alias into private cache was accepted")
+	}
+
+	if err := os.RemoveAll(filepath.Join(privateDir, "handles")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cacheDir, "public"), filepath.Join(privateDir, "handles")); err != nil {
+		t.Fatal(err)
+	}
+	withPublicDNSForSciHubTest(t)
+	if _, err := h.PublicHandle("https://repository.test/public.boundary.pdf"); err == nil {
+		t.Fatal("private handles symlink into public namespace accepted")
+	}
+}
+
+func TestPublicCandidatesDoNotTreatUnsafeDOIURLsOrISBNLocationsAsIdentity(t *testing.T) {
+	setHarvestTestJail(t)
+	withPublicDNSForSciHubTest(t)
+	h := mustNew(t, Options{CacheDir: t.TempDir()})
+	for _, source := range []string{
+		"ftp://doi.org/10.1234/public.boundary",
+		"https://user:pass@doi.org/10.1234/public.boundary",
+	} {
+		if _, err := h.PublicCandidates([]Candidate{{URL: source}}); err == nil {
+			t.Fatalf("unsafe DOI URL %q was accepted as an identity handle", source)
+		}
+	}
+	got, err := h.PublicCandidates([]Candidate{{URL: "https://repository.test/isbn/9780306406157"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !publicHandleRE.MatchString(got[0].URL) {
+		t.Fatalf("ISBN-containing repository URL became identity %#v; want opaque handle", got)
+	}
+}
+
+func TestSearchCachePublicReportsUnreadablePrivateEntries(t *testing.T) {
+	setHarvestTestJail(t)
+	cacheDir := t.TempDir()
+	h := mustNew(t, Options{CacheDir: cacheDir})
+	privatePath := filepath.Join(cacheDir, "html", "000-broken.md")
+	if err := os.MkdirAll(filepath.Dir(privatePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cacheDir, "html", "never-created.md"), privatePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.SearchCachePublic("needle", 1, false); err == nil {
+		t.Fatal("unreadable private cache entry was reported as an empty search")
+	}
+}
+
+func TestPublicResultDoesNotAcceptNonHarvesterProvenanceArtifact(t *testing.T) {
+	setHarvestTestJail(t)
+	h := mustNew(t, Options{CacheDir: t.TempDir()})
+	path := filepath.Join(h.options.CacheDir, "html", "foreign.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nurl: https://mirror.secret.example/private\nmethod: foreign\n---\n\nbody"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := h.PublicResult("10.1234/public.boundary", Result{Kind: "html", Path: path}, false)
+	if got.Error == "" || !strings.Contains(strings.ToLower(got.Error), "stored") || strings.Contains(got.Error, "mirror.secret.example") {
+		t.Fatalf("foreign artifact result = %#v; want safe refusal", got)
+	}
+	if strings.Contains(strings.ToLower(got.Error), "not found") {
+		t.Fatalf("foreign artifact was misreported missing: %q", got.Error)
+	}
+}

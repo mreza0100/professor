@@ -74,22 +74,22 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 		{
 			name:   "invalid URL",
 			result: harvest.Result{ErrorKind: "invalid"},
-			want:   []string{"Invalid URL", "`search`"},
+			want:   []string{"input is invalid", "findWorks"},
 		},
 		{
 			name:   "timeout",
 			result: harvest.Result{ErrorKind: "timeout"},
-			want:   []string{"timed out", "`search`"},
+			want:   []string{"timed out", "Retry later"},
 		},
 		{
 			name:   "challenge",
 			result: harvest.Result{Challenge: true, HTTPStatus: 200},
-			want:   []string{"challenge", "`search`"},
+			want:   []string{"access challenge", "another copy"},
 		},
 		{
 			name:   "HTTP 404",
 			result: harvest.Result{Content: "tiny", ContentChars: 4, HTTPStatus: 404},
-			want:   []string{"HTTP 404", "`search`", "`findWorks`"},
+			want:   []string{"not found", "findWorks"},
 		},
 		{
 			name:   "thin extraction",
@@ -128,12 +128,43 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
+	home := t.TempDir()
+	service, err := NewConfigured("test", Runtime{
+		Home:             home,
+		CacheDir:         filepath.Join(home, "cache"),
+		SciHubURL:        "https://mirror.example/scihub",
+		AnnasURL:         "https://annas.example",
+		SciDBURL:         "https://scidb.example",
+		LibGenURL:        "https://libgen.example",
+		GoogleScholarURL: "https://scholar.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	for _, tc := range []struct{ name, got, want string }{
+		{"SciHubURL", service.runtime.SciHubURL, "https://mirror.example/scihub"},
+		{"AnnasURL", service.runtime.AnnasURL, "https://annas.example"},
+		{"SciDBURL", service.runtime.SciDBURL, "https://scidb.example"},
+		{"LibGenURL", service.runtime.LibGenURL, "https://libgen.example"},
+		{"GoogleScholarURL", service.runtime.GoogleScholarURL, "https://scholar.example"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
 // A failed search renders every backend's own error, one per line.
 func TestSearchFailureRendersEachBackend(t *testing.T) {
 	text := renderSearchFailure(errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")))
-	for _, want := range []string{"searxng http://127.0.0.1:8888: HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("search failure text lacks %q:\n%s", want, text)
+	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "Retrieval failed") {
+		t.Fatalf("search failure lost safe public message: %q", text)
+	}
+	for _, secret := range []string{"searxng", "127.0.0.1", "HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("search failure text exposed private backend detail %q:\n%s", secret, text)
 		}
 	}
 	if strings.Contains(text, "unreachable or failing") {

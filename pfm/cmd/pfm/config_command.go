@@ -97,6 +97,8 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  external: the authenticated second port — enabled, host, port, publicURL, auth.passphrase / auth.staticToken, stateDir")
 	fmt.Fprintln(stdout, "  search: enabled, searxngURL (its origin is trusted — loopback/LAN is fine), braveApiKey")
 	fmt.Fprintln(stdout, "  scholarly: contactEmail (enables Unpaywall), googleBooksApiKey, coreApiKey, semanticScholarApiKey")
+	fmt.Fprintln(stdout, "  scholarly.sciHubURL: Sci-Hub mirror URL for the SciHubEVA-compatible DOI/PMID fallback after open-access sources; empty disables it")
+	fmt.Fprintln(stdout, "  scholarly: annasURL, sciDBURL, libGenURL, googleScholarURL — optional provider base URLs; empty disables each")
 	fmt.Fprintln(stdout, "  fetch: browser (the opt-in real-browser rung), userAgent, proxyURL")
 	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
 	fmt.Fprintln(stdout, "  cache: dir (default ~/.professor/.cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)")

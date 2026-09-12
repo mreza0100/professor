@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"hostops/pfm/internal/harvest"
@@ -34,7 +35,7 @@ type RemoteOptions struct {
 }
 
 // RemoteServer is the external gateway: exact /mcp path, bearer/OAuth wall,
-// and local reads confined to the cache root. It is never unauthenticated.
+// and local reads confined to the exported-artifact directory. It is never unauthenticated.
 type RemoteServer struct {
 	publicURL string
 	resource  string
@@ -46,7 +47,7 @@ type RemoteServer struct {
 
 // NewRemote builds the external gateway handler without binding a socket. It
 // refuses to exist without a credential, and always confines local reads to
-// the cache root: a remote caller never owns this machine.
+// the exported-artifact directory: a remote caller never owns this machine.
 func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	publicURL := strings.TrimRight(strings.TrimSpace(options.PublicURL), "/")
 	parsed, err := url.Parse(publicURL)
@@ -62,7 +63,7 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
 	}
 	runtime.CacheDir = cache
-	runtime.LocalRoots = []string{cache}
+	runtime.LocalRoots = []string{filepath.Join(cache, "public")}
 	version := options.Version
 	if version == "" {
 		version = "dev"

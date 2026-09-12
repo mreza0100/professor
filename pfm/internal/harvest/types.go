@@ -57,6 +57,7 @@ type Options struct {
 	MaxBytes       int64
 	LocalRoots     []string
 	JinaURL        string
+	SciHubURL      string
 	MaxInlineChars int
 	// ProxyURL, when set, is applied to every default transport (direct,
 	// Chrome, binary, Jina, and OA). UserAgent customizes only direct/Jina;
@@ -83,6 +84,10 @@ type Options struct {
 	SemanticScholarAPIKey string
 	SearXNGURL            string
 	BraveAPIKey           string
+	AnnasURL              string
+	SciDBURL              string
+	LibGenURL             string
+	GoogleScholarURL      string
 	DisableSearch         bool
 }
 
@@ -95,6 +100,11 @@ type settings struct {
 	semanticScholarKey string
 	searXNGURL         string
 	braveAPIKey        string
+	sciHubURL          string
+	annasURL           string
+	sciDBURL           string
+	libGenURL          string
+	googleScholarURL   string
 	disableSearch      bool
 	browser            bool
 }
@@ -176,6 +186,26 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
+	sciHubURL, err := normalizeSciHubURL(options.SciHubURL)
+	if err != nil {
+		return nil, err
+	}
+	annasURL, err := normalizeProviderBaseURL("Anna's", options.AnnasURL)
+	if err != nil {
+		return nil, err
+	}
+	sciDBURL, err := normalizeProviderBaseURL("SciDB", options.SciDBURL)
+	if err != nil {
+		return nil, err
+	}
+	libGenURL, err := normalizeProviderBaseURL("LibGen", options.LibGenURL)
+	if err != nil {
+		return nil, err
+	}
+	googleScholarURL, err := normalizeProviderBaseURL("Google Scholar", options.GoogleScholarURL)
+	if err != nil {
+		return nil, err
+	}
 	resolved := settings{
 		contactEmail:       strings.TrimSpace(options.ContactEmail),
 		googleBooksAPIKey:  strings.TrimSpace(options.GoogleBooksAPIKey),
@@ -183,9 +213,19 @@ func New(options Options) (*Harvester, error) {
 		semanticScholarKey: strings.TrimSpace(options.SemanticScholarAPIKey),
 		searXNGURL:         strings.TrimSpace(options.SearXNGURL),
 		braveAPIKey:        strings.TrimSpace(options.BraveAPIKey),
+		sciHubURL:          sciHubURL,
+		annasURL:           annasURL,
+		sciDBURL:           sciDBURL,
+		libGenURL:          libGenURL,
+		googleScholarURL:   googleScholarURL,
 		disableSearch:      options.DisableSearch,
 		browser:            options.BrowserRung != nil && *options.BrowserRung,
 	}
+	options.SciHubURL = sciHubURL
+	options.AnnasURL = resolved.annasURL
+	options.SciDBURL = resolved.sciDBURL
+	options.LibGenURL = resolved.libGenURL
+	options.GoogleScholarURL = resolved.googleScholarURL
 	if options.CacheDir == "" {
 		dir, err := defaultCacheDir()
 		if err != nil {

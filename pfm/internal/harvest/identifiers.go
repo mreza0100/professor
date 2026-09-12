@@ -3,6 +3,7 @@ package harvest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -49,6 +50,10 @@ type Resolver struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
+	AnnasURL              string
+	SciDBURL              string
+	LibGenURL             string
+	GoogleScholarURL      string
 }
 
 type doabMetadata struct {
@@ -85,6 +90,7 @@ func candidatePriority(source, status, version, kind string) int {
 }
 
 var doiPattern = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
+var doiHTTPStatusPattern = regexp.MustCompile(`(?i)\bHTTP\s+(\d{3})\b`)
 var citationPDFPattern = regexp.MustCompile(`(?is)<meta[^>]+name=["']citation_pdf_url["'][^>]+content=["']([^"']+)["']`)
 var citationPDFPatternReversed = regexp.MustCompile(`(?is)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']citation_pdf_url["']`)
 var citationDOIPattern = regexp.MustCompile(`(?is)<meta[^>]+name=["'](?:citation_doi|dc\.identifier|DC\.Identifier)["'][^>]+content=["']([^"']+)["']`)
@@ -190,7 +196,17 @@ func NormalizeIdentifier(input string) string {
 
 func ClassifyIdentifier(input string) IdentifierKind {
 	trim := strings.TrimSpace(input)
-	if DOIFrom(trim) != "" || strings.HasPrefix(strings.ToLower(trim), "doi:") {
+	lowInput := strings.ToLower(trim)
+	if parsed, err := url.Parse(trim); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+		host := strings.ToLower(parsed.Hostname())
+		if host != "doi.org" && host != "dx.doi.org" {
+			return IdentifierNone
+		}
+		if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return IdentifierNone
+		}
+	}
+	if DOIFrom(trim) != "" || strings.HasPrefix(lowInput, "doi:") {
 		return IdentifierDOI
 	}
 	low := strings.ToLower(trim)
@@ -250,7 +266,92 @@ func (h *Harvester) resolver() *Resolver {
 		return &Resolver{}
 	}
 	return &Resolver{Client: h.oa, ContactEmail: h.settings.contactEmail, GoogleBooksAPIKey: h.settings.googleBooksAPIKey,
-		CoreAPIKey: h.settings.coreAPIKey, SemanticScholarAPIKey: h.settings.semanticScholarKey}
+		CoreAPIKey: h.settings.coreAPIKey, SemanticScholarAPIKey: h.settings.semanticScholarKey,
+		AnnasURL: h.settings.annasURL, SciDBURL: h.settings.sciDBURL, LibGenURL: h.settings.libGenURL,
+		GoogleScholarURL: h.settings.googleScholarURL}
+}
+
+type doiMetadataFailure struct {
+	provider string
+	err      error
+}
+
+type doiMetadataError struct {
+	failures []doiMetadataFailure
+	kind     string
+}
+
+func (e *doiMetadataError) Error() string {
+	details := make([]string, 0, len(e.failures))
+	for _, failure := range e.failures {
+		details = append(details, failure.provider+":"+doiMetadataFailureKind(failure.err))
+	}
+	return fmt.Sprintf("DOI metadata lookup failed; %s: providers %s", e.kind, strings.Join(details, ", "))
+}
+
+func (e *doiMetadataError) Unwrap() error {
+	causes := make([]error, 0, len(e.failures))
+	for _, failure := range e.failures {
+		if failure.err != nil {
+			causes = append(causes, failure.err)
+		}
+	}
+	return errors.Join(causes...)
+}
+
+func doiMetadataHTTPStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	match := doiHTTPStatusPattern.FindStringSubmatch(err.Error())
+	if len(match) != 2 {
+		return 0
+	}
+	var status int
+	if _, scanErr := fmt.Sscanf(match[1], "%d", &status); scanErr != nil {
+		return 0
+	}
+	return status
+}
+
+func doiMetadataFailureKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	status := doiMetadataHTTPStatus(err)
+	switch {
+	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
+		return "timeout"
+	case status == http.StatusTooManyRequests:
+		return "connect"
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "blocked"
+	case status >= 400 && status < 500:
+		return "invalid"
+	case status >= 500:
+		return "connect"
+	default:
+		return errorKind(err)
+	}
+}
+
+func doiMetadataAbsence(err error) bool {
+	status := doiMetadataHTTPStatus(err)
+	return status == http.StatusNotFound || status == http.StatusGone
+}
+
+func doiResolverErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	var metadataErr *doiMetadataError
+	if errors.As(err, &metadataErr) {
+		return metadataErr.kind
+	}
+	return errorKind(err)
 }
 
 func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, error) {
@@ -260,6 +361,7 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 	}
 	ctx = resolverContext(ctx, r)
 	client := r.client()
+	var specialFailure *doiMetadataFailure
 	var out []Candidate
 	// Deterministic arXiv DOI routing avoids unnecessary third-party queries.
 	const arxivDOIPrefix = "10.48550/arxiv."
@@ -273,8 +375,12 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		}, nil
 	}
 	if strings.HasPrefix(strings.ToLower(doi), "10.31235/") || strings.HasPrefix(strings.ToLower(doi), "10.31234/") || strings.HasPrefix(strings.ToLower(doi), "10.31219/") || strings.HasPrefix(strings.ToLower(doi), "10.31730/") || strings.HasPrefix(strings.ToLower(doi), "10.35542/") || strings.HasPrefix(strings.ToLower(doi), "10.33767/") {
-		if candidates, err := r.osf(ctx, client, doi); err == nil && len(candidates) > 0 {
+		candidates, err := r.osf(ctx, client, doi)
+		if err == nil && len(candidates) > 0 {
 			return candidates, nil
+		}
+		if err != nil && !doiMetadataAbsence(err) {
+			specialFailure = &doiMetadataFailure{provider: "osf", err: err}
 		}
 	}
 	// Providers are independent and the Python resolver fans them out. Gather
@@ -282,6 +388,7 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 	// order never changes the public candidate order.
 	sources := []string{"unpaywall", "openalex", "semanticscholar", "europepmc", "openaire", "zenodo", "elife", "plos", "nber", "crossref", "core", "doaj"}
 	results := make([][]Candidate, len(sources))
+	errorsBySource := make([]error, len(sources))
 	var wg sync.WaitGroup
 	for i, source := range sources {
 		wg.Add(1)
@@ -315,18 +422,38 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 			case "doaj":
 				candidates, err = r.doaj(ctx, client, doi)
 			}
-			if err != nil {
-				// A dead/misbehaving provider is an OUTAGE, not evidence of
-				// absence — name it at warning level instead of collapsing the
-				// failure into an empty candidate list.
-				log.Printf("harvest: oa source %s failed for %s: %v", source, doi, err)
-			}
+			errorsBySource[i] = err
 			results[i] = candidates
 		}(i, source)
 	}
 	wg.Wait()
 	for _, candidates := range results {
 		out = append(out, candidates...)
+	}
+	failures := make([]doiMetadataFailure, 0)
+	if specialFailure != nil {
+		log.Printf("harvest: oa source %s failed for %s: %v", specialFailure.provider, doi, specialFailure.err)
+		failures = append(failures, *specialFailure)
+	}
+	for i, providerErr := range errorsBySource {
+		if providerErr == nil || doiMetadataAbsence(providerErr) {
+			continue
+		}
+		// Keep this diagnostic deterministic and internal. Public result
+		// rendering maps the typed error to a stable class and never exposes
+		// provider URLs or raw transport text.
+		log.Printf("harvest: oa source %s failed for %s: %v", sources[i], doi, providerErr)
+		failures = append(failures, doiMetadataFailure{provider: sources[i], err: providerErr})
+	}
+	if len(out) == 0 && len(failures) > 0 {
+		kind := "connect"
+		for _, failure := range failures {
+			if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
+				kind = candidateKind
+				break
+			}
+		}
+		return nil, &doiMetadataError{failures: failures, kind: kind}
 	}
 	return sortCandidates(out), nil
 }
@@ -534,8 +661,16 @@ func (r *Resolver) ResolveTitle(ctx context.Context, title string) ([]Candidate,
 	client := r.client()
 	doi := r.titleToDOI(ctx, client, title)
 	if doi != "" {
-		if candidates, err := r.ResolveDOI(ctx, doi); err == nil && len(candidates) > 0 {
+		candidates, err := r.ResolveDOI(ctx, doi)
+		if err == nil && len(candidates) > 0 {
 			return candidates, nil
+		}
+		if err != nil {
+			fallback := r.arxivByTitle(ctx, client, title)
+			if len(fallback) > 0 {
+				return fallback, nil
+			}
+			return nil, err
 		}
 	}
 	return r.arxivByTitle(ctx, client, title), nil
@@ -664,6 +799,34 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 		}(index, gather)
 	}
 	wait.Wait()
+	providerFailures := []string{}
+	if r.configuredProviderBase("annas") != "" {
+		candidates, err := r.annasSearch(ctx, query, limit)
+		if err != nil {
+			log.Printf("harvest: annas book discovery failed for %s: %v", query, err)
+			providerFailures = append(providerFailures, "Anna's: "+err.Error())
+		} else {
+			parts = append(parts, candidates)
+		}
+	}
+	if r.configuredProviderBase("libgen") != "" {
+		candidates, err := r.libGenSearch(ctx, query, limit)
+		if err != nil {
+			log.Printf("harvest: libgen book discovery failed for %s: %v", query, err)
+			providerFailures = append(providerFailures, "LibGen: "+err.Error())
+		} else {
+			parts = append(parts, candidates)
+		}
+	}
+	if strings.TrimSpace(r.GoogleScholarURL) != "" {
+		candidates, err := r.googleScholar(ctx, query, limit)
+		if err != nil {
+			log.Printf("harvest: google scholar discovery failed for %s: %v", query, err)
+			providerFailures = append(providerFailures, "Google Scholar: "+err.Error())
+		} else {
+			parts = append(parts, candidates)
+		}
+	}
 	best := map[string]Candidate{}
 	order := make([]string, 0)
 	for _, part := range parts {
@@ -693,6 +856,9 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	if len(out) == 0 && len(providerFailures) > 0 {
+		return nil, fmt.Errorf("configured discovery sources failed: %s", strings.Join(providerFailures, "; "))
 	}
 	return out, nil
 }
@@ -1222,13 +1388,95 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	case IdentifierPMID:
 		candidates, err = r.ResolvePMID(ctx, source)
 	}
+	trace := []string{}
+	resolverFailureKind := ""
+	if err != nil && kind == IdentifierDOI {
+		resolverFailureKind = doiResolverErrorKind(err)
+	}
+	var sciHubFailure *Result
+	trySciHub := func() (Result, bool) {
+		if kind != IdentifierDOI && kind != IdentifierPMID || h.settings.sciHubURL == "" {
+			return Result{}, false
+		}
+		identifier := canonical
+		if kind == IdentifierPMID {
+			identifier = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(source)), "pmid:"))
+		}
+		result := h.fetchSciHub(ctx, identifier, options)
+		if result.Error != "" {
+			copy := result
+			sciHubFailure = &copy
+			trace = append(trace, result.Rungs...)
+			return result, false
+		}
+		trace = append(trace, result.Rungs...)
+		return h.storeResultAlias(source, canonical, result, trace, options), true
+	}
+	tryShadow := func() (Result, bool) {
+		if kind != IdentifierDOI {
+			return Result{}, false
+		}
+		result, attempted := h.fetchDOIShadow(ctx, canonical, options)
+		if !attempted {
+			return Result{}, false
+		}
+		trace = append(trace, result.Rungs...)
+		if result.Error != "" {
+			copy := result
+			sciHubFailure = &copy // shared terminal diagnostic slot for all shadow providers
+			return result, false
+		}
+		return h.storeResultAlias(source, canonical, result, trace, options), true
+	}
+	tryScholar := func() (Result, bool) {
+		if kind != IdentifierDOI || strings.TrimSpace(h.settings.googleScholarURL) == "" {
+			return Result{}, false
+		}
+		result := h.fetchScholarDOI(ctx, canonical, options)
+		trace = append(trace, result.Rungs...)
+		if result.Error != "" {
+			copy := result
+			sciHubFailure = &copy
+			return result, false
+		}
+		return h.storeResultAlias(source, canonical, result, trace, options), true
+	}
 	if err != nil {
-		return Result{Source: source, Error: err.Error()}
+		if result, ok := trySciHub(); ok {
+			return result
+		}
+		if result, ok := tryShadow(); ok {
+			return result
+		}
+		if result, ok := tryScholar(); ok {
+			return result
+		}
+		failure := Result{Source: source, Error: err.Error(), ErrorKind: resolverFailureKind, Rungs: trace}
+		if sciHubFailure != nil {
+			failure.Error += "; " + sciHubFailure.Error
+			// A missing fallback cannot establish absence while metadata lookup
+			// failed. Preserve that outage; a concrete challenge or other failure
+			// can still supply the final actionable diagnostic.
+			missing := sciHubFailure.ErrorKind == "missing" || sciHubFailure.ErrorKind == "missing_pdf" ||
+				sciHubFailure.HTTPStatus == http.StatusNotFound || sciHubFailure.HTTPStatus == http.StatusGone
+			if sciHubFailure.ErrorKind != "" && !missing {
+				failure.ErrorKind = sciHubFailure.ErrorKind
+				failure.Challenge = sciHubFailure.Challenge
+				failure.HTTPStatus = sciHubFailure.HTTPStatus
+			}
+		}
+		return failure
 	}
 	if len(candidates) == 0 && kind != IdentifierDOI {
+		if result, ok := trySciHub(); ok {
+			return result
+		} else if sciHubFailure != nil {
+			return Result{Source: source, Error: withRungs(sciHubFailure.Error, sciHubFailure.Rungs), ErrorKind: sciHubFailure.ErrorKind,
+				Challenge: sciHubFailure.Challenge, HTTPStatus: sciHubFailure.HTTPStatus, Rungs: sciHubFailure.Rungs}
+		}
 		return Result{Source: source, Error: "no legal open-access copy found"}
 	}
-	trace := make([]string, 0, len(candidates))
+	trace = make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		trace = append(trace, "oa:"+c.Source)
 		result := h.fetchURLWithPolicy(ctx, c.URL, options, false)
@@ -1270,6 +1518,19 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			}
 		}
 	}
+	if kind == IdentifierDOI || kind == IdentifierPMID {
+		if result, ok := trySciHub(); ok {
+			return result
+		}
+	}
+	if kind == IdentifierDOI {
+		if result, ok := tryShadow(); ok {
+			return result
+		}
+		if result, ok := tryScholar(); ok {
+			return result
+		}
+	}
 	if kind == IdentifierDOI {
 		doiURL := "https://doi.org/" + canonical
 		trace = append(trace, "wayback")
@@ -1288,10 +1549,38 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			checked = "Unpaywall, " + checked
 			skipped = ""
 		}
-		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in any open-access source (checked %s).%s The paper is likely paywalled — use `search` to find an author preprint or the publisher's page directly.", canonical, checked, skipped)
-		return Result{Source: source, Error: withRungs(message, trace), Rungs: trace}
+		if sciHubFailure != nil {
+			message := fmt.Sprintf("Found DOI %s, but retrieval exhausted the configured open-access and fallback sources (checked %s).%s %s", canonical, checked, skipped, sciHubFailure.Error)
+			return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
+				Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
+		}
+		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — use `search` to find an author preprint or the publisher's page directly.", canonical, checked, skipped)
+		return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
+			Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
 	}
-	return Result{Source: source, Error: withRungs("all legal open-access candidates failed", trace), Rungs: trace}
+	message := "all legal open-access candidates failed"
+	if sciHubFailure != nil {
+		message += " " + sciHubFailure.Error
+	}
+	return Result{Source: source, Error: withRungs(message, trace), Rungs: trace, ErrorKind: sciHubFailureKind(sciHubFailure), Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure)}
+}
+
+func sciHubFailureKind(result *Result) string {
+	if result == nil {
+		return ""
+	}
+	return result.ErrorKind
+}
+
+func sciHubFailureChallenge(result *Result) bool {
+	return result != nil && result.Challenge
+}
+
+func sciHubFailureStatus(result *Result) int {
+	if result == nil {
+		return 0
+	}
+	return result.HTTPStatus
 }
 
 func extractPMCID(raw string) string {
@@ -1302,7 +1591,51 @@ func extractPMCID(raw string) string {
 func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, options FetchOptions) Result {
 	cands, err := h.resolver().ResolveDOI(ctx, doi)
 	if err != nil {
-		return Result{Source: doi, Error: err.Error()}
+		metadataFailureKind := doiResolverErrorKind(err)
+		if h.settings.sciHubURL != "" {
+			result := h.fetchSciHub(ctx, DOIFrom(doi), options)
+			if result.Error == "" {
+				result.Rungs = append(append([]string(nil), rungs...), result.Rungs...)
+				return result
+			}
+			trace := append(append([]string(nil), rungs...), result.Rungs...)
+			if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
+				if shadow.Error == "" {
+					shadow.Rungs = append(trace, shadow.Rungs...)
+					return shadow
+				}
+				result = shadow
+				trace = append(trace, shadow.Rungs...)
+			}
+			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+				scholar.Rungs = append(trace, scholar.Rungs...)
+				return scholar
+			} else if h.settings.googleScholarURL != "" {
+				result = scholar
+				trace = append(trace, scholar.Rungs...)
+			}
+			failureKind := result.ErrorKind
+			if failureKind == "" {
+				failureKind = metadataFailureKind
+			}
+			return Result{Source: doi, Error: err.Error() + "; " + result.Error, ErrorKind: failureKind,
+				Challenge: result.Challenge, HTTPStatus: result.HTTPStatus, Rungs: trace}
+		}
+		if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
+			if shadow.Error == "" {
+				shadow.Rungs = append(append([]string(nil), rungs...), shadow.Rungs...)
+				return shadow
+			}
+			if h.settings.googleScholarURL == "" {
+				return shadow
+			}
+			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+				combined := append(append([]string(nil), rungs...), shadow.Rungs...)
+				scholar.Rungs = append(combined, scholar.Rungs...)
+				return scholar
+			}
+		}
+		return Result{Source: doi, Error: err.Error(), ErrorKind: metadataFailureKind}
 	}
 	trace := append([]string(nil), rungs...)
 	for _, c := range cands {
@@ -1311,6 +1644,53 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 		if result.Error == "" {
 			result.Rungs = append([]string(nil), trace...)
 			return result
+		}
+	}
+	if h.settings.sciHubURL != "" {
+		result := h.fetchSciHub(ctx, DOIFrom(doi), options)
+		if result.Error == "" {
+			result.Rungs = append(trace, result.Rungs...)
+			return result
+		}
+		trace = append(trace, result.Rungs...)
+		lastProvider := result
+		if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
+			trace = append(trace, shadow.Rungs...)
+			if shadow.Error == "" {
+				shadow.Rungs = append([]string(nil), trace...)
+				return shadow
+			}
+			lastProvider = shadow
+		}
+		if h.settings.googleScholarURL != "" {
+			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+				scholar.Rungs = append(trace, scholar.Rungs...)
+				return scholar
+			} else {
+				trace = append(trace, scholar.Rungs...)
+				lastProvider = scholar
+			}
+		}
+		return Result{Source: doi, Error: withRungs("OA chain exhausted: "+lastProvider.Error, trace), ErrorKind: lastProvider.ErrorKind,
+			Challenge: lastProvider.Challenge, HTTPStatus: lastProvider.HTTPStatus, Rungs: trace}
+	}
+	if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
+		if shadow.Error == "" {
+			shadow.Rungs = append(trace, shadow.Rungs...)
+			return shadow
+		}
+		trace = append(trace, shadow.Rungs...)
+		if h.settings.googleScholarURL == "" {
+			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+shadow.Error, trace), ErrorKind: shadow.ErrorKind, Challenge: shadow.Challenge, HTTPStatus: shadow.HTTPStatus, Rungs: trace}
+		}
+	}
+	if h.settings.googleScholarURL != "" {
+		if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+			scholar.Rungs = append(trace, scholar.Rungs...)
+			return scholar
+		} else {
+			trace = append(trace, scholar.Rungs...)
+			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+scholar.Error, trace), ErrorKind: scholar.ErrorKind, Challenge: scholar.Challenge, HTTPStatus: scholar.HTTPStatus, Rungs: trace}
 		}
 	}
 	return Result{Source: doi, Error: withRungs("OA chain exhausted", trace), Rungs: trace}

@@ -79,6 +79,11 @@ type HarvesterScholarly struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
+	SciHubURL             string
+	AnnasURL              string
+	SciDBURL              string
+	LibGenURL             string
+	GoogleScholarURL      string
 }
 
 type HarvesterFetch struct {
@@ -146,6 +151,11 @@ type rawHarvesterScholarly struct {
 	GoogleBooksAPIKey     *string `json:"googleBooksApiKey,omitempty"`
 	CoreAPIKey            *string `json:"coreApiKey,omitempty"`
 	SemanticScholarAPIKey *string `json:"semanticScholarApiKey,omitempty"`
+	SciHubURL             *string `json:"sciHubURL,omitempty"`
+	AnnasURL              *string `json:"annasURL,omitempty"`
+	SciDBURL              *string `json:"sciDBURL,omitempty"`
+	LibGenURL             *string `json:"libGenURL,omitempty"`
+	GoogleScholarURL      *string `json:"googleScholarURL,omitempty"`
 }
 
 type rawHarvesterFetch struct {
@@ -199,6 +209,11 @@ var harvesterSourceKeys = []string{
 	"harvester.search.enabled", "harvester.search.searxngURL", "harvester.search.braveApiKey",
 	"harvester.scholarly.contactEmail", "harvester.scholarly.googleBooksApiKey",
 	"harvester.scholarly.coreApiKey", "harvester.scholarly.semanticScholarApiKey",
+	"harvester.scholarly.sciHubURL",
+	"harvester.scholarly.annasURL",
+	"harvester.scholarly.sciDBURL",
+	"harvester.scholarly.libGenURL",
+	"harvester.scholarly.googleScholarURL",
 	"harvester.fetch.browser", "harvester.fetch.userAgent", "harvester.fetch.proxyURL",
 	"harvester.convert.pdfOcr", "harvester.convert.pdfLayout",
 	"harvester.cache.dir", "harvester.cache.ttlSeconds", "harvester.cache.negativeTtlSeconds",
@@ -313,6 +328,35 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		}
 	}
 	if scholarly := raw.Scholarly; scholarly != nil {
+		for key, pair := range map[string]struct {
+			raw    *string
+			target *string
+		}{
+			"sciHubURL":        {scholarly.SciHubURL, &harvester.Scholarly.SciHubURL},
+			"annasURL":         {scholarly.AnnasURL, &harvester.Scholarly.AnnasURL},
+			"sciDBURL":         {scholarly.SciDBURL, &harvester.Scholarly.SciDBURL},
+			"libGenURL":        {scholarly.LibGenURL, &harvester.Scholarly.LibGenURL},
+			"googleScholarURL": {scholarly.GoogleScholarURL, &harvester.Scholarly.GoogleScholarURL},
+		} {
+			if pair.raw == nil {
+				continue
+			}
+			value := strings.TrimSpace(*pair.raw)
+			if value != "" {
+				if err := validateHTTPURL(value, true); err != nil {
+					return fmt.Errorf("harvester config %s: scholarly.%s %w", path, key, err)
+				}
+				parsed, err := url.Parse(value)
+				if err != nil {
+					return fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
+				}
+				if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+					return fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
+				}
+			}
+			*pair.target = value
+			file("scholarly." + key)
+		}
 		for key, pair := range map[string]struct {
 			raw    *string
 			target *string
@@ -762,6 +806,11 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"googleBooksApiKey":     secret(harvester.Scholarly.GoogleBooksAPIKey),
 			"coreApiKey":            secret(harvester.Scholarly.CoreAPIKey),
 			"semanticScholarApiKey": secret(harvester.Scholarly.SemanticScholarAPIKey),
+			"sciHubURL":             harvester.Scholarly.SciHubURL,
+			"annasURL":              harvester.Scholarly.AnnasURL,
+			"sciDBURL":              harvester.Scholarly.SciDBURL,
+			"libGenURL":             harvester.Scholarly.LibGenURL,
+			"googleScholarURL":      harvester.Scholarly.GoogleScholarURL,
 		},
 		"fetch": map[string]any{
 			"browser": harvester.Fetch.Browser, "userAgent": harvester.Fetch.UserAgent,
