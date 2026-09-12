@@ -64,7 +64,7 @@ pfm/
     main.go                         # run(): global flags → Runtime → commands table → Run
     command_table.go                # THE top-level command table {Name, Group, Summary, Hidden, Diagnostic, Run}
     flags.go                        # newFlagSet / parseFlags / parseFlagsAnywhere (from main.go:541-580)
-    runtime.go                      # Runtime load (from runtime_config.go)
+    runtime_config.go               # commandRuntime = config.Runtime; the loaders live in internal/config/runtime.go
     chat.go                         # `pfm chat <verb>` over chat.Verbs (from headless_command.go:85 + runChatSatellite)
     internal_entry.go               # `pfm internal <entry>` over hooks.Table (from main.go:381 if-chain)
     <command>_command.go            # one thin adapter per top-level command: flags → package call → render
@@ -74,7 +74,6 @@ pfm/
     chat/                           # NEW. The chat verb layer. CLI, MCP, picker and pfmd all call it.
       README.md                     # ≤ 20 lines: what a verb is, what feeds it, what it feeds
       verbs.go                      # THE verb table {Name, Summary, MCPTool, ReadOnly}
-      runtime.go                    # chat.Runtime: paths + config + database handles (from commandRuntime)
       target.go                     # target resolution shared by verbs (from headlessTarget and friends)
       <verb>.go × 27                # XRequest (json tags = MCP schema) · XResult · X(ctx, rt, req) · CLI flag binding
       <verb>_test.go                # one per verb; jail scenarios named <verb>_<scenario>_jail_test.go
@@ -87,7 +86,7 @@ pfm/
       README.md doctor.go           # probe runner; three distinct verdicts: healthy / broken / could-not-look
       deps.go hooks.go harness_prompt.go spawn_audit.go tmux_titles.go prepush.go harvest.go mcp.go codex_panes.go
       <probe>_test.go
-    fleet/                          # NEW. Scan(ctx, rt) → Snapshot: index → gather → compose (from pipeline.go)
+    fleet/                          # NEW. Scan(ctx, db, Request) → Result: index → gather → reconcile → compose (from pipeline.go, codexpanes.go)
     picker/                         # NEW. The ls loop, cadence, cosmos sampler; row actions call chat verbs (from commands.go, pipeline.go)
     update/                         # NEW. From update_command.go (binary self-update).
     professor/                      # + update_project.go and init_command.go logic (template baselines)
@@ -118,7 +117,7 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | Rebuildable transcript index | index DB | `internal/store` · `paths.Values.IndexDB` | file `~/.local/state/pfm/index.db` · env `PFM_INDEX_DB` | file is `fleet.db`, field `DB`, env `PFM_DB` |
 | Operator decisions (kills, children, comms, issues, branch seats) | fleet DB | `internal/fleetdb` · `paths.Values.FleetDB` | file `~/.cc/fleet.db` · env `PFM_FLEET_DB` | package `shared`, field `SharedDB`, env `PFM_SHARED_DB`; `installer.go:2266` re-spells the path |
 | One operation on one chat | verb | `internal/chat/<verb>.go` · `chat.Verbs` | CLI `pfm chat <verb>` · MCP `chat_<verb>` (`-` → `_`) | verbs live in `cmd/pfm/*_command.go`; dispatch sits in `headless_command.go:85`; `pfm headless <verb>` is a second entry to every verb, with the aliases `run`→`new` and `transcript`→`read` (`headless_command.go:54-61`); `chat_goal` is MCP-only |
-| Resolved paths + config + handles for one process | Runtime | `chat.Runtime` | — | `commandRuntime` (cmd/pfm) and `mcpserv.Runtime` (a second shape) |
+| Resolved paths + config for one process | Runtime | `internal/config` · `config.Runtime` (`LoadRuntime`, `RuntimeOrDefault`) | — | `mcpserv.Runtime` (a second shape; `commandRuntime` is now an alias) |
 | A `pfm internal` entrypoint (hooks are the subset with a harness event) | entry | `internal/hooks/table.go` · `hooks.Table` | argv `pfm internal <entry>` (unchanged — installed wiring depends on it) | if-chain at `main.go:381`; usage lists 8 of 19 |
 | The one tmux process runner | tmux runner | `internal/tmux` · `tmux.Runner` | — | `CommandTmux` ×7, `RealTmux`, `CommandHost`, `reloadCommandTmux` |
 | Account usage windows | limits | `internal/limits` · `limits.Sampler` | cache `cc-usage-<uid>/acct-N.json` (unchanged) | lives in `stats` beside resource sampling |
@@ -304,6 +303,14 @@ Hops are reported as the pair source-only · orientation.
 ## 8. Migration
 
 **Incremental, not a rebuild.** `cmd/pfm` is 18% of source, and every other move is a package split or a rename. Each step is one wave, independently shippable with the suite green, and names the metric it moves. Every wave also splits any over-ceiling file it touches (the C1 ratchet).
+
+**As built on `refactor/pfm-rearchitect`.** The order changed once, for a reason the plan missed: every verb resolves its target through the fleet scan, and the scan lived in `package main`, so no verb could leave `cmd/pfm` before the scan did. The executed order is:
+
+- step 1's ratchet half (`pfm/scripts/arch-check.sh`, the `pfm/.arch/` baselines, `make arch` in `gate`); the guarded `pfm/CLAUDE.md` half waits for `/pfm`;
+- step 6's scan half, as `internal/fleet`. Codex pane reconciliation moved with it, because `fleet.Scan` runs it. `config.Runtime` became the one runtime shape (`commandRuntime` is an alias), and the account projections became `config` methods;
+- step 4(a)'s first verbs: target resolution, `last`, `status` and `read` in `internal/chat`. MCP `chat_last` and `chat_status` call `chat.Verbs` typed (C10 10 → 8).
+
+The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 
 1. **Orientation truth and the ratchet.** Through `/pfm`, since both files are guarded: in `pfm/CLAUDE.md`, delete `check/`, `legacy/`, `PLAN.md` and `CUTOVER.md`; delete the § Stack "no build tags" sentence; replace the package table with the `go list` command and the subcommand list with `pfm help`; fix "13 jail tests". Wire `arch-check.sh` into `.claude/scripts/dev.sh verify pfm` and commit `pfm/.arch/*.txt` from `--measure`. As a code change, add the 10 missing package docs. *Moves:* orientation hops, C9, C12.
 2. **Façades, bottom-up.** Land `internal/tmux` (absorbing `tmuxfmt`), `internal/procfs` (breaking the `gather → resolve` cycle that forced resolve's copy), `internal/sqlitedb`, `internal/atomicfile` and `internal/jsonl`, then move every consumer onto them. Delete the builtin shadows and the helper triplets. *Moves:* C5, C6, C7, and roughly 2K fewer lines.
