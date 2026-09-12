@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/shared"
 )
@@ -94,7 +95,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := composedChatRows(context.Background(), io.Discard); err != nil {
+	if _, err := pfmchat.Rows(context.Background(), io.Discard, nil); err != nil {
 		t.Fatalf("prime a real index pass over the parent transcript: %v", err)
 	}
 	growth, err := os.OpenFile(parentPath, os.O_APPEND|os.O_WRONLY, 0o600)

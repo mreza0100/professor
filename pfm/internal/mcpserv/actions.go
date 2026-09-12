@@ -1,14 +1,13 @@
 package mcpserv
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/headless"
+	"hostops/pfm/internal/chat"
+	pfmengine "hostops/pfm/internal/engine"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,30 +20,20 @@ func (service *Service) chatLast(
 	if strings.TrimSpace(input.Target) == "" {
 		return nil, LastOutput{}, fmt.Errorf("target is required")
 	}
-	if service.backend.dispatch == nil {
-		return nil, LastOutput{}, fmt.Errorf("chat_last command is not configured")
+	if service.backend.chat == nil {
+		return nil, LastOutput{}, fmt.Errorf("chat_last verb is not configured")
 	}
 	target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, LastOutput{}, err
 	}
-	var stdout, stderr bytes.Buffer
-	code := service.backend.dispatch(
-		ctx,
-		[]string{"chat", "last", target},
-		&stdout,
-		&stderr,
-	)
-	if code != 0 {
-		return nil, LastOutput{}, fmt.Errorf(
-			"chat_last command rc=%d stderr=%q",
-			code,
-			strings.TrimSpace(stderr.String()),
-		)
+	result, err := service.backend.chat.Last(ctx, chat.LastRequest{Target: target})
+	if err != nil {
+		return nil, LastOutput{}, fmt.Errorf("chat_last: %w", err)
 	}
-	text := strings.TrimRight(stdout.String(), "\r\n")
+	text := strings.TrimRight(result.Text, "\r\n")
 	if text == "" {
-		return nil, LastOutput{}, fmt.Errorf("chat_last command returned no answer")
+		return nil, LastOutput{}, fmt.Errorf("chat_last: %q returned an empty answer", target)
 	}
 	return nil, LastOutput{Target: input.Target, Text: text}, nil
 }
@@ -60,48 +49,30 @@ func (service *Service) chatStatus(
 	if !input.Summary && !input.Ask && (input.Engine != "" || input.Model != "") {
 		return nil, StatusOutput{}, fmt.Errorf("engine and model require summary=true or ask=true")
 	}
-	if service.backend.dispatch == nil {
-		return nil, StatusOutput{}, fmt.Errorf("chat_status command is not configured")
+	var engine pfmengine.ID
+	if input.Engine != "" {
+		parsed, err := pfmengine.Parse(input.Engine)
+		if err != nil {
+			return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
+		}
+		engine = parsed
+	}
+	if service.backend.chat == nil {
+		return nil, StatusOutput{}, fmt.Errorf("chat_status verb is not configured")
 	}
 	target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, StatusOutput{}, err
 	}
-	args := []string{"chat", "status", target, "--json"}
-	if input.Summary {
-		args = append(args, "--summary")
+	// A dead chat is a status, not an error: it comes back with its state.
+	status, err := service.backend.chat.Status(ctx, chat.StatusRequest{
+		Target: target, Summary: input.Summary, Ask: input.Ask,
+		Engine: engine, Model: input.Model,
+	})
+	if err != nil {
+		return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
 	}
-	if input.Ask {
-		args = append(args, "--ask")
-	}
-	if input.Engine != "" {
-		args = append(args, "--engine", input.Engine)
-	}
-	if input.Model != "" {
-		args = append(args, "--model", input.Model)
-	}
-	var stdout, stderr bytes.Buffer
-	code := service.backend.dispatch(ctx, args, &stdout, &stderr)
-	var output StatusOutput
-	decodeErr := json.Unmarshal(stdout.Bytes(), &output)
-	if code != 0 {
-		if decodeErr == nil && output.State == headless.StateDead {
-			return nil, output, nil
-		}
-		return nil, StatusOutput{}, fmt.Errorf(
-			"chat_status command rc=%d stderr=%q",
-			code,
-			strings.TrimSpace(stderr.String()),
-		)
-	}
-	if decodeErr != nil {
-		return nil, StatusOutput{}, fmt.Errorf(
-			"chat_status command returned invalid JSON stderr=%q: decode output: %w",
-			strings.TrimSpace(stderr.String()),
-			decodeErr,
-		)
-	}
-	return nil, output, nil
+	return nil, StatusOutput(status), nil
 }
 
 func (service *Service) chatNew(ctx context.Context, request *mcp.CallToolRequest, input NewInput) (*mcp.CallToolResult, ActionOutput, error) {

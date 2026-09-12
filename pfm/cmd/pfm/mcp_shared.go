@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io"
 	"os"
 	"strings"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/transcript"
@@ -26,6 +27,7 @@ func mcpRuntime(runtime commandRuntime) mcpserv.Runtime {
 		CodexBinary:    runtime.Config.Codex.Binary,
 		OpencodeBinary: runtime.Config.OpenCode.Binary,
 		Operations:     mcpSharedOperations(runtime),
+		Chat:           pfmchat.Verbs{Runtime: &runtime, Warnings: os.Stderr},
 		Dispatch: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			if len(args) == 0 || args[0] != "chat" {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
@@ -153,7 +155,7 @@ func mcpSharedOperations(runtime commandRuntime) mcpserv.SharedOperations {
 			if maxBytes < 1 || maxBytes > 1<<20 {
 				return mcpserv.ReadOutput{}, fmt.Errorf("max_bytes must be between 1 and 1048576")
 			}
-			chat, entries, truncated, err := readChatEntries(ctx, input.Source, lastN, runtime)
+			chat, entries, truncated, err := pfmchat.ReadEntries(ctx, input.Source, lastN, &runtime)
 			if err != nil {
 				return mcpserv.ReadOutput{}, err
 			}
@@ -218,14 +220,14 @@ func excludedFromMCPList(kind compose.Kind) bool {
 // reported as a contradiction, never smoothed into one of its two halves.
 func mcpRowState(row compose.Row) string {
 	switch {
-	case row.Killed && isLiveKind(row.Kind):
+	case row.Killed && pfmchat.IsLive(row.Kind):
 		return "killed-but-live"
 	case row.Kind == compose.Booting:
 		// A booting chat HAS a socket and already answers chat_inject by
 		// name. Excluding it made chat_ls report a chat that exists as
 		// simply absent for its first minute.
 		return "booting"
-	case isLiveKind(row.Kind):
+	case pfmchat.IsLive(row.Kind):
 		return "idle"
 	default:
 		return "resumable"

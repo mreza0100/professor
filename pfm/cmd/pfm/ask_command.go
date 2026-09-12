@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 )
@@ -156,7 +157,7 @@ func awaitAnswer(
 	turn, err := headless.Await(
 		ctx,
 		func(ctx context.Context) (headless.Chat, bool, error) {
-			return resolveChat(ctx, handle, io.Discard, runtimes...)
+			return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 		},
 		options,
 	)

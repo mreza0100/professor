@@ -42,6 +42,15 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	return Runtime{Config: effective, Paths: resolved}, nil
 }
 
+// RuntimeOrDefault is the caller's runtime, or the default one loaded now —
+// the rule for every package API whose runtime parameter is optional.
+func RuntimeOrDefault(runtime *Runtime) (Runtime, error) {
+	if runtime != nil {
+		return *runtime, nil
+	}
+	return LoadRuntime("")
+}
+
 // LoadDiagnosticRuntime is LoadRuntime for commands that must stay usable on
 // a broken config: they run on defaults and carry the load error in
 // ConfigError to the visible command surface.

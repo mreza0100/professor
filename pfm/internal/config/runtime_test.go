@@ -62,3 +62,27 @@ func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 		t.Fatalf("ConfigError = %v on an absent config", runtime.ConfigError)
 	}
 }
+
+// TestRuntimeOrDefaultUsesTheCallersRuntimeAsGiven pins the optional-runtime
+// rule: a caller's runtime is used as given, and only a nil one loads the
+// default — whose broken config is still an error, never silent defaults.
+func TestRuntimeOrDefaultUsesTheCallersRuntimeAsGiven(t *testing.T) {
+	given := Runtime{Config: Config{Path: "/given/config.toml"}}
+	got, err := RuntimeOrDefault(&given)
+	if err != nil || got.Config.Path != "/given/config.toml" {
+		t.Fatalf("RuntimeOrDefault(&given) = %+v, %v; want the given runtime", got.Config, err)
+	}
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := ResolvePath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("this is [not a config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime, err := RuntimeOrDefault(nil); err == nil {
+		t.Fatalf("RuntimeOrDefault(nil) ran on %+v past a broken default config", runtime.Config)
+	}
+}

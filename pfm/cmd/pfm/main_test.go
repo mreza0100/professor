@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/testjail"
 )
@@ -475,8 +476,8 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 // TestCheckRefusesALiveCodexSocketMissingFromTheGoRows is the regression this
 // checker existed to catch and did not. A legacy-only live-codex row means the
 func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
-	root := jailTest(t)
-	dbPath := filepath.Join(root, "fleet.db")
+	jailTest(t)
+	dbPath := os.Getenv(paths.EnvDB)
 	if err := os.WriteFile(dbPath, []byte("not a sqlite database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -800,35 +801,11 @@ func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPro
 func jailTest(t *testing.T) string {
 	t.Helper()
 
-	root := testjail.ShortRoot(t)
-	for _, directory := range []string{
-		filepath.Join(root, "t"),
-		filepath.Join(root, "sid"),
-		filepath.Join(root, "claude"),
-		filepath.Join(root, "codex"),
-		filepath.Join(root, "tmux"),
-		filepath.Join(root, "home"),
-		filepath.Join(root, "home", ".local", "bin"),
-		filepath.Join(root, "proc"),
-	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
-	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	root := testjail.Fleet(t)
 	jailedHome := filepath.Join(root, "home")
-	t.Setenv("PFM_HOME", jailedHome)
-	// HOME is the same concept under its other name. Pinning only
-	// PFM_HOME leaves anything reading the plain variable — the test
-	// itself, a subprocess, a library — writing into the operator's real
-	// account, which is how fixture transcripts reached a live
-	// ~/.claude/projects. The two must never be allowed to disagree.
-	t.Setenv("HOME", jailedHome)
+	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	canonical := filepath.Join(root, "home", ".local", "bin", "pfm")
 	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
 		t.Fatal(err)
@@ -867,10 +844,6 @@ func jailTest(t *testing.T) string {
 		}
 	}
 	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
-	t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
-	// A chat server loads the user's ~/.tmux.conf in real life; a fixture must
-	// not, or the machine it runs on steers the test.
-	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	return root
 }
 

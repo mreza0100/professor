@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/agentrole"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -369,7 +370,7 @@ func awaitLaunch(
 	turn, err := headless.Await(
 		ctx,
 		func(ctx context.Context) (headless.Chat, bool, error) {
-			return resolveChat(ctx, handle, io.Discard, runtimes...)
+			return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 		},
 		proof,
 	)
@@ -380,7 +381,7 @@ func awaitLaunch(
 		rescued, _ := headless.Await(
 			ctx,
 			func(ctx context.Context) (headless.Chat, bool, error) {
-				return resolveChat(ctx, handle, io.Discard, runtimes...)
+				return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 			},
 			rescueProofOptions(options),
 		)
@@ -438,7 +439,7 @@ func rescueLaunchPrompt(
 	stderr io.Writer,
 	runtimes ...commandRuntime,
 ) bool {
-	chat, found, err := resolveChat(ctx, handle, io.Discard, runtimes...)
+	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 	if err != nil || !found || !chat.Live {
 		return false
 	}

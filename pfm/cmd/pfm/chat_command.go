@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -68,7 +69,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		// their CODEX_THREAD_ID through the fleet store, then preserve the live
 		// row's immutable socket and pane for the detached exit finisher.
 		if os.Getenv("TMUX") == "" && os.Getenv(resolve.CodexThreadEnv) != "" {
-			chat, found, err := resolveChat(context.Background(), "self", io.Discard, runtimes...)
+			chat, found, err := pfmchat.Resolve(context.Background(), "self", io.Discard, firstRuntime(runtimes))
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 				return 1
@@ -92,7 +93,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	// used to answer "killed" for a chat whose engine was still running. A
 	// target that resolves to nothing still reaches runKill below, which is
 	// the only path that can tombstone an id the composer no longer lists.
-	chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
+	chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
 	if err != nil {
 		if !fleet.ChatIDPattern.MatchString(target) {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -193,7 +194,7 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	target := flags.Arg(0)
 	if !fleet.ChatIDPattern.MatchString(target) {
-		chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
+		chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 			return 1

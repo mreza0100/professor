@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"io"
@@ -416,7 +417,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	}
 	found, elsewhere, killed := 0, 0, 0
 	for _, row := range scan.Output.Rows {
-		if !isLiveKind(row.Kind) {
+		if !pfmchat.IsLive(row.Kind) {
 			continue
 		}
 		if row.Killed || row.NameKilled {
@@ -427,7 +428,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 			elsewhere++
 			continue
 		}
-		chat := chatFromRow(row)
+		chat := pfmchat.FromRow(row)
 		status, inspectErr := headless.Inspect(context.Background(), chat, time.Now())
 		state := "unknown"
 		if inspectErr != nil {
@@ -707,7 +708,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 // folded into "not found", because a probe that could not run must never
 // report absence.
 func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime) (compose.Row, bool, error) {
-	rows, err := composedChatRows(ctx, io.Discard, runtimes...)
+	rows, err := pfmchat.Rows(ctx, io.Discard, firstRuntime(runtimes))
 	if err != nil {
 		return compose.Row{}, false, err
 	}
@@ -731,7 +732,7 @@ func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime)
 // That case takes the account's configured posture, which is the same default a
 // fresh chat on that account would get.
 func forkCache1H(parent compose.Row, parentFound bool, config pfmconfig.Config, account int) bool {
-	if parentFound && isLiveKind(parent.Kind) {
+	if parentFound && pfmchat.IsLive(parent.Kind) {
 		return parent.C1H
 	}
 	return config.EffectiveClaude(account).Cache1H

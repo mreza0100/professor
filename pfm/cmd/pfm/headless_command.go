@@ -12,14 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/compose"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/transcript"
 )
 
@@ -169,122 +167,6 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "            5 answer timed out · 6 message not delivered")
 }
 
-// resolveChat finds a chat by name, id, or socket over a live compose pass —
-// the same rows the picker shows, so a chat the user can see is a chat these
-// commands can address. Ambiguity is refused rather than guessed at.
-// warn is where gather's probe warnings go. The read verbs pass io.Discard:
-// they answer about ONE chat, and a warning about somebody else's dead socket
-// is noise in the middle of a machine-facing answer. `run` keeps them.
-func resolveChat(
-	ctx context.Context,
-	name string,
-	warn io.Writer,
-	runtimes ...commandRuntime,
-) (headless.Chat, bool, error) {
-	if name == "self" || name == "me" {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
-		if err != nil {
-			return headless.Chat{}, false, err
-		}
-		identity, err := identifier.Identify(ctx)
-		if err != nil {
-			seat, found := codexSeatIdentity(ctx, runtimes...)
-			if !found {
-				return headless.Chat{}, false, err
-			}
-			identity = seat
-		}
-		switch {
-		case identity.ID != "":
-			name = identity.ID
-		case identity.SocketName != "":
-			name = identity.SocketName
-		default:
-			name = identity.Session
-		}
-	}
-	rows, err := composedChatRows(ctx, warn, runtimes...)
-	if err != nil {
-		return headless.Chat{}, false, err
-	}
-	return matchChat(rows, name)
-}
-
-func composedChatRows(
-	ctx context.Context,
-	warn io.Writer,
-	runtimes ...commandRuntime,
-) ([]compose.Row, error) {
-	database, err := store.Open(store.WithWarningWriter(warn))
-	if err != nil {
-		return nil, err
-	}
-	defer database.Close()
-	request := scanRequest{View: compose.AllView, ReadOnly: true}
-	if len(runtimes) != 0 {
-		request.Runtime = &runtimes[0]
-	}
-	scan, err := scanFleet(
-		ctx,
-		database,
-		request,
-		warn,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return scan.Output.Rows, nil
-}
-
-// rosterCandidates projects composed rows onto the matching rule's input.
-func rosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
-	candidates := make([]resolve.RosterCandidate, 0, len(rows))
-	for _, row := range rows {
-		candidates = append(candidates, resolve.RosterCandidate{
-			Name: row.Name, ID: row.ID, Socket: row.Socket,
-			Session: row.SessionName, Pane: row.PaneID,
-			Engine: string(compose.EngineForKind(row.Kind)), Live: isLiveKind(row.Kind),
-		})
-	}
-	return candidates
-}
-
-func matchChat(rows []compose.Row, name string) (headless.Chat, bool, error) {
-	match, found, err := resolve.ResolveRosterName(rosterCandidates(rows), name)
-	if err != nil || !found {
-		return headless.Chat{}, false, err
-	}
-	for _, row := range rows {
-		if row.ID == match.ID && row.Socket == match.Socket &&
-			row.PaneID == match.Pane && row.Name == match.Name {
-			return chatFromRow(row), true, nil
-		}
-	}
-	return headless.Chat{}, false, fmt.Errorf("resolved roster row disappeared from the same snapshot")
-}
-
-func isLiveKind(kind compose.Kind) bool {
-	return kind == compose.LiveClaude ||
-		kind == compose.LiveCodex ||
-		kind == compose.LiveSplit ||
-		kind == compose.Agent ||
-		kind == compose.Booting
-}
-
-func chatFromRow(row compose.Row) headless.Chat {
-	return headless.Chat{
-		Name:    row.Name,
-		ID:      row.ID,
-		Engine:  compose.EngineForKind(row.Kind),
-		Path:    row.Path,
-		CWD:     row.CWD,
-		Socket:  row.Socket,
-		Session: row.SessionName,
-		Pane:    row.PaneID,
-		Live:    isLiveKind(row.Kind),
-	}
-}
-
 // headlessTarget resolves a name for a verb that needs one, reporting the
 // refusal itself. A name nothing answers to is never silent and never rc 0.
 func headlessTarget(
@@ -294,21 +176,28 @@ func headlessTarget(
 	asJSON bool,
 	runtimes ...commandRuntime,
 ) (headless.Chat, int) {
-	chat, found, err := resolveChat(ctx, name, io.Discard, runtimes...)
+	target, err := pfmchat.Target(ctx, name, firstRuntime(runtimes))
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat: %v\n", err)
-		return headless.Chat{}, 2
+		return headless.Chat{}, reportTargetError(err, name, stdout, stderr, asJSON)
 	}
-	if !found {
+	return target, 0
+}
+
+// reportTargetError renders a verb's target failure on the CLI contract: an
+// unknown chat prints its missing row and exits codeUnknownChat; a scan that
+// could not look exits 2 and never reads as "no such chat".
+func reportTargetError(err error, name string, stdout, stderr io.Writer, asJSON bool) int {
+	if errors.Is(err, pfmchat.ErrUnknownChat) {
 		if asJSON {
 			writeJSON(stdout, headless.Missing(name))
 		} else {
 			fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
 		}
 		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
-		return headless.Chat{}, codeUnknownChat
+		return codeUnknownChat
 	}
-	return chat, 0
+	fmt.Fprintf(stderr, "pfm chat: %v\n", err)
+	return 2
 }
 
 func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -343,51 +232,17 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 			return 1
 		}
 	}
-	ctx := context.Background()
-	chat, code := headlessTarget(ctx, names[0], stdout, stderr, *asJSON, runtimes...)
-	if code != 0 {
-		return code
+	status, err := pfmchat.Status(context.Background(), firstRuntime(runtimes), pfmchat.StatusRequest{
+		Target: names[0], Summary: *withSummary, Ask: *withAsk,
+		Engine: summaryEngineID, Model: *summaryModel,
+	}, stderr)
+	var targetErr *pfmchat.TargetError
+	if errors.As(err, &targetErr) {
+		return reportTargetError(err, names[0], stdout, stderr, *asJSON)
 	}
-	status, err := headless.Inspect(ctx, chat, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat status: %v\n", err)
 		return 1
-	}
-	if *withSummary || *withAsk {
-		runtime, runtimeErr := optionalCommandRuntime(runtimes)
-		if runtimeErr != nil {
-			fmt.Fprintf(stderr, "pfm chat status: %v\n", runtimeErr)
-			return 1
-		}
-		if *withSummary {
-			database, openErr := store.Open(store.WithWarningWriter(stderr))
-			if openErr != nil {
-				fmt.Fprintf(stderr, "pfm chat status: %v\n", openErr)
-				return 1
-			}
-			summary := headless.Summarize(ctx, chat, headless.SummaryOptions{
-				Config: runtime.Config, Database: database,
-				Engine: summaryEngineID, Model: *summaryModel,
-			})
-			closeErr := database.Close()
-			if closeErr != nil {
-				fmt.Fprintf(stderr, "pfm chat status: close summary cache: %v\n", closeErr)
-				return 1
-			}
-			status.Summary = summary.Text
-			status.SummaryCached = summary.Cached
-		}
-		if *withAsk {
-			// No cache: a pane changes continuously, so Ask pays an ask
-			// runner on every call instead of consulting Summarize's
-			// exact-offset cache, which would serve a confidently stale
-			// answer about a chat that has moved on.
-			answer := headless.Ask(ctx, chat, headless.AskOptions{
-				Config: runtime.Config,
-				Engine: summaryEngineID, Model: *summaryModel,
-			})
-			status.Ask = answer.Text
-		}
 	}
 	if *asJSON {
 		writeJSON(stdout, status)
@@ -424,13 +279,13 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 		return 2
 	}
 	ctx := context.Background()
-	chat, entries, truncated, err := readChatEntries(ctx, names[0], *tail, runtimes...)
+	chat, entries, truncated, err := pfmchat.ReadEntries(ctx, names[0], *tail, firstRuntime(runtimes))
 	if err != nil {
-		if errors.Is(err, errChatNotFound) {
+		if errors.Is(err, pfmchat.ErrUnknownChat) {
 			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", names[0])
 			return codeUnknownChat
 		}
-		if errors.Is(err, errChatNoTranscript) {
+		if errors.Is(err, pfmchat.ErrNoTranscript) {
 			fmt.Fprintf(stderr, "pfm chat read: %q has not written a transcript yet\n", chat.Name)
 			return codeDeadChat
 		}
@@ -458,37 +313,6 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 	return 0
 }
 
-var (
-	errChatNotFound     = errors.New("chat not found")
-	errChatNoTranscript = errors.New("chat has not written a transcript")
-)
-
-// readChatEntries is the shared transcript extraction primitive for the CLI
-// and MCP adapters. Keeping resolution and transcript.Tail here makes their
-// defaults and failures identical.
-func readChatEntries(
-	ctx context.Context,
-	target string,
-	tail int,
-	runtimes ...commandRuntime,
-) (headless.Chat, []transcript.Entry, bool, error) {
-	chat, found, err := resolveChat(ctx, target, io.Discard, runtimes...)
-	if err != nil {
-		return headless.Chat{}, nil, false, err
-	}
-	if !found {
-		return headless.Chat{}, nil, false, fmt.Errorf("%w: %q", errChatNotFound, target)
-	}
-	if chat.Path == "" {
-		return chat, nil, false, fmt.Errorf("%w: %q", errChatNoTranscript, chat.Name)
-	}
-	entries, truncated, err := transcript.Tail(ctx, chat.Path, string(chat.Engine), tail, 0)
-	if err != nil {
-		return chat, nil, false, err
-	}
-	return chat, entries, truncated, nil
-}
-
 func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet(
 		"chat last",
@@ -503,28 +327,22 @@ func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...comman
 		flags.Usage()
 		return 2
 	}
-	ctx := context.Background()
-	chat, code := headlessTarget(ctx, names[0], stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
-	}
-	if chat.Path == "" {
-		fmt.Fprintf(stderr, "pfm chat last: %q has not written a transcript yet\n", chat.Name)
+	result, err := pfmchat.Last(context.Background(), firstRuntime(runtimes), pfmchat.LastRequest{Target: names[0]})
+	var targetErr *pfmchat.TargetError
+	switch {
+	case errors.As(err, &targetErr):
+		return reportTargetError(err, names[0], stdout, stderr, false)
+	case errors.Is(err, pfmchat.ErrNoTranscript):
+		fmt.Fprintf(stderr, "pfm chat last: %q has not written a transcript yet\n", result.Chat.Name)
 		return codeDeadChat
-	}
-	// A wide window, then the newest assistant entry within it: the last thing
-	// SAID, however many tool calls have happened since.
-	entries, _, err := transcript.Tail(ctx, chat.Path, string(chat.Engine), 200, 0)
-	if err != nil {
+	case errors.Is(err, pfmchat.ErrNoAnswer):
+		fmt.Fprintf(stderr, "pfm chat last: %q has not answered yet\n", result.Chat.Name)
+		return codeDeadChat
+	case err != nil:
 		fmt.Fprintf(stderr, "pfm chat last: %v\n", err)
 		return 1
 	}
-	entry, found := transcript.Last(entries, transcript.RoleAssistant)
-	if !found {
-		fmt.Fprintf(stderr, "pfm chat last: %q has not answered yet\n", chat.Name)
-		return codeDeadChat
-	}
-	fmt.Fprintln(stdout, entry.Text)
+	fmt.Fprintln(stdout, result.Text)
 	return 0
 }
 
@@ -574,7 +392,7 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 		Follow:    !*noFollow,
 		Raw:       *raw,
 		Alive: func() bool {
-			chat, found, err := resolveChat(context.Background(), name, io.Discard, runtimes...)
+			chat, found, err := pfmchat.Resolve(context.Background(), name, io.Discard, firstRuntime(runtimes))
 			return err == nil && found && chat.Live
 		},
 	}, stdout)
@@ -947,7 +765,7 @@ func runHeadlessWatch(args []string, stdout, stderr io.Writer, runtimes ...comma
 	watcher := headless.Watcher{
 		Name: name,
 		Resolve: func(ctx context.Context) (headless.Chat, bool, error) {
-			return resolveChat(ctx, name, io.Discard, runtimes...)
+			return pfmchat.Resolve(ctx, name, io.Discard, firstRuntime(runtimes))
 		},
 	}
 	status, err := watcher.Watch(ctx, headless.WatchOptions{

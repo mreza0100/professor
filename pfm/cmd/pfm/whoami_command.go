@@ -5,18 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmchat "hostops/pfm/internal/chat"
 	"io"
 	"os"
-	"path/filepath"
 
-	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/store"
 )
 
 // runWhoami prints THIS chat's own tmux session name — its identity, and the
@@ -43,7 +40,7 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	ctx := context.Background()
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		seat, found := codexSeatIdentity(ctx, runtimes...)
+		seat, found := pfmchat.SeatIdentity(ctx, firstRuntime(runtimes))
 		if !found {
 			fmt.Fprintf(stderr, "%v\n", err)
 			return 1
@@ -86,58 +83,6 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	return 0
 }
 
-// codexSeatIdentity answers for a codex seat whose turns run in `codex
-// app-server` instead of in its own pane. That server is reparented to init and
-// serves every seat from one process, so a tool shell it spawns has no tmux
-// anywhere in its ancestry — the walk has nothing to find, and the seat's
-// messages went out UNSIGNED though the seat itself is plainly addressable.
-//
-// The shell does carry CODEX_THREAD_ID, and the fleet already binds a thread to
-// the socket hosting it: this is that lookup, and nothing more. It runs only
-// after the tmux rungs fail, because CODEX_THREAD_ID is INHERITED — a process
-// with a pane of its own must never be renamed by an id it merely inherited.
-func codexSeatIdentity(ctx context.Context, runtimes ...commandRuntime) (resolve.Identity, bool) {
-	thread := os.Getenv(resolve.CodexThreadEnv)
-	if thread == "" || os.Getenv(resolve.ClaudeSessionEnv) != "" {
-		return resolve.Identity{}, false
-	}
-	database, err := store.Open(store.WithWarningWriter(io.Discard))
-	if err != nil {
-		return resolve.Identity{}, false
-	}
-	defer database.Close()
-	request := scanRequest{View: compose.AllView, ReadOnly: true}
-	if len(runtimes) != 0 {
-		request.Runtime = &runtimes[0]
-	}
-	scan, err := scanFleet(
-		ctx,
-		database,
-		request,
-		io.Discard,
-	)
-	if err != nil {
-		return resolve.Identity{}, false
-	}
-	for _, row := range scan.Output.Rows {
-		if row.ID != thread || row.Socket == "" {
-			continue
-		}
-		// A seat with no live socket is no identity: better to say the sender
-		// is underivable than to hand back a handle nobody can reply to.
-		return resolve.Identity{
-			Session:    row.Socket,
-			SocketPath: filepath.Join(scan.Paths.TmuxDir, row.Socket),
-			SocketName: row.Socket,
-			Engine:     string(pfmengine.Codex),
-			ID:         thread,
-			Source:     "codex-thread",
-			Recovered:  true,
-		}, true
-	}
-	return resolve.Identity{}, false
-}
-
 // codexSeatIdentifier adapts the fleet's thread-to-live-seat lookup to the
 // injector's final sender-identity rung. It is deliberately separate from
 // resolve.Whoami: tmux environment and process ancestry stay the first two
@@ -146,11 +91,7 @@ func codexSeatIdentity(ctx context.Context, runtimes ...commandRuntime) (resolve
 type codexSeatIdentifier struct{ Runtime *commandRuntime }
 
 func (identifier codexSeatIdentifier) Identify(ctx context.Context) (resolve.Identity, error) {
-	var runtimes []commandRuntime
-	if identifier.Runtime != nil {
-		runtimes = append(runtimes, *identifier.Runtime)
-	}
-	identity, found := codexSeatIdentity(ctx, runtimes...)
+	identity, found := pfmchat.SeatIdentity(ctx, identifier.Runtime)
 	if !found {
 		return resolve.Identity{}, resolve.ErrNoTmux
 	}

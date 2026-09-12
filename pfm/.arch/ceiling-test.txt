@@ -7,6 +7,6 @@ internal/index/index_test.go 1054
 internal/inject/engine_test.go 1735
 internal/installer/installer_test.go 1616
 internal/kill/kill_test.go 1379
-internal/mcpserv/server_test.go 1175
+internal/mcpserv/server_test.go 1137
 internal/stats/limits_test.go 1854
 internal/ui/chronoscope_test.go 1291

@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
@@ -137,23 +139,18 @@ func metadataIdentityService(t *testing.T) *Service {
 	return service
 }
 
-func TestMetadataIdentityNormalizesCLIBackedSelfReads(t *testing.T) {
+// TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs pins that "self" on
+// chat_last and chat_status is the REQUEST's caller — resolved from the call's
+// metadata before the verb runs, so the verb only ever sees a concrete id.
+func TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs(t *testing.T) {
 	service := metadataIdentityService(t)
-	var calls [][]string
-	service.backend.dispatch = func(_ context.Context, args []string, stdout, stderr io.Writer) int {
-		calls = append(calls, append([]string(nil), args...))
-		switch strings.Join(args, " ") {
-		case "chat last thread-a":
-			_, _ = io.WriteString(stdout, "self answer\n")
-			return 0
-		case "chat status thread-a --json":
-			_, _ = io.WriteString(stdout, `{"name":"Codex A","state":"idle","engine":"cx","session_id":"thread-a"}`+"\n")
-			return 0
-		default:
-			_, _ = io.WriteString(stderr, "unexpected self target")
-			return 4
-		}
+	verbs := &fakeChatVerbs{
+		last: chat.LastResult{Text: "self answer\n"},
+		status: headless.Status{
+			Name: "Codex A", State: headless.StateIdle, Engine: pfmengine.Codex, SessionID: "thread-a",
+		},
 	}
+	service.backend.chat = verbs
 	protocol := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"threadId": "thread-a"}
 	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "chat_last", meta, LastInput{Target: "self"})
@@ -164,9 +161,11 @@ func TestMetadataIdentityNormalizesCLIBackedSelfReads(t *testing.T) {
 	if status.Name != "Codex A" || status.SessionID != "thread-a" {
 		t.Fatalf("chat_status(self) = %+v", status)
 	}
-	want := [][]string{{"chat", "last", "thread-a"}, {"chat", "status", "thread-a", "--json"}}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("self dispatch calls = %q, want %q", calls, want)
+	if want := []chat.LastRequest{{Target: "thread-a"}}; !reflect.DeepEqual(verbs.lasts, want) {
+		t.Fatalf("self Last calls = %+v, want %+v", verbs.lasts, want)
+	}
+	if want := []chat.StatusRequest{{Target: "thread-a"}}; !reflect.DeepEqual(verbs.statuses, want) {
+		t.Fatalf("self Status calls = %+v, want %+v", verbs.statuses, want)
 	}
 }
 

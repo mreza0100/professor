@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/resolve"
@@ -26,7 +27,7 @@ func (resolver fleetNameResolver) ResolveName(
 	if err != nil {
 		return inject.Target{}, inject.CodeUndelivered, "", err
 	}
-	chat, found, err := matchChat(liveRows, name)
+	chat, found, err := pfmchat.Match(liveRows, name)
 	if err != nil {
 		var ambiguous *resolve.RosterAmbiguityError
 		if errors.As(err, &ambiguous) {
@@ -68,7 +69,7 @@ func (resolver fleetNameResolver) SenderName(
 	if err != nil {
 		return "", false, fmt.Errorf("name sender seat %s: %w", identity.Session, err)
 	}
-	name, found := resolve.ResolveRosterSeat(rosterCandidates(liveRows), identity)
+	name, found := resolve.ResolveRosterSeat(pfmchat.RosterCandidates(liveRows), identity)
 	return name, found, nil
 }
 
@@ -78,13 +79,13 @@ func (resolver fleetNameResolver) liveRows(
 	ctx context.Context,
 	requiredEngine string,
 ) ([]compose.Row, error) {
-	rows, err := composedChatRows(ctx, io.Discard, resolver.runtimes...)
+	rows, err := pfmchat.Rows(ctx, io.Discard, firstRuntime(resolver.runtimes))
 	if err != nil {
 		return nil, err
 	}
 	liveRows := rows[:0]
 	for _, row := range rows {
-		if !isLiveKind(row.Kind) || row.Socket == "" ||
+		if !pfmchat.IsLive(row.Kind) || row.Socket == "" ||
 			(row.PaneID == "" && row.SessionName == "") ||
 			(requiredEngine != "" && string(compose.EngineForKind(row.Kind)) != requiredEngine) {
 			continue

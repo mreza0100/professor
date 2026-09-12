@@ -92,7 +92,7 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 // under the given account directory, without starting any tmux pane or
 // process — the shape `pfm chat branch` must resolve an account for even
 // when the parent chat is not currently running. A real file (rather than a
-// bare store row) is deliberate: composedChatRows runs the actual
+// bare store row) is deliberate: pfmchat.Rows runs the actual
 // incremental indexer over the account's project roots on every call, and an
 // indexed row whose file does not exist on disk is stale-swept by that same
 // pass — a DB-only fixture would be pruned out from under the test.

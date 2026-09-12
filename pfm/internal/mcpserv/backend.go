@@ -34,6 +34,7 @@ type backend struct {
 	injector             injectionService
 	resolver             resolve.Resolver
 	operations           SharedOperations
+	chat                 ChatVerbs
 	dispatch             Dispatch
 	paths                paths.Values
 	warnings             io.Writer
@@ -96,6 +97,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		injector:             injector,
 		resolver:             *resolver,
 		operations:           runtime.Operations,
+		chat:                 runtime.Chat,
 		dispatch:             runtime.Dispatch,
 		paths:                runtime.Paths,
 		warnings:             warnings,

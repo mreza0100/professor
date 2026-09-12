@@ -1,1 +1,1 @@
-internal/mcpserv/actions.go 10
+internal/mcpserv/actions.go 8

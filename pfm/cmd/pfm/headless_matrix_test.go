@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 )
 
@@ -136,58 +135,6 @@ func TestModelAndEffortReachBothEngines(t *testing.T) {
 	}
 }
 
-// TestChatMatchingPrefersTheLiveSeat covers resolution: a name, an id, a
-// socket, the live row winning over its own resume twin, and a genuine
-// collision being refused rather than guessed.
-func TestChatMatchingPrefersTheLiveSeat(t *testing.T) {
-	rows := []compose.Row{
-		{Kind: compose.LiveCodex, ID: "019f-live", Name: "worker", Socket: "cx-1-2-3", Path: "/cx/live.jsonl"},
-		{Kind: compose.ResumeCodex, ID: "019f-live", Name: "worker", Path: "/cx/live.jsonl"},
-		{Kind: compose.ResumeClaude, ID: "b1111111-1111-4111-8111-111111111111", Name: "other"},
-		{Kind: compose.ResumeClaude, ID: "c2222222-2222-4222-8222-222222222222", Name: "twin"},
-		{Kind: compose.ResumeClaude, ID: "d3333333-3333-4333-8333-333333333333", Name: "twin"},
-	}
-	for _, testCase := range []struct {
-		name    string
-		query   string
-		wantID  string
-		live    bool
-		wantErr bool
-		missing bool
-	}{
-		{name: "by name prefers live", query: "worker", wantID: "019f-live", live: true},
-		{name: "by socket", query: "cx-1-2-3", wantID: "019f-live", live: true},
-		{name: "by id prefix", query: "b1111111", wantID: "b1111111-1111-4111-8111-111111111111"},
-		{name: "case folded", query: "OTHER", wantID: "b1111111-1111-4111-8111-111111111111"},
-		{name: "ambiguous", query: "twin", wantErr: true},
-		{name: "unknown", query: "ghost", missing: true},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			chat, found, err := matchChat(rows, testCase.query)
-			switch {
-			case testCase.wantErr:
-				if err == nil {
-					t.Fatalf("ambiguous name resolved to %#v", chat)
-				}
-				if !strings.Contains(err.Error(), "matches 2 chats") {
-					t.Fatalf("error = %v", err)
-				}
-			case testCase.missing:
-				if found || err != nil {
-					t.Fatalf("unknown name = %#v found=%t err=%v", chat, found, err)
-				}
-			default:
-				if err != nil || !found {
-					t.Fatalf("found=%t err=%v", found, err)
-				}
-				if chat.ID != testCase.wantID || chat.Live != testCase.live {
-					t.Fatalf("chat = %#v", chat)
-				}
-			}
-		})
-	}
-}
-
 // TestUnknownChatIsRc4WithAMachineShape is STM's hard rule at the CLI edge:
 // never empty output with rc 0.
 func TestUnknownChatIsRc4WithAMachineShape(t *testing.T) {
@@ -227,40 +174,5 @@ func TestUnknownChatIsRc4WithAMachineShape(t *testing.T) {
 	}
 	if status["state"] != "not-found" {
 		t.Fatalf("status = %v", status)
-	}
-}
-
-// TestMatchChatAcceptsAFullSocketPathAndTheBareName covers the second
-// resolver's half of the same normalisation defect the cosmos graph had. A
-// compose.Row carries the BARE socket name tmux is addressed by (-L), while
-// everything the fleet RECORDS is a full -S path: inject writes one into the
-// comms ledger, spawn writes one for every chat it starts, and `pfm chat
-// resolve` prints one. An operator or a script pasting the path it was handed
-// matched nothing, and the miss reported as "no chat named …" — an absence,
-// for a chat that was right there.
-func TestMatchChatAcceptsAFullSocketPathAndTheBareName(t *testing.T) {
-	rows := []compose.Row{
-		{Kind: compose.LiveClaude, ID: "p-do-id", Name: "P:DO", Socket: "cc-1787705979-3980493-30867", PaneID: "%0"},
-		{Kind: compose.LiveCodex, ID: "other-id", Name: "Other", Socket: "cx-1787757492-3196324-4837", PaneID: "%1"},
-	}
-	for _, target := range []string{
-		"cc-1787705979-3980493-30867",
-		"/tmp/tmux-1000/cc-1787705979-3980493-30867",
-		"P:DO",
-		"p-do-id",
-	} {
-		chat, found, err := matchChat(rows, target)
-		if err != nil {
-			t.Fatalf("matchChat(%q) error: %v", target, err)
-		}
-		if !found {
-			t.Fatalf("matchChat(%q) found nothing; the chat is in the roster", target)
-		}
-		if chat.Name != "P:DO" {
-			t.Fatalf("matchChat(%q) = %q, want P:DO", target, chat.Name)
-		}
-	}
-	if _, found, err := matchChat(rows, "/tmp/tmux-1000/cc-0-0-0"); found || err != nil {
-		t.Fatalf("a path naming no live chat resolved: found=%v err=%v", found, err)
 	}
 }

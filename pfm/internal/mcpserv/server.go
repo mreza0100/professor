@@ -8,9 +8,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"hostops/pfm/internal/chat"
 	"hostops/pfm/internal/chatkeys"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
@@ -64,7 +66,10 @@ type Runtime struct {
 	// the registered OpenCode descriptor's default binary.
 	OpencodeBinary string
 	Operations     SharedOperations
-	Dispatch       Dispatch
+	// Chat is the typed verb layer (production: chat.Verbs over the command's
+	// runtime). Verbs not yet on it still reach package main through Dispatch.
+	Chat     ChatVerbs
+	Dispatch Dispatch
 	// AllowAmbientIdentity is reserved for the stdio server, whose process is
 	// launched by the calling chat. A shared HTTP daemon must leave it false:
 	// its environment and ancestry identify the daemon's launcher, not the MCP
@@ -79,6 +84,13 @@ type SharedOperations struct {
 	List func(context.Context, LSInput) (LSOutput, error)
 	Find func(context.Context, FindInput) (FindOutput, error)
 	Read func(context.Context, ReadInput) (ReadOutput, error)
+}
+
+// ChatVerbs is the slice of the chat verb layer this server calls typed. Its
+// production value is chat.Verbs; tests substitute a recorder.
+type ChatVerbs interface {
+	Last(context.Context, chat.LastRequest) (chat.LastResult, error)
+	Status(context.Context, chat.StatusRequest) (headless.Status, error)
 }
 
 // Dispatch is the in-process command dispatcher used by stateful chat tools.

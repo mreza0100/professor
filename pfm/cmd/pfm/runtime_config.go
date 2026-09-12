@@ -13,11 +13,19 @@ import (
 // one shape lives in internal/config (Runtime, LoadRuntime).
 type commandRuntime = pfmconfig.Runtime
 
+// optionalCommandRuntime is a branch's trailing runtime, or the default one
+// loaded now.
 func optionalCommandRuntime(runtimes []commandRuntime) (commandRuntime, error) {
-	if len(runtimes) != 0 {
-		return runtimes[0], nil
+	return pfmconfig.RuntimeOrDefault(firstRuntime(runtimes))
+}
+
+// firstRuntime is a branch's optional trailing runtime as the pointer the
+// package APIs take; nil hands each package its own default.
+func firstRuntime(runtimes []commandRuntime) *commandRuntime {
+	if len(runtimes) == 0 {
+		return nil
 	}
-	return pfmconfig.LoadRuntime("")
+	return &runtimes[0]
 }
 
 // splitGlobalConfig accepts the global flag only before the command. This is

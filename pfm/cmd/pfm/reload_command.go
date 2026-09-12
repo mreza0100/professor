@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"io"
@@ -638,7 +639,7 @@ func reloadTarget(ctx context.Context, sock, pane string, resolved paths.Values,
 	}
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
-		recovered, found := codexSeatIdentity(ctx, runtime)
+		recovered, found := pfmchat.SeatIdentity(ctx, &runtime)
 		if !found {
 			fmt.Fprintf(stderr, "pfm chat reload: couldn't identify this chat: %v\n", err)
 			return "", "", reload.Pane{}, 1

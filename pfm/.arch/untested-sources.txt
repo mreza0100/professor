@@ -145,7 +145,6 @@ internal/kill/self.go
 internal/kill/spawn.go
 internal/kill/tmux.go
 internal/kill/types.go
-internal/mcpserv/actions.go
 internal/mcpserv/read.go
 internal/mcpserv/search.go
 internal/mcpserv/stdio.go
