@@ -36,7 +36,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
-	vscode := flags.Bool("vscode", false, "install the Professor VS Code extension and make its terminal the default")
+	vscode := flags.Bool("vscode", false, "install the Professor VS Code extension and make the PFM terminal the default")
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip source-fetched Claude Code themes")

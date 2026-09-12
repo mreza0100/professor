@@ -95,8 +95,8 @@ type Options struct {
 	// default (config.DefaultNameSyncInterval).
 	NameSyncInterval time.Duration
 	// VSCode explicitly opts the first install into installing the Professor
-	// VS Code extension (Professor's assistant in VS Code) and making its
-	// contributed terminal profile the platform default. Once written, the
+	// VS Code extension (Professor's assistant in VS Code) and making the PFM
+	// settings terminal profile the platform default. Once written, the
 	// ownership ledger keeps later ordinary installs and updates reconciled
 	// without requiring the flag again.
 	VSCode bool

@@ -16,14 +16,20 @@ import (
 const (
 	vscodeOwnershipName    = "vscode-ownership.json"
 	vscodeOwnershipVersion = 1
-	vscodeProfileName      = "PFM"
-	// vscodeDefaultProfileName is the default-profile VALUE pfm owns: the
-	// Professor extension's contributed terminal profile (its title in
-	// assets/vscode/professor/package.json). vscodeProfileName ("PFM") stays
-	// the KEY of the settings profile pfm writes as a fallback, not the
-	// default value — an installed Professor extension is what a new
-	// integrated terminal actually opens into.
-	vscodeDefaultProfileName = "Professor"
+	// vscodeProfileName is the settings profile pfm writes AND the default
+	// terminal it selects. The default must stay a SETTINGS profile: a window
+	// reload rebuilds every restored terminal through createTerminal, and VS
+	// Code's getContributedDefaultProfile hands a restored terminal (no
+	// executable, no extHostTerminalId) to an EXTENSION-contributed default —
+	// the extension makes a brand-new terminal, the live one is never
+	// reattached, and the pty host shuts it down after its grace time.
+	vscodeProfileName = "PFM"
+	// vscodeExtensionProfileTitle is the terminal profile the Professor
+	// extension contributes (its title in assets/vscode/professor/package.json):
+	// offered in the + dropdown, never selected as the default. An owned
+	// default holding it — written by the release that briefly selected it —
+	// is pfm's own earlier value and moves back to vscodeProfileName.
+	vscodeExtensionProfileTitle = "Professor"
 	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
 	// product's extensions directory, and the extension id VS Code records
 	// for it.
@@ -172,15 +178,13 @@ func (installer *engine) vscodeExtensionLinks() []string {
 // linkVSCodeExtension reconciles the set of extension links pfm owns:
 // previously recorded targets plus every currently discoverable product
 // root. It runs only on a VS Code-managed install (the flag, or a non-empty
-// ledger), and discovery is unconditional there because the default pfm
-// writes names the extension's profile: a ledger written before the
-// extension shipped holds an owned "PFM" default that this same run upgrades
-// to "Professor", and that default must not outlive a missing extension. A
-// recorded target whose product was uninstalled (its root directory is gone)
-// is dropped by name rather than recreating a directory tree nothing else
-// uses; every other target gets its extensions/ directory created if needed
-// and the link itself made idempotent through ensureLink. It returns the
-// kept targets, sorted, for the ownership ledger.
+// ledger), and discovery is unconditional there: the extension is part of the
+// managed VS Code surface, so a ledger written before it shipped gets it on
+// the next ordinary install. A recorded target whose product was uninstalled
+// (its root directory is gone) is dropped by name rather than recreating a
+// directory tree nothing else uses; every other target gets its extensions/
+// directory created if needed and the link itself made idempotent through
+// ensureLink. It returns the kept targets, sorted, for the ownership ledger.
 func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error) {
 	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
 	targets := make(map[string]bool, len(recorded))
@@ -272,15 +276,15 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	}
 
 	existingDefault, hasDefault := document[defaultKey]
-	if alreadyOwned && record.DefaultOwned && (!hasDefault || (existingDefault != vscodeDefaultProfileName && existingDefault != vscodeProfileName)) {
-		// An owned default still holding the legacy "PFM" value is an upgrade
-		// pfm makes itself, not an operator override — only a THIRD value
+	if alreadyOwned && record.DefaultOwned && (!hasDefault || (existingDefault != vscodeProfileName && existingDefault != vscodeExtensionProfileTitle)) {
+		// An owned default holding the extension's title is pfm's own earlier
+		// value, moved back — not an operator override. Only a THIRD value
 		// (something the operator picked after installation) relinquishes.
 		record.DefaultOwned = false
 		record.HadDefault = false
 		record.PreviousDefault = nil
 	}
-	if installer.options.VSCode && !record.DefaultOwned && (!hasDefault || existingDefault != vscodeDefaultProfileName) {
+	if installer.options.VSCode && !record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
 		record.DefaultOwned = true
 		record.HadDefault = hasDefault
 		if hasDefault {
@@ -351,8 +355,8 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 		}
 		changed = true
 	}
-	if record.DefaultOwned && (!hasDefault || existingDefault != vscodeDefaultProfileName) {
-		updated, err = setJSONCProperty(updated, 0, defaultKey, []byte(`"`+vscodeDefaultProfileName+`"`))
+	if record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
+		updated, err = setJSONCProperty(updated, 0, defaultKey, []byte(`"`+vscodeProfileName+`"`))
 		if err != nil {
 			return nil, record, false, err
 		}
@@ -403,7 +407,7 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 		profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 		updated := append([]byte(nil), raw...)
 		changed := false
-		if record.DefaultOwned && (document[defaultKey] == vscodeDefaultProfileName || document[defaultKey] == vscodeProfileName) {
+		if record.DefaultOwned && (document[defaultKey] == vscodeProfileName || document[defaultKey] == vscodeExtensionProfileTitle) {
 			if record.HadDefault {
 				updated, err = setJSONCProperty(updated, 0, defaultKey, record.PreviousDefault)
 			} else {

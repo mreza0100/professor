@@ -286,11 +286,9 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 
 // TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtension
 // covers the ledger written before the extension shipped: an ordinary
-// install (no --vscode) over a v1 ledger with an owned default still naming
-// the legacy "PFM" value must upgrade the default to "Professor" AND link
-// the extension — discovery in linkVSCodeExtension is unconditional on any
-// managed run, exactly because that upgraded default must not outlive a
-// missing extension.
+// install (no --vscode) over a v1 ledger with an owned "PFM" default must
+// link the extension — discovery in linkVSCodeExtension is unconditional on
+// any managed run — and keep the default on the PFM settings profile.
 func TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtension(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
 	home := t.TempDir()
@@ -319,8 +317,8 @@ func TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtensi
 	}
 
 	got := readFixture(t, settings)
-	if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "Professor"`) {
-		t.Fatalf("ordinary install did not upgrade the pre-extension default to Professor:\n%s", got)
+	if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
+		t.Fatalf("ordinary install moved the pre-extension default off the PFM settings profile:\n%s", got)
 	}
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	source := filepath.Join(managed, filepath.FromSlash(vscodeExtensionSource))
@@ -337,11 +335,11 @@ func TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtensi
 
 // TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyValue
 // pins unwireVSCode's restore condition covering BOTH values a pfm-owned
-// default can hold at uninstall time: "Professor" (what a fresh install
-// claims today) and the legacy "PFM" (what an install from before this
-// wave, or an unmigrated ledger, could still be holding).
+// default can hold at uninstall time: "PFM" (what an install claims) and
+// "Professor" (the extension's title, which the release that briefly
+// selected it could have left behind).
 func TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyValue(t *testing.T) {
-	for _, current := range []string{vscodeDefaultProfileName, vscodeProfileName} {
+	for _, current := range []string{vscodeProfileName, vscodeExtensionProfileTitle} {
 		t.Run(current, func(t *testing.T) {
 			t.Setenv("VSCODE_PORTABLE", "")
 			home := t.TempDir()
@@ -355,7 +353,7 @@ func TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyV
 				t.Fatal(err)
 			}
 			got := readFixture(t, settings)
-			if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "Professor"`) {
+			if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
 				t.Fatalf("install did not claim the default:\n%s", got)
 			}
 			overridden, err := setJSONCProperty([]byte(got), 0, "terminal.integrated.defaultProfile.linux", []byte(`"`+current+`"`))
@@ -498,8 +496,8 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		t.Fatal("package.json contributes no terminal profile")
 	}
 	profile := manifest.Contributes.Terminal.Profiles[0]
-	if profile.Title != vscodeDefaultProfileName {
-		t.Fatalf("contributed profile title = %q, want vscodeDefaultProfileName %q", profile.Title, vscodeDefaultProfileName)
+	if profile.Title != vscodeExtensionProfileTitle {
+		t.Fatalf("contributed profile title = %q, want vscodeExtensionProfileTitle %q", profile.Title, vscodeExtensionProfileTitle)
 	}
 	wantEvent := "onTerminalProfile:" + profile.ID
 	found := false
@@ -605,7 +603,7 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(merged, []byte(`"`+vscodeDefaultProfileName+`"`)) || !bytes.Contains(merged, []byte("kept by the dotfile repo")) {
+	if !bytes.Contains(merged, []byte(`"terminal.integrated.defaultProfile.linux": "`+vscodeProfileName+`"`)) || !bytes.Contains(merged, []byte("kept by the dotfile repo")) {
 		t.Fatalf("the link's target did not receive the merge:\n%s", merged)
 	}
 	if backups, _ := filepath.Glob(dotfiles + ".pre-professor-*"); len(backups) != 1 {
@@ -617,8 +615,89 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(restored, []byte(vscodeDefaultProfileName)) || bytes.Contains(restored, []byte("PFM_AUTO_OPEN")) ||
+	if bytes.Contains(restored, []byte("terminal.integrated.defaultProfile")) || bytes.Contains(restored, []byte("PFM_AUTO_OPEN")) ||
 		!bytes.Contains(restored, []byte("kept by the dotfile repo")) {
 		t.Fatalf("uninstall did not restore through the link:\n%s", restored)
+	}
+}
+
+// TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne
+// pins the reload regression. VS Code rebuilds every terminal a window reload
+// restores through createTerminal, and getContributedDefaultProfile hands a
+// restored terminal — no executable, no extHostTerminalId — to an
+// EXTENSION-contributed default profile: the extension then makes a brand-new
+// terminal, the live one is never reattached, and the pty host shuts it down
+// once its reconnection grace time expires. Every tab closed on reload. So the
+// default pfm selects is the settings profile pfm itself writes, and an owned
+// default holding the extension's contributed title (written by the release
+// that briefly selected it) moves back on the next ordinary install.
+func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t *testing.T) {
+	t.Setenv("VSCODE_PORTABLE", "")
+	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Contributes struct {
+			Terminal struct {
+				Profiles []struct {
+					Title string `json:"title"`
+				} `json:"profiles"`
+			} `json:"terminal"`
+		} `json:"contributes"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	contributed := map[string]bool{}
+	for _, profile := range manifest.Contributes.Terminal.Profiles {
+		contributed[profile.Title] = true
+	}
+
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	writeFixture(t, settings, "{}\n")
+	run := func(vscodeFlag bool) (string, map[string]any) {
+		t.Helper()
+		installer := newVSCodeExtensionEngine(home, []string{}, vscodeFlag)
+		if vscodeFlag {
+			installer.options.vscodeSettingsPaths = []string{settings}
+		}
+		if err := installer.wireVSCode(); err != nil {
+			t.Fatal(err)
+		}
+		content, err := os.ReadFile(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(content, &document); err != nil {
+			t.Fatalf("settings are not strict JSON: %v\n%s", err, content)
+		}
+		profiles, _ := document["terminal.integrated.profiles.linux"].(map[string]any)
+		value, _ := document["terminal.integrated.defaultProfile.linux"].(string)
+		return value, profiles
+	}
+	assertSettingsProfileDefault := func(stage, value string, profiles map[string]any) {
+		t.Helper()
+		if _, isSettingsProfile := profiles[value]; !isSettingsProfile || contributed[value] {
+			t.Fatalf("%s: default terminal %q is not a settings profile pfm writes (settings profiles %v; the extension contributes %v) — a window reload would hand every restored terminal to the extension", stage, value, profiles, contributed)
+		}
+	}
+
+	value, profiles := run(true)
+	assertSettingsProfileDefault("install", value, profiles)
+
+	// The owned default holding the extension's title moves back.
+	for title := range contributed {
+		content, err := os.ReadFile(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, settings, strings.Replace(string(content),
+			`"terminal.integrated.defaultProfile.linux": "`+value+`"`,
+			`"terminal.integrated.defaultProfile.linux": "`+title+`"`, 1))
+		value, profiles = run(false)
+		assertSettingsProfileDefault("ordinary install over an owned "+title+" default", value, profiles)
 	}
 }

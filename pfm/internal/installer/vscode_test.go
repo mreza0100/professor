@@ -52,7 +52,7 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 		`"zsh": {"path": "/bin/zsh"}`,
 		`"PFM":`,
 		`"PFM_AUTO_OPEN": "pfm"`,
-		`"terminal.integrated.defaultProfile.linux": "Professor"`,
+		`"terminal.integrated.defaultProfile.linux": "PFM"`,
 		// The terminal-persistence keys: tmux is the chat's survival layer,
 		// the tab only a view — persistence reconnects the view across a
 		// reload, revive stays "never" so a dead server does not spawn one
@@ -275,7 +275,7 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 	got := readFixture(t, settings)
 	for _, want := range []string{
 		`"terminal.integrated.profiles.osx"`,
-		`"terminal.integrated.defaultProfile.osx": "Professor"`,
+		`"terminal.integrated.defaultProfile.osx": "PFM"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("darwin settings missing %q:\n%s", want, got)
@@ -351,7 +351,7 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 		t.Fatalf("reinstall after edited-profile refusal: %v", err)
 	}
 	got := readFixture(t, settings)
-	if !strings.Contains(got, `/operator/zsh`) || !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "Professor"`) {
+	if !strings.Contains(got, `/operator/zsh`) || !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
 		t.Fatalf("reinstall did not reconcile around retained edited profile:\n%s", got)
 	}
 }
@@ -472,14 +472,12 @@ const realMalformedVSCodeSettings = `{
 // sanitizeJSONC/parseJSONCObject's trailing-comma tolerance against the
 // actual file that tripped errMalformedVSCodeSettings on devbox, not a
 // synthetic stand-in: the merge must proceed (no skip, no error). The PFM
-// profile and all four ScalarOwned keys already match what pfm would write
-// (an "ok", not a "change" — same law as every other already-correct
-// settings file); only the default profile forces a real write here, since
-// this fixture's on-disk default still names the legacy "PFM" value and a
-// fresh claim (no ownership ledger precedes this run) moves it forward to
-// "Professor" — TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject
-// is the sibling fixture that forces an actual write to the PROFILE object
-// and proves THAT output is strict-JSON-clean. What this test proves is
+// profile, the "PFM" default, and all four ScalarOwned keys already match
+// what pfm would write (an "ok", not a "change" — same law as every other
+// already-correct settings file) —
+// TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject is the
+// sibling fixture that forces an actual write to the PROFILE object and
+// proves THAT output is strict-JSON-clean. What this test proves is
 // JSONC tolerance: the merge reads the malformed file successfully
 // (decodeJSONCObject, the same tolerant parser wireVSCode uses), and the PFM
 // profile, all four ScalarOwned keys, and everything the operator's file
@@ -508,7 +506,7 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 	for _, want := range []string{
 		`"PFM":`,
 		`"PFM_AUTO_OPEN": "pfm"`,
-		`"terminal.integrated.defaultProfile.linux": "Professor"`,
+		`"terminal.integrated.defaultProfile.linux": "PFM"`,
 		`"terminal.integrated.enablePersistentSessions": true`,
 		`"terminal.integrated.persistentSessionReviveProcess": "never"`,
 		`"terminal.integrated.showExitAlert": false`,

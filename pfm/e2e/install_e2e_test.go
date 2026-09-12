@@ -344,7 +344,7 @@ func runInstallE2E(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"// e2e operator setting", `"PFM"`, `"PFM_AUTO_OPEN": "pfm"`, fmt.Sprintf("%q: \"Professor\"", defaultKey)} {
+		for _, want := range []string{"// e2e operator setting", `"PFM"`, `"PFM_AUTO_OPEN": "pfm"`, fmt.Sprintf("%q: \"PFM\"", defaultKey)} {
 			if !strings.Contains(string(merged), want) {
 				t.Fatalf("VS Code settings missing %q after install:\n%s", want, merged)
 			}

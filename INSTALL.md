@@ -100,7 +100,7 @@ Add `$HOME/.local/bin` to `PATH` if it isn't already, then:
 ```bash
 pfm install             # preview — the default mode, no writes
 pfm install --yes       # apply the preview
-pfm install --vscode    # opt-in preview: install the Professor VS Code extension + its terminal
+pfm install --vscode    # opt-in preview: the Professor VS Code extension + the PFM default terminal
 pfm install --yes --vscode
 ```
 
@@ -121,10 +121,11 @@ pfm install --yes --vscode
 9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into
    `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`,
    `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install), and in
-   the user or remote-machine `settings.json` selects its `Professor` terminal as the platform
-   default beside a fallback `PFM` settings profile. A Professor terminal opens a login zsh, then
-   the installed shim opens the PFM picker at the shell's first prompt; each tab carries its
-   chat's live name and focuses as soon as it opens. PFM edits JSONC surgically, so comments and
+   the user or remote-machine `settings.json` adds a `PFM` terminal profile and selects it as the
+   platform default (the extension's own `Professor` profile stays in the + dropdown — a default
+   an extension contributes would make every window reload drop the open terminals). A PFM
+   terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first
+   prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and
    unrelated profiles survive; later installs retain ownership, and uninstall removes only the
    links still pointing at PFM's copy and restores the prior default unless the operator changed
    it after installation. Reload the VS Code window once to load a newly linked extension.
