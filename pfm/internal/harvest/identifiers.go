@@ -354,6 +354,23 @@ func doiResolverErrorKind(err error) string {
 	return errorKind(err)
 }
 
+func mergeResolverFailure(failure, fallback Result) Result {
+	if fallback.Error == "" {
+		return failure
+	}
+	failure.Error += "; " + fallback.Error
+	// A missing fallback cannot establish absence while metadata lookup failed.
+	// Keep this precedence identical for direct identifiers and publisher pivots.
+	missing := fallback.ErrorKind == "missing" || fallback.ErrorKind == "missing_pdf" ||
+		fallback.HTTPStatus == http.StatusNotFound || fallback.HTTPStatus == http.StatusGone
+	if fallback.ErrorKind != "" && !missing {
+		failure.ErrorKind = fallback.ErrorKind
+		failure.Challenge = fallback.Challenge
+		failure.HTTPStatus = fallback.HTTPStatus
+	}
+	return failure
+}
+
 func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, error) {
 	doi = DOIFrom(doi)
 	if doi == "" {
@@ -1453,17 +1470,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 		failure := Result{Source: source, Error: err.Error(), ErrorKind: resolverFailureKind, Rungs: trace}
 		if sciHubFailure != nil {
-			failure.Error += "; " + sciHubFailure.Error
-			// A missing fallback cannot establish absence while metadata lookup
-			// failed. Preserve that outage; a concrete challenge or other failure
-			// can still supply the final actionable diagnostic.
-			missing := sciHubFailure.ErrorKind == "missing" || sciHubFailure.ErrorKind == "missing_pdf" ||
-				sciHubFailure.HTTPStatus == http.StatusNotFound || sciHubFailure.HTTPStatus == http.StatusGone
-			if sciHubFailure.ErrorKind != "" && !missing {
-				failure.ErrorKind = sciHubFailure.ErrorKind
-				failure.Challenge = sciHubFailure.Challenge
-				failure.HTTPStatus = sciHubFailure.HTTPStatus
-			}
+			failure = mergeResolverFailure(failure, *sciHubFailure)
 		}
 		return failure
 	}
@@ -1592,50 +1599,35 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 	cands, err := h.resolver().ResolveDOI(ctx, doi)
 	if err != nil {
 		metadataFailureKind := doiResolverErrorKind(err)
+		trace := append([]string(nil), rungs...)
+		var last Result
 		if h.settings.sciHubURL != "" {
 			result := h.fetchSciHub(ctx, DOIFrom(doi), options)
+			trace = append(trace, result.Rungs...)
 			if result.Error == "" {
-				result.Rungs = append(append([]string(nil), rungs...), result.Rungs...)
+				result.Rungs = trace
 				return result
 			}
-			trace := append(append([]string(nil), rungs...), result.Rungs...)
-			if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
-				if shadow.Error == "" {
-					shadow.Rungs = append(trace, shadow.Rungs...)
-					return shadow
-				}
-				result = shadow
-				trace = append(trace, shadow.Rungs...)
-			}
-			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
-				scholar.Rungs = append(trace, scholar.Rungs...)
-				return scholar
-			} else if h.settings.googleScholarURL != "" {
-				result = scholar
-				trace = append(trace, scholar.Rungs...)
-			}
-			failureKind := result.ErrorKind
-			if failureKind == "" {
-				failureKind = metadataFailureKind
-			}
-			return Result{Source: doi, Error: err.Error() + "; " + result.Error, ErrorKind: failureKind,
-				Challenge: result.Challenge, HTTPStatus: result.HTTPStatus, Rungs: trace}
+			last = result
 		}
 		if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
+			trace = append(trace, shadow.Rungs...)
 			if shadow.Error == "" {
-				shadow.Rungs = append(append([]string(nil), rungs...), shadow.Rungs...)
+				shadow.Rungs = trace
 				return shadow
 			}
-			if h.settings.googleScholarURL == "" {
-				return shadow
-			}
-			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
-				combined := append(append([]string(nil), rungs...), shadow.Rungs...)
-				scholar.Rungs = append(combined, scholar.Rungs...)
+			last = shadow
+		}
+		if h.settings.googleScholarURL != "" {
+			scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options)
+			trace = append(trace, scholar.Rungs...)
+			if scholar.Error == "" {
+				scholar.Rungs = trace
 				return scholar
 			}
+			last = scholar
 		}
-		return Result{Source: doi, Error: err.Error(), ErrorKind: metadataFailureKind}
+		return mergeResolverFailure(Result{Source: doi, Error: err.Error(), ErrorKind: metadataFailureKind, Rungs: trace}, last)
 	}
 	trace := append([]string(nil), rungs...)
 	for _, c := range cands {
