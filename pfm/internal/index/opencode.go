@@ -8,7 +8,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"time"
 
+	"hostops/pfm/internal/sqlitedb"
 	"hostops/pfm/internal/store"
 )
 
@@ -225,7 +227,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 	// writers or tear state, and the one statement pins one consistent snapshot
 	// across every materialized shape and validation CTE. A bounded busy timeout
 	// converts a hot-writer moment into an error we report, never an unbounded wait.
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, err := sqlitedb.OpenReadOnly(dbPath, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open opencode store read-only: %w", err)
 	}

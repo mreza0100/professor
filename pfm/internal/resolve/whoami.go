@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 const (
@@ -312,27 +311,18 @@ func (namer CommandTmuxNamer) SessionName(
 	ctx context.Context,
 	socketPath, target string,
 ) (string, error) {
-	arguments := []string{"-S", socketPath, "display-message", "-p"}
+	arguments := []string{"display-message", "-p"}
 	if target != "" {
 		arguments = append(arguments, "-t", target)
 	}
 	arguments = append(arguments, "#{session_name}")
-	command := exec.CommandContext(ctx, namer.binary(), arguments...)
-	command.Env = append(os.Environ(), "TMUX=")
-	output, err := command.Output()
+	output, err := pfmtmux.Command(ctx, namer.Binary, socketPath, arguments...).Output()
 	if err != nil && target != "" {
 		// A stale pane id must not kill a live session: retry untargeted, the
 		// way chat.sh's bare `tmux display-message -p` does.
 		return namer.SessionName(ctx, socketPath, "")
 	}
 	return strings.TrimSpace(string(output)), err
-}
-
-func (namer CommandTmuxNamer) binary() string {
-	if namer.Binary == "" {
-		return deps.Executable("tmux")
-	}
-	return deps.Executable(namer.Binary)
 }
 
 // CommandPaneOwners lists pane pids on one tmux socket.
@@ -345,7 +335,7 @@ type CommandPaneOwners struct {
 //
 // Space-delimited, never a tab. tmux hands a control character in a format
 // string back as "_" unless the caller's environment carries a UTF-8 locale or
-// merely DEFINES $TMUX — the empty one set below happens to satisfy that, which
+// merely DEFINES $TMUX — the empty one pfmtmux.Command sets happens to satisfy that, which
 // is the whole reason a tab worked here while the same tab in a scrubbed tool
 // shell left ancestry recovery answering "not in tmux". A pane pid is digits and
 // a pane id is %N, so a space cannot be ambiguous and nothing rests on the
@@ -354,24 +344,7 @@ func (lister CommandPaneOwners) PaneOwners(
 	ctx context.Context,
 	socketPath string,
 ) ([]PaneOwner, error) {
-	binary := lister.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	} else {
-		binary = deps.Executable(binary)
-	}
-	command := exec.CommandContext(
-		ctx,
-		binary,
-		"-S",
-		socketPath,
-		"list-panes",
-		"-a",
-		"-F",
-		"#{pane_pid} #{pane_id}",
-	)
-	command.Env = append(os.Environ(), "TMUX=")
-	output, err := command.Output()
+	output, err := pfmtmux.Command(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").Output()
 	if err != nil {
 		return nil, err
 	}

@@ -3,15 +3,14 @@ package reap
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/gather"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/tmuxfmt"
 )
 
@@ -188,13 +187,5 @@ func (tmux CommandTmux) command(
 	socket string,
 	arguments ...string,
 ) *exec.Cmd {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	commandArguments := []string{"-S", filepath.Join(tmux.TmuxDir, socket)}
-	commandArguments = append(commandArguments, arguments...)
-	command := exec.CommandContext(ctx, binary, commandArguments...)
-	command.Env = append(os.Environ(), "TMUX=")
-	return command
+	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 }

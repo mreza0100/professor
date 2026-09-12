@@ -20,6 +20,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/spawn"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 var launchExec = syscall.Exec
@@ -240,7 +241,5 @@ func readLaunchStatus(path string) (int, error) {
 }
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, binary, append([]string{"-S", socketPath}, args...)...)
-	command.Env = environmentWith("TMUX", "")
-	return command
+	return pfmtmux.Command(ctx, binary, socketPath, args...)
 }

@@ -7,6 +7,7 @@ import (
 	pfmchat "hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"io"
 	"io/fs"
 	"os"
@@ -18,7 +19,6 @@ import (
 	"time"
 
 	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
@@ -39,9 +39,7 @@ var startReloadWorker = func(command *exec.Cmd) error {
 }
 
 func (reloadCommandTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, deps.Executable("tmux"), append([]string{"-S", socket}, args...)...)
-	cmd.Env = append(os.Environ(), "TMUX=")
-	return cmd
+	return pfmtmux.Command(ctx, "", socket, args...)
 }
 
 func (tmux reloadCommandTmux) ListPanes(ctx context.Context, socket string) ([]reload.Pane, error) {

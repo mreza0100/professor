@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"hostops/pfm/internal/resolve"
+	"hostops/pfm/internal/sqlitedb"
 )
 
 // CodexThread is one conversation as the Codex CLI's own SQLite state store
@@ -248,17 +250,12 @@ func NewCodexThreadResolverRoots(
 	}
 }
 
-// readCodexState reads one state store. The handle is read-only through the
-// mode=ro URI and never immutable=1, which would kill the -wal and serve a
-// stale snapshot of a store Codex is actively writing.
+// readCodexState reads one state store, read-only while Codex writes it.
 func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
-	dsn := "file:" + file + "?mode=ro&_pragma=busy_timeout(2000)"
-	db, err := sql.Open(driverName, dsn)
+	db, err := sqlitedb.OpenReadOnly(file, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open Codex state store %q: %w", file, err)
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
 	defer db.Close()
 
 	columns, err := codexStateColumns(ctx, db)

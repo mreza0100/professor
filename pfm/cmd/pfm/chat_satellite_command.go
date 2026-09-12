@@ -9,6 +9,7 @@ import (
 	pfmchat "hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"io"
 	"io/fs"
 	"os"
@@ -929,13 +930,13 @@ func runChatModal(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	for index := 0; index < count; index++ {
-		if output, err := exec.Command(deps.Executable("tmux"), "-S", socketPath, "send-keys", "Down").CombinedOutput(); err != nil {
+		if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Down").CombinedOutput(); err != nil {
 			fmt.Fprintf(stderr, "pfm chat modal: send Down: %v: %s\n", err, strings.TrimSpace(string(output)))
 			return 1
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if output, err := exec.Command(deps.Executable("tmux"), "-S", socketPath, "send-keys", "Enter").CombinedOutput(); err != nil {
+	if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Enter").CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: send Enter: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
 	}

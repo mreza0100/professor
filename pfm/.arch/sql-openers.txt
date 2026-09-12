@@ -1,5 +1,0 @@
-internal/heal/heal.go 2
-internal/index/opencode.go 1
-internal/shared/shared.go 2
-internal/store/codexstate.go 1
-internal/store/store.go 1

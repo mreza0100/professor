@@ -18,13 +18,10 @@ import (
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/paths"
-
-	_ "modernc.org/sqlite"
+	"hostops/pfm/internal/sqlitedb"
 )
 
 const (
-	driverName = "sqlite"
-
 	// PrimaryAccountKey is the meta row for the primary Claude account.
 	PrimaryAccountKey = "primary_account"
 
@@ -127,18 +124,9 @@ func Open(ctx context.Context, values paths.Values) *Store {
 }
 
 func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create shared state directory: %w", err)
-	}
-	db, err := sql.Open(driverName, path)
+	db, err := sqlitedb.OpenStore(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open shared state database: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if err := applyPragmas(ctx, db); err != nil {
-		_ = db.Close()
-		return nil, err
 	}
 	if _, err := db.ExecContext(ctx, schemaDDL); err != nil {
 		_ = db.Close()
@@ -147,30 +135,8 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// applyPragmas enables WAL so concurrent chats queue instead of erasing one
-// another's edits, plus a busy timeout for concurrent writers.
-func applyPragmas(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout=10000"); err != nil {
-		return fmt.Errorf("set shared busy_timeout: %w", err)
-	}
-	var journalMode string
-	if err := db.QueryRowContext(
-		ctx,
-		"PRAGMA journal_mode=WAL",
-	).Scan(&journalMode); err != nil {
-		return fmt.Errorf("enable shared WAL: %w", err)
-	}
-	if !strings.EqualFold(journalMode, "wal") {
-		return fmt.Errorf("enable shared WAL: journal_mode is %q", journalMode)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA synchronous=NORMAL"); err != nil {
-		return fmt.Errorf("set shared synchronous mode: %w", err)
-	}
-	return nil
-}
-
 // SetBusyTimeout changes how long a statement waits for a concurrent writer
-// before giving up. The default is the ten seconds applyPragmas sets; the
+// before giving up. The default is sqlitedb.StoreBusyTimeout; the
 // busy-policy fixture shortens it so it can reach the give-up path without
 // stalling a test for ten seconds.
 func (s *Store) SetBusyTimeout(ctx context.Context, milliseconds int) error {
@@ -594,15 +560,11 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool) {
 	if _, err := os.Stat(path); err != nil {
 		return 0, false
 	}
-	db, err := sql.Open(driverName, path)
+	db, err := sqlitedb.OpenReadWrite(path, sqlitedb.StoreBusyTimeout)
 	if err != nil {
 		return 0, false
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout=10000"); err != nil {
-		return 0, false
-	}
 	var value string
 	if err := db.QueryRowContext(
 		ctx,

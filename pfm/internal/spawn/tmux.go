@@ -12,6 +12,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/paths"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 // CommandTmux invokes tmux only through the configured socket directory, the
@@ -123,13 +124,7 @@ func (tmux CommandTmux) newSessionCommand(
 	socket string,
 	arguments ...string,
 ) (*exec.Cmd, error) {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	commandArguments := []string{"-S", filepath.Join(tmux.TmuxDir, socket)}
-	commandArguments = append(commandArguments, arguments...)
-	environment := append(os.Environ(), "TMUX=")
+	binary, commandArguments, environment := pfmtmux.Invocation(tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 	return serviceScopeCommand(ctx, binary, commandArguments, environment)
 }
 
@@ -168,15 +163,5 @@ func (tmux CommandTmux) command(
 	socket string,
 	arguments ...string,
 ) *exec.Cmd {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	commandArguments := []string{"-S", filepath.Join(tmux.TmuxDir, socket)}
-	commandArguments = append(commandArguments, arguments...)
-	command := exec.CommandContext(ctx, binary, commandArguments...)
-	// TMUX= keeps a spawn made from inside a chat from nesting the new server
-	// into the caller's own.
-	command.Env = append(os.Environ(), "TMUX=")
-	return command
+	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 }

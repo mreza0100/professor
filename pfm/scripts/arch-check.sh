@@ -100,9 +100,10 @@ grep '^cmd/pfm/' "$T/src.list" > "$T/cmd.list"
 if g "$T/raw" "$T/cmd.list" -nE 'exec\.Command|sql\.Open\(|os\.(WriteFile|Rename)\('; then count_by_file "$T/raw" > "$T/c4"; ratchet_counts C4-cmd-primitives cmd-primitives "$T/c4"
 else say C4-cmd-primitives ERROR "grep could not read cmd/pfm sources"; fi
 
-# C5 one tmux runner: concrete runner types outside internal/tmux/.
+# C5 one tmux runner: outside internal/tmux/, a file that builds its own tmux
+# invocation — resolves the tmux binary or assembles the -S socket argv itself.
 grep -v '^internal/tmux/' "$T/src.list" > "$T/notmux.list"
-if g "$T/raw" "$T/notmux.list" -lE '^type (CommandTmux|RealTmux|CommandHost|reloadCommandTmux) struct'; then cp "$T/raw" "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
+if g "$T/raw" "$T/notmux.list" -lE 'deps\.Executable\("tmux"\)|\[\]string\{"-S", '; then cp "$T/raw" "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
 else say C5-tmux-runner ERROR "grep could not read sources"; fi
 
 # C6 one atomic writer: outside internal/atomicfile/, a file naming an atomic-write

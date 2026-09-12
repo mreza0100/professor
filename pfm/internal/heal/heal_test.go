@@ -73,7 +73,7 @@ func newCodexJail(t *testing.T) *codexJail {
 
 func openJailDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	database, err := sql.Open(driverName, "file:"+path)
+	database, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
