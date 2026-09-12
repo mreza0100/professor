@@ -63,6 +63,9 @@ var fixedCommands = []Entry{
 	// keeps every account's OAuth credential on macOS, so it must never
 	// resolve to something a $PATH entry shadowed.
 	{Name: "security", Command: "/usr/bin/security", Purpose: "Darwin login-keychain OAuth credential reads", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system security command"},
+	// MinVersion 0.2.73 is the release the shipped .rumdl.toml policy (MD060
+	// compact style, per-file-ignores) was validated against.
+	{Name: "rumdl", Purpose: "markdown lint and format for prompts and docs", Required: false, Platforms: []string{"linux", "darwin"}, VersionArgs: []string{"--version"}, Parse: prefixedVersion("rumdl"), MinVersion: "0.2.73", InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl"},
 }
 
 // Registry is the one complete dependency table. Configured engine names and

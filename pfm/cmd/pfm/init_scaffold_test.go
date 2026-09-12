@@ -29,7 +29,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load deployed baseline: %v", err)
 	}
-	if got, want := len(baseline.Files), 10; got != want {
+	if got, want := len(baseline.Files), 11; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
 	if _, ok := baseline.Files[".claude/agents/per-project/developer.md"]; ok {
@@ -41,6 +41,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	for _, relative := range []string{
 		"CLAUDE.md",
 		".claude/settings.json",
+		".rumdl.toml",
 		".claude/commands/dev.md",
 		".claude/agents/gitter.md",
 		".claude/scripts/dev.sh",
@@ -53,6 +54,21 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("deployed %s: %v", relative, err)
 		}
+	}
+	// .rumdl.toml is neither a frontmatter .md nor a shebang .sh, so
+	// addScaffoldMarker deliberately leaves it untouched — assert the
+	// deployed bytes equal the template's exactly, the guard against a
+	// future marker-placement change silently corrupting a TOML file.
+	rumdlToml, err := os.ReadFile(filepath.Join(target, ".rumdl.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRumdlToml, err := os.ReadFile(filepath.Join(source, "templates", "project", "rumdl-policy.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rumdlToml, wantRumdlToml) {
+		t.Fatalf(".rumdl.toml deployed bytes=%q, want the template's bytes unmodified=%q", rumdlToml, wantRumdlToml)
 	}
 	commandRaw, err := os.ReadFile(filepath.Join(target, ".claude", "commands", "dev.md"))
 	if err != nil {
@@ -73,7 +89,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		t.Fatalf("script executable mode=%v err=%v", info, err)
 	}
 	handoff := "open Claude here and follow " + filepath.Join(source, "docs", "SETUP.md") + " § Install interview — it fills tokens and deploys per-project agents"
-	if !strings.Contains(stdout.String(), "deployed 10 project files") || !strings.Contains(stdout.String(), handoff) {
+	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
 }
@@ -138,6 +154,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		"VERSION":                                                  {content: "0.65.0\n", mode: 0o600},
 		"templates/project/CLAUDE.md":                              {content: "# {TOKEN} contract\n", mode: 0o600},
 		"templates/project/settings.json":                          {content: "{}\n", mode: 0o600},
+		"templates/project/rumdl-policy.toml":                      {content: "# fixture rumdl policy\n[global]\n", mode: 0o600},
 		"templates/project/commands/dev.md":                        {content: "---\nname: dev\n---\n{TOKEN}\n", mode: 0o600},
 		"templates/project/agents/gitter.md":                       {content: "---\nname: gitter\n---\nbody\n", mode: 0o600},
 		"templates/project/agents/per-project/developer.md":        {content: "---\nname: developer\n---\nbody\n", mode: 0o600},

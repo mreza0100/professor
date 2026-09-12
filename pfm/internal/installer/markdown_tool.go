@@ -1,0 +1,104 @@
+package installer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/harvestpy"
+)
+
+// rumdlPinnedVersion is the rumdl release pfm provisions via `uv tool
+// install`, referenced by both the dry-run plan text and the real install
+// args below. It is the same release the shipped .rumdl.toml policy
+// (MD060 compact style, per-file-ignores) was validated against — the
+// deps registry's "rumdl" entry carries the matching MinVersion.
+const rumdlPinnedVersion = "0.2.73"
+
+// maxRumdlFailureOutput bounds how much of a failed `uv tool install`
+// invocation's combined output reaches the install log line — enough to
+// diagnose a real failure, never enough to flood it.
+const maxRumdlFailureOutput = 4096
+
+// installMarkdownTool provisions rumdl, the markdown linter/formatter the
+// framework's prompts and docs are checked against. It is a soft
+// dependency: no path through this step may fail `pfm install` (mirrors
+// installHarvest's dry-run gate and ok/skip/say reporting idiom, but every
+// terminal state here returns nil).
+func (installer *engine) installMarkdownTool(ctx context.Context) error {
+	platform := installer.harvestPlatform()
+	provisionedUV := filepath.Join(harvestpy.RuntimeRoot(harvestPythonRoot(installer.options.Home), platform), "uv")
+
+	if path, err := deps.Resolve("rumdl"); err == nil {
+		if version, versionErr := rumdlVersion(ctx, path); versionErr == nil && deps.AtLeast(version, rumdlPinnedVersion) {
+			installer.ok(fmt.Sprintf("rumdl already present (%s)", version))
+			return nil
+		}
+	}
+
+	if !installer.apply {
+		installer.say("rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)", rumdlPinnedVersion, provisionedUV)
+		return nil
+	}
+
+	if installer.options.HarvestOffline {
+		installer.skip(fmt.Sprintf("rumdl: offline, will not attempt uv tool install rumdl==%s", rumdlPinnedVersion))
+		return nil
+	}
+
+	// Prefer the harvestpy-provisioned uv; fall back to a bare "uv" so
+	// exec searches $PATH for a system-installed one when the provisioned
+	// binary is absent.
+	uvPath := provisionedUV
+	if info, statErr := os.Stat(uvPath); statErr != nil || info.IsDir() {
+		uvPath = deps.Executable("uv")
+	}
+
+	binDir := filepath.Join(installer.options.Home, ".local", "bin")
+	command := exec.CommandContext(ctx, uvPath, "tool", "install", "rumdl=="+rumdlPinnedVersion)
+	command.Env = append(os.Environ(), "UV_TOOL_BIN_DIR="+binDir)
+	output, runErr := command.CombinedOutput()
+	if runErr != nil {
+		var lookupErr *exec.Error
+		if errors.As(runErr, &lookupErr) {
+			installer.skip("rumdl: no uv available (checked provisioned harvestpy uv and PATH)")
+			return nil
+		}
+		installer.skip(fmt.Sprintf(
+			"rumdl: uv tool install rumdl==%s failed: %v raw=%q",
+			rumdlPinnedVersion, runErr, truncateOutput(output, maxRumdlFailureOutput),
+		))
+		return nil
+	}
+	installer.ok(fmt.Sprintf("rumdl installed via uv tool install rumdl==%s", rumdlPinnedVersion))
+	return nil
+}
+
+// rumdlVersion runs `path --version` and parses rumdl's exact
+// "rumdl X.Y.Z" output shape.
+func rumdlVersion(ctx context.Context, path string) (string, error) {
+	output, err := exec.CommandContext(ctx, path, "--version").Output()
+	if err != nil {
+		return "", fmt.Errorf("run %s --version: %w", path, err)
+	}
+	line := deps.FirstLine(string(output))
+	version, ok := strings.CutPrefix(line, "rumdl ")
+	if !ok {
+		return "", fmt.Errorf("expected \"rumdl \" prefix in %q", line)
+	}
+	return strings.TrimSpace(version), nil
+}
+
+// truncateOutput bounds command output before it reaches an install log line.
+func truncateOutput(output []byte, max int) string {
+	trimmed := strings.TrimSpace(string(output))
+	if len(trimmed) <= max {
+		return trimmed
+	}
+	return trimmed[:max] + "...(truncated)"
+}

@@ -205,6 +205,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.installHarvest(ctx); err != nil {
 		return err
 	}
+	if err := installer.installMarkdownTool(ctx); err != nil {
+		return err
+	}
 	installer.installThemes(ctx)
 	assets, err := assetFiles()
 	if err != nil {

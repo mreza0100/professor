@@ -29,7 +29,7 @@ const (
 // that pins it read the same string. The STOP clause is not decoration: the
 // --then waiter recognises the compaction turn by watching this pane yield and
 // then go busy again, and a caller that keeps working erases that boundary.
-const selfCompactDescription = "The ONLY answer to \"compact yourself\", \"give yourself a compact\", \"self-compact\", or \"compact at this milestone\" — this tool and nothing else, never a hand-typed /compact and never a reboot of the pane: it compacts the requesting chat in place after its active turn settles and KEEPS the session (crons, sub-agents, and the pane all survive). Inspect your current screen, author a single-line focus, and give exactly ONE post-compact steer in `then` — one string, never a list — that must not start with /compact; the waiter types it into the reborn chat so it resumes unattended. Compaction DISCARDS context: if the caller keeps durable state of its own — a ledger, a scratch prompt, a state file, a chat-specific memory — it MUST write everything it wants to survive into that state BEFORE calling this, because the focus line and the one steer are the only things that cross the boundary. END THE TURN IMMEDIATELY after this call returns: run no further tool, start no further work, just report that compaction is queued. The steer is delivered by a waiter that identifies the compaction turn by watching this pane, so a caller that keeps working after calling this makes its own turn indistinguishable from the compaction and the steer lands beside the compaction instead of after it."
+const selfCompactDescription = "Compacts THIS chat in place after its turn settles and KEEPS the session (crons, sub-agents, pane) — the only answer to \"compact yourself\" / \"self-compact at this milestone\", this tool and nothing else, never a hand-typed /compact. Call chat_self_compact{focus:\"one line\", then:\"one steer\"} — exactly ONE post-compact steer, a string never a list. Only focus and then cross the boundary — write durable state to disk FIRST. END THE TURN IMMEDIATELY after it returns, run no further tool; more work lands the steer beside the compaction. Main chat only — a sub-agent has no pane."
 
 var chatToolNames = []string{
 	"chat_capture", "chat_find", "chat_goal", "chat_inject",
@@ -100,7 +100,7 @@ func newService(version string, backend *backend) *Service {
 		Name:    "pfm",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: "The local pfm chat fleet — cross-chat communication between independent chats, never parent/child agent communication (a sub-agent and its parent use the harness's native agent tools). Verbs: inspect, resolve, capture, search, read transcripts, branch, compile/fire goals, name, kill, reload, save, and safely inject. Routing for common asks — any phrasing of delivering text to another chat (\"send\", \"tell\", \"message\", \"reply to\", \"inject into\" chat X) is chat_inject; \"give yourself a compact\" / \"self-compact at this milestone\" is chat_self_compact (single-line focus plus exactly ONE continuation steer); \"who are you / what is your address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn/start a new chat\" is chat_new. Excluded interactive/plumbing verbs: end, modal, watch, stream, recover, and history.",
+		Instructions: "The local pfm chat fleet — cross-chat communication between independent running chats, never parent/child agent communication (a sub-agent returns its result and its parent reads it; neither holds a reason to call any chat_* verb). Routing — \"send / tell / message / reply to / inject into chat X\" is chat_inject; \"compact yourself / self-compact at this milestone\" is chat_self_compact; \"fire this compiled /goal\" is chat_goal; \"who am I / my address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn / start a new chat\" is chat_new; \"is chat X idle, what is it doing\" is chat_status; \"what did X answer last\" is chat_last; \"find / read an old transcript\" is chat_find then chat_read; \"dump my transcript to a file\" is chat_save. Every target names a chat except chat_save's, which is a file path. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands.",
 	})
 	service := &Service{server: server, backend: backend}
 	service.register()
@@ -127,17 +127,17 @@ func (service *Service) register() {
 	mutating := &mcp.ToolAnnotations{ReadOnlyHint: false}
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_ls",
-		Description: "List live and resumable Claude/Codex chats as structured rows.",
+		Description: "Lists live and resumable chats as rows — \"what chats are running\", \"is there a chat named X\". Call chat_ls{} or chat_ls{project:\"substring\", all:true}. Returns rows plus matched, truncated, and the filter echoed back; rows empty with matched 0 = nothing matched; a tool error = the fleet could not be read. Address a row with chat_inject by its session or name.",
 		Annotations: readOnly,
 	}, service.chatLS)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_resolve",
-		Description: "Resolve an exact Claude label, tmux session, or Codex window name using chat.sh return-code semantics.",
+		Description: "Resolves one exact name to its tmux socket and pane — \"where does chat X live\", checking a target before chat_inject or chat_keys. Call chat_resolve{kind:\"label\", name:\"my-chat\"}. Returns status ok (code 0) with socket_path and pane; not_found (1) = no such chat; ambiguous (2) = several match, listed in candidates; a tool error = the resolver itself failed.",
 		Annotations: readOnly,
 	}, service.chatResolve)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_inject",
-		Description: "Send a message to a live chat — the cross-chat verb behind every \"send / tell / message / reply to chat X\" request. Do NOT use this tool, or any chat MCP tool, for parent/child agent communication; a sub-agent and its parent talk through the harness's native agent tools. Safely types and submits after selector, busy, draft, and submit-confirm guards.",
+		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / inject into chat X\" ask. Call chat_inject{target:\"my-chat\", message:\"…\"}; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke.",
 		Annotations: mutating,
 	}, service.chatInject)
 	mcp.AddTool(service.server, &mcp.Tool{
@@ -146,63 +146,63 @@ func (service *Service) register() {
 		Annotations: mutating,
 	}, service.chatSelfCompact)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_goal", Description: "Fire an already-compiled, single-line /goal body (maximum 4000 characters) at a live chat or the requesting chat.", Annotations: mutating,
+		Name: "chat_goal", Description: "Fires an already-compiled one-line /goal body at a live chat — \"run this goal in chat X\", or in the requesting chat. Call chat_goal{goal:\"…\"} (self) or chat_goal{target:\"my-chat\", goal:\"…\"}. Cross-chat or self only — a sub-agent returns its result to its parent and never fires a goal at it. Returns the chat_inject receipt (delivered, queued, refused…); not_found = no such chat; a tool error = the body was empty, multi-line, over 4000 chars, or delivery broke.", Annotations: mutating,
 	}, service.chatGoal)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_keys",
-		Description: "Press validated tmux key names or explicitly type literal key text into a live chat.",
+		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call chat_keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use chat_inject; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
 		Annotations: mutating,
 	}, service.chatKeys)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_capture",
-		Description: "Capture the whole retained scrollback of a resolved live chat, bounded by tail_lines and max_bytes.",
+		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call chat_capture{target:\"my-chat\"} or chat_capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; a tool error = the capture itself failed. For the last answer only, chat_last; for a killed or old chat, chat_read.",
 		Annotations: readOnly,
 	}, service.chatCapture)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_whoami",
-		Description: "Print THIS chat's own tmux session name — its identity, and the address another chat injects to.",
+		Description: "Reports THIS chat's own identity — \"who am I\", \"what is my address\" — the session name another chat targets with chat_inject. Call chat_whoami{}. Returns status ok with session, socket_path, pane, engine, id; not_found = this transport carries no caller identity, message names the pfm chat command to run from the chat's own shell instead. A sub-agent has no chat identity — it reports to its parent by returning.",
 		Annotations: readOnly,
 	}, service.chatWhoami)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_find",
-		Description: "Find indexed Claude/Codex transcripts by literal name or prompt excerpt with file confirmation.",
+		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
 		Annotations: readOnly,
 	}, service.chatFind)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_read",
-		Description: "Read bounded recent visible turns from an indexed Claude/Codex transcript.",
+		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last.",
 		Annotations: readOnly,
 	}, service.chatRead)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_last", Description: "Return the newest assistant answer from a chat.", Annotations: readOnly,
+		Name: "chat_last", Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.", Annotations: readOnly,
 	}, service.chatLast)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_status", Description: "Inspect one chat, optionally summarizing its last human exchange or asking its current status from a live pane capture plus that exchange.", Annotations: readOnly,
+		Name: "chat_status", Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds, context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.", Annotations: readOnly,
 	}, service.chatStatus)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_new", Description: "Create a detached named chat through the canonical pfm chat new dispatcher.", Annotations: mutating,
+		Name: "chat_new", Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.", Annotations: mutating,
 	}, service.chatNew)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_open", Description: "Open a resumable chat through the canonical pfm chat open dispatcher.", Annotations: mutating,
+		Name: "chat_open", Description: "Reopens a resumable (not live) chat in a pane — \"resume / reopen chat X\". Call chat_open{target:\"my-chat\"}. Returns status ok with the open message; a tool error = no such resumable chat or the open failed, message carries its stderr. A live chat needs no opening — address it with chat_inject.", Annotations: mutating,
 	}, service.chatOpen)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_name", Description: "Name a live chat through the canonical pfm chat name dispatcher.", Annotations: mutating,
+		Name: "chat_name", Description: "Names or renames a live chat — \"call this chat X\", \"rename chat A to B\". Call chat_name{target:\"self\", name:\"my-chat\"}. Returns status ok; a tool error = the name was empty or multi-line, the target did not resolve, or the rename failed, message says which.", Annotations: mutating,
 	}, service.chatName)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_kill", Description: "Hide a chat through the canonical pfm chat kill dispatcher — a live target (open tmux socket and pane) is also ended, not just hidden; a resumable-only target stays a store write.", Annotations: mutating,
+		Name: "chat_kill", Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.", Annotations: mutating,
 	}, service.chatKill)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_unkill", Description: "Unkill a chat through the canonical pfm chat unkill dispatcher.", Annotations: mutating,
+		Name: "chat_unkill", Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.", Annotations: mutating,
 	}, service.chatUnkill)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_reload", Description: "Reboot a chat in place through the canonical pfm chat reload dispatcher. Takes a target ONLY: no account switch, no cache mode, no --then follow-up. For any of those run `pfm chat reload [--account N] [--1h on|off] [--then \"prompt\"]` yourself — every setting there is a flag, never a bare word.", Annotations: mutating,
+		Name: "chat_reload", Description: "Reboots a LIVE chat in place, same conversation — \"reload chat X\". Call chat_reload{target:\"my-chat\"} — target only; an account switch, cache mode, or --then follow-up needs the shell form pfm chat reload [--account N] [--1h on|off] [--then \"prompt\"], every setting a flag. Returns status ok; a tool error = the target is not live (no tmux socket) or the reload failed. To compact rather than reboot, chat_self_compact.", Annotations: mutating,
 	}, service.chatReload)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_save", Description: "Append a transcript snapshot + environment snapshot to a FILE. Its target is a file path, never a chat: with no transcript argument it dumps the CALLING chat's own transcript.", Annotations: mutating,
+		Name: "chat_save", Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.", Annotations: mutating,
 	}, service.chatSave)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "issue_servicedesk",
-		Description: "File a durable complaint about Professor itself — what went wrong, and where — for a human to triage later. Reporter identity is captured automatically and can never be supplied by the caller.",
+		Description: "Files a durable complaint about Professor itself for a human to triage — a command, agent, hook, or tool that misbehaved. Call issue_servicedesk{title:\"one line\", detail:\"what went wrong, what was expected, where\", area:\"/pfm\"}. Reporter identity is captured, never supplied. Returns status ok with the issue id; a tool error = title or detail missing, unknown severity, or the write failed — nothing was filed. Not for a bug in the user's own project.",
 		Annotations: mutating,
 	}, service.issueServicedesk)
 }

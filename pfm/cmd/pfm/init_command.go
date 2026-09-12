@@ -22,6 +22,7 @@ var initTemplatePaths = []struct {
 }{
 	{source: "project/CLAUDE.md", target: "CLAUDE.md"},
 	{source: "project/settings.json", target: ".claude/settings.json"},
+	{source: "project/rumdl-policy.toml", target: ".rumdl.toml"},
 	{source: "project/commands", target: ".claude/commands"},
 	{source: "project/agents", target: ".claude/agents", skip: "per-project"},
 	{source: "project/scripts", target: ".claude/scripts"},

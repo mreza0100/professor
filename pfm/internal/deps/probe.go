@@ -359,6 +359,14 @@ func writeVerbose(directory, name string, output []byte) error {
 	return nil
 }
 
+// AtLeast reports whether version satisfies minimum, comparing the numeric
+// fields of each in order. It is the ONE version comparison in pfm: a second
+// one disagrees the moment a pre-release suffix appears ("0.2.73-beta" splits
+// to a non-numeric third field, which a naive Atoi reads as 0), and two
+// answers to "is the installed tool new enough" means doctor and install
+// disagree about the same binary.
+func AtLeast(version, minimum string) bool { return atLeast(version, minimum) }
+
 func atLeast(version, minimum string) bool {
 	left := numericVersion(version)
 	right := numericVersion(minimum)
