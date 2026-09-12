@@ -99,6 +99,7 @@
       "codex-sync.sh",
       "dev.sh",
       "explore-deny.sh",
+      "format-md.sh",
       "guard-stamp.sh",
       "pfm-guard.sh"
     ],
