@@ -1,6 +1,6 @@
 ---
 name: wave:ccc
-description: Control & Command Center — /wave:ccc {train-name?} (default: the newest train under docs/dev/trains/). The standing command seat over a train: derives true state from ground truth (train.md, STATE.md ledger, git log, worktrees, queue stamps, panes), runs the full audit on arrival, then HOLDS command until the train closes — probes seat liveness, verifies every DONE/green claim against the tree before accepting it, rules escalations that are scope-allocation inside the approved train, routes user-only decisions up with why, and dispatches through the orchestrator only. Trigger — "/wave:ccc", "take command of the train", "audit the train", "what's the train's real state".
+description: USER-ONLY — the user types /wave:ccc {train?} (default the newest under docs/dev/trains/); never run it unprompted. Control & Command Center — the standing seat over a running /wave:orchestrator train, verifying every DONE/green claim against the tree, ruling in-train escalations, dispatching only through the orchestrator. Triggers "take command of the train", "audit the train".
 disable-model-invocation: true
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: rnd
-description: RND lifecycle owner — opens, continues, verifies and lands research runs on {AI_SERVICE_NAME} LLM calls under .professor/RND/<call>/<N>-<slug>/, spawning the rndier agent to execute one run. Triggers: "RND <goal>", "rnd new <call> <slug> <goal>", "rnd continue <call>", "rnd verify <call>/<run>", "rnd land <call>/<run>", "research and develop", "iterate until", "find the best prompt for".
-argument-hint: [new <call> <slug> <goal> | continue <call> [<goal>] | verify <call>/<run> | land <call>/<run> | <goal>]
+description: 'Runs research on {AI_SERVICE_NAME} LLM calls — under .professor/RND/<call>/<N>-<slug>/, one rndier spawn per run; `new <call> <slug> <goal>` (or a bare `<goal>`), `continue <call> [<goal>]`, `verify <call>/<run>`, `land <call>/<run>` (user-ratified only). Triggers "RND <goal>", "research and develop", "iterate until", "find the best prompt for".'
+argument-hint: "[new <call> <slug> <goal> | continue <call> [<goal>] | verify <call>/<run> | land <call>/<run> | <goal>]"
 ---
 
 # RND — lifecycle

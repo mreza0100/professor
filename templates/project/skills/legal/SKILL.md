@@ -1,7 +1,7 @@
 ---
 name: legal
 repo: 'https://github.com/lawve-ai/awesome-legal-skills'
-description: 'Index of curated legal/compliance reference playbooks for the Professor and /officer to consult when drafting or reviewing legal documents. Covers DPA review and drafting (Art. 28), DPIA building (Art. 35), breach response (Art. 33/34), privacy notices/policies (Art. 13/14), vendor/sub-processor due diligence, adversarial QC on legal drafts, NDA triage and severity×likelihood risk tiering, statutory interpretation, the pre-delivery self-check every legal draft must pass, and folding session corrections into sharpened reference rules (skill-optimizer). Load when a task involves legal drafting, a DPA/DPIA/privacy policy/breach notice/consent doc, vendor vetting, statute interpretation, or any compliance-review or legal-QC work.'
+description: Index of curated legal/compliance playbooks — DPA (Art. 28), DPIA (Art. 35), breach response (Art. 33/34), privacy notices (Art. 13/14), vendor due diligence, red-team QC, NDA/risk triage, statute reading, pre-delivery self-check, skill-optimizer. Load for legal drafting, any DPA/DPIA/privacy/breach/consent doc, vendor vetting or legal QC. Formal compliance assessment → /officer.
 ---
 
 # Legal Reference Index
@@ -12,19 +12,19 @@ For a formal compliance assessment, route to `/officer` — this skill is the sh
 
 ## When to consult what
 
-| If the task is…                                                     | Consult                                 |
+| If the task is… | Consult |
 | ------------------------------------------------------------------- | ---------------------------------------- |
-| **About to deliver any drafted/edited legal document** (run first)  | `references/pre-delivery-self-check.md` |
-| Reviewing a DPA/DPA addendum, a data-subject request, or a transfer | `references/privacy-compliance-dpa.md`  |
-| Drafting or revising a DPA / Art. 28 processor agreement            | `references/dpa-drafting-guide.md`      |
-| Building a DPIA, a risk register, or an Art. 36 consultation call   | `references/dpia.md`                    |
-| Responding to a breach / incident (Art. 33/34, ENISA severity, T0)  | `references/breach-response.md`         |
-| Drafting a privacy notice, policy, or {SUBJECT_NOUN} consent document | `references/privacy-notice-policy.md`   |
-| Vetting a new sub-processor or vendor before onboarding             | `references/vendor-due-diligence.md`    |
-| Running a dedicated adversarial QC / fact-check pass on a draft     | `references/red-team-verifier.md`       |
-| Triaging an NDA, or tiering any finding by severity × likelihood    | `references/nda-risk-triage.md`         |
-| Reading a new statute/regulation correctly before relying on it     | `references/statute-analysis.md`        |
-| Turning a session's corrections into a sharpened reference rule     | `references/skill-optimizer.md`         |
+| **About to deliver any drafted/edited legal document** (run first) | `references/pre-delivery-self-check.md` |
+| Reviewing a DPA/DPA addendum, a data-subject request, or a transfer | `references/privacy-compliance-dpa.md` |
+| Drafting or revising a DPA / Art. 28 processor agreement | `references/dpa-drafting-guide.md` |
+| Building a DPIA, a risk register, or an Art. 36 consultation call | `references/dpia.md` |
+| Responding to a breach / incident (Art. 33/34, ENISA severity, T0) | `references/breach-response.md` |
+| Drafting a privacy notice, policy, or {SUBJECT_NOUN} consent document | `references/privacy-notice-policy.md` |
+| Vetting a new sub-processor or vendor before onboarding | `references/vendor-due-diligence.md` |
+| Running a dedicated adversarial QC / fact-check pass on a draft | `references/red-team-verifier.md` |
+| Triaging an NDA, or tiering any finding by severity × likelihood | `references/nda-risk-triage.md` |
+| Reading a new statute/regulation correctly before relying on it | `references/statute-analysis.md` |
+| Turning a session's corrections into a sharpened reference rule | `references/skill-optimizer.md` |
 
 ## The non-negotiable
 

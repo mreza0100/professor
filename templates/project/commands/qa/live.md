@@ -1,6 +1,6 @@
 ---
 name: qa:live
-description: Live end-to-end QA of the whole frontend on the dev stack with real database, real LLM, and real transcription — no mocks, no seeded data. Builds its own data through the real UI dependency chain, walks each step in its own browser sub-agent, and reports per-feature pass/fail plus feature↔UI drift. Triggered by "/qa:live", "/qa:live <area>", or "/qa:live <feature-number>". Distinct from the qa-{project} pipeline gate agents.
+description: USER-ONLY — the user types /qa:live [all | <feature-area> | <feature-number>]; never run it unprompted. Walks the whole frontend live on the dev stack — real database, real LLM, real transcription, no mocks or seeded data. Returns per-feature pass/fail plus feature↔UI drift. Not for pipeline gates → qa-{project}.
 argument-hint: [all | <feature-area> | <feature-number>]
 disable-model-invocation: true
 ---
@@ -29,8 +29,7 @@ Derive the plan every run from source; never hardcode a feature list — it drif
 2. Scope from the argument:
    - empty or `all` → the full chain and every Active feature.
    - `<feature-area>` / `<feature-number>` → build only as much of the chain as that feature needs to exist (a {SESSION_NOUN} insight needs a {SUBJECT_NOUN} + an analyzed {SESSION_NOUN} first).
-3. Lay out the creation dependency chain — each feature is verified at its natural point on data QA just created:
-   {ROLE_ADMIN} → **{ORG_UNIT}** → **{ROLE_SUPER}** (created by {ROLE_ADMIN}) → **{USER_NOUN}** (created by {ROLE_SUPER}) → **{SUBJECT_NOUN}** (created by the {ROLE_SUPER} — a {USER_NOUN} cannot create {SUBJECT_NOUN}s — and assigned to a {USER_NOUN}) → {USER_NOUN} logs in → **{SESSION_NOUN}** → **audio upload** → **transcription** → **{AI_PROJECT} analysis** → **the {AI_PROJECT} analysis outputs ({DOMAIN_FRAMEWORKS})**.
+3. Lay out the creation dependency chain — each feature is verified at its natural point on data QA just created: {ROLE_ADMIN} → **{ORG_UNIT}** → **{ROLE_SUPER}** (created by {ROLE_ADMIN}) → **{USER_NOUN}** (created by {ROLE_SUPER}) → **{SUBJECT_NOUN}** (created by the {ROLE_SUPER} — a {USER_NOUN} cannot create {SUBJECT_NOUN}s — and assigned to a {USER_NOUN}) → {USER_NOUN} logs in → **{SESSION_NOUN}** → **audio upload** → **transcription** → **{AI_PROJECT} analysis** → **the {AI_PROJECT} analysis outputs ({DOMAIN_FRAMEWORKS})**.
 4. For each feature, map its entry + controls by reconciling: **Routes** (`{FRONTEND_PROJECT}/app/`), **testIDs and flows** (`{FRONTEND_PROJECT}/e2e/visual/*.spec.ts` — authoritative for testIDs, but the live snapshot wins on navigation shape, which the specs can lag), **journeys** (`docs/agents/map/workflows.md`).
 5. Emit the plan: the ordered chain of role-walkers, each with the entities it creates and the features it verifies.
 

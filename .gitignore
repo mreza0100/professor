@@ -49,3 +49,6 @@ scripts/placeholder-map.tsv
 # leak-check.sh private denylist — names the very things that must never be
 # published, so it is never tracked/public. See scripts/leak-check.sh header.
 scripts/leak-terms.txt
+
+# rumdl result cache (see /quality:forlint) — host state, never repo content.
+.rumdl_cache/

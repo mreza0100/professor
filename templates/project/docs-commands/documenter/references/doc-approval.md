@@ -23,16 +23,16 @@ Worker-facing extract of `~/.claude/commands/quality/doc.md` (canonical, machine
 
 A doc is APPROVED only when ALL hold; otherwise REJECTED with the failing checks named — fix and re-check. A REJECTED doc never ships.
 
-| #   | Check         | REJECT when                                                                                                                    |
+| # | Check | REJECT when |
 | --- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Size          | a topic file is >500 lines (split) or any file >80 KB                                                                          |
-| 2   | ToC           | a file >100 lines lacks a top Table of Contents                                                                                |
-| 3   | Record format | long prose sits in a table cell instead of a `###` section                                                                     |
-| 4   | Grep-true     | a `###` heading paraphrases a code symbol the record maps to, instead of being that symbol verbatim                            |
-| 5   | Current-state | a tombstone, `~~strikethrough~~`, "removed/added/deprecated {date or wave}" note, or per-pipeline changelog framing is present |
-| 6   | One hop       | a record sends the reader on a doc → doc → doc chase instead of inlining the essential fact                                    |
-| 7   | Index         | the cluster `_index.md` does not list exactly the files on disk                                                                |
-| 8   | Byline        | a `> Author:` / `> Last updated:` / `> Wave:` line is present                                                                  |
+| 1 | Size | a topic file is >500 lines (split) or any file >80 KB |
+| 2 | ToC | a file >100 lines lacks a top Table of Contents |
+| 3 | Record format | long prose sits in a table cell instead of a `###` section |
+| 4 | Grep-true | a `###` heading paraphrases a code symbol the record maps to, instead of being that symbol verbatim |
+| 5 | Current-state | a tombstone, `~~strikethrough~~`, "removed/added/deprecated {date or wave}" note, or per-pipeline changelog framing is present |
+| 6 | One hop | a record sends the reader on a doc → doc → doc chase instead of inlining the essential fact |
+| 7 | Index | the cluster `_index.md` does not list exactly the files on disk |
+| 8 | Byline | a `> Author:` / `> Last updated:` / `> Wave:` line is present |
 
 Emit `APPROVED: {path}` or `REJECTED: {path} — checks {n,…}` per doc.
 

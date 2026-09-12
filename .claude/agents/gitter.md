@@ -1,9 +1,6 @@
 ---
 name: gitter
-description: >
-  The registered Git writer — no other subagent runs git WRITES here.
-  Phases: SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE. Code waves work in isolated worktrees and
-  land on develop only after their fenced gates pass; main moves only through the release PR.
+description: The only agent that writes git — every other agent is read-only. Delegate each worktree setup, commit, merge, push, pull, tag or release by Phase (SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE) or freeform. Returns the verified refs. Push, tag and release run only on the user's explicit in-turn request; main moves only via the release PR.
 model: sonnet # spec-execution tier — fleet prompt § Model Selection
 tools: Read, Write, Bash, Glob, Grep
 ---

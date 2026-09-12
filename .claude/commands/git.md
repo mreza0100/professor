@@ -1,6 +1,6 @@
 ---
 name: git
-description: Git gateway — routes commit/push/pull/tag/release to gitter when available; when unavailable, the active main Codex chat may perform scoped Git writes after explicit current-turn user authorization. Subagents stay read-only; publication remains explicit-request-only.
+description: MANDATORY — route every git WRITE here; read-only git runs directly. `/git {commit|push|pull|tag|release|freeform}` dispatches the gitter phase; a commit brief names exact paths and the verification that ran. gitter unavailable → the main Codex chat writes only with the user's in-turn authorization; push/tag/release need the user's explicit in-turn request.
 argument-hint: [commit|push|pull|tag|release|freeform request]
 ---
 

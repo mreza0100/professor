@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: context-meter
-description: "Audits Claude Code context consumption across CLAUDE.md, agents, commands, skills, and MCP servers — the machine-global roster included — ranks the heaviest offenders against the framework's size limits, and reports savings by tokens reclaimed (`--verbose` for per-file detail). Report-only; trims route through /pfm. Triggered by 'context budget', 'token budget', 'context-budget', 'context meter', 'context-meter', 'audit context', 'what's eating my context', or after adding/growing an agent, command, or skill."
+description: Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pfm; runtime spend → /tokens.
 ---
 
 # Context Budget

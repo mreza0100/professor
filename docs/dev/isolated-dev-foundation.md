@@ -46,6 +46,4 @@ gitter-only git writes; guarded files; the leak gate; the publication boundary; 
 
 ## Open decisions (the user's)
 
-a. **Markdown-only waves** (templates/docs, e.g. #14) — stay on main, or also fenced through the worktree?
-b. **Live-install mirror trigger** — only on the user's explicit command, or automatically once a train fully closes (S10-equivalent)?
-c. **Container flavor** — extend the #11 e2e image (one image for dev and e2e), or a separate devcontainer definition?
+a. **Markdown-only waves** (templates/docs, e.g. #14) — stay on main, or also fenced through the worktree? b. **Live-install mirror trigger** — only on the user's explicit command, or automatically once a train fully closes (S10-equivalent)? c. **Container flavor** — extend the #11 e2e image (one image for dev and e2e), or a separate devcontainer definition?

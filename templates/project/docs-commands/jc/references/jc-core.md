@@ -66,15 +66,9 @@ After the restart settles, check for new errors via `/dev log` (or tail `$ROOT/t
 - Hit the relevant endpoints to confirm the issue is resolved
 - **Affected-first:** run only the tests you touched or added (plus directly affected ones) first as a fast confirm — they must fail without the fix and pass with it. Only once they pass, run the **full** suite (unit + integration) once per modified roster project, as the gate. Derive each project's suite commands from its child `CLAUDE.md` and its qa-reference doc — a project's integration tier can be a separate set of scripts from its unit tier, so the top-level test command alone may not be the full gate.
 
-**ZERO TOLERANCE — fix ALL failing tests.** If tests fail, you fix them — period. It does not matter
-whether the failure was caused by your hotfix or was pre-existing. JC leaves `main` cleaner than he
-found it. "Pre-existing" is not an excuse — it's a second bug you just discovered. Diagnose it, fix it,
-and include it in your commit. If you walked past a broken test and committed anyway, you blessed
-broken code — and that is not what JC does.
+**ZERO TOLERANCE — fix ALL failing tests.** If tests fail, you fix them — period. It does not matter whether the failure was caused by your hotfix or was pre-existing. JC leaves `main` cleaner than he found it. "Pre-existing" is not an excuse — it's a second bug you just discovered. Diagnose it, fix it, and include it in your commit. If you walked past a broken test and committed anyway, you blessed broken code — and that is not what JC does.
 
-The ONLY acceptable exception: a test that requires external services you genuinely cannot reach
-(e.g., a paid API key that isn't configured locally). In that case, document the skip explicitly
-in your report. Everything else gets fixed.
+The ONLY acceptable exception: a test that requires external services you genuinely cannot reach (e.g., a paid API key that isn't configured locally). In that case, document the skip explicitly in your report. Everything else gets fixed.
 
 ### 4d. Run typecheck
 
@@ -87,9 +81,7 @@ Only run checks for projects that were modified. Skip projects whose language ha
 
 ### 4e. If the fix didn't work
 
-Go back to Step 2 — re-diagnose with the new information. Repeat until the issue is resolved.
-Do NOT give up after one attempt. Use logs, breakpoints, endpoint testing, and database inspection
-to iteratively narrow down the root cause.
+Go back to Step 2 — re-diagnose with the new information. Repeat until the issue is resolved. Do NOT give up after one attempt. Use logs, breakpoints, endpoint testing, and database inspection to iteratively narrow down the root cause.
 
 ### 4f. Prevent recurrence
 
@@ -130,10 +122,7 @@ cd {project} && {PROJECT_FORMAT} && {PROJECT_LINT} && cd ..
 
 It reads the changed files, updates only the relevant permanent docs, skips unaffected ones, and does NOT commit — that happens in Step 7.
 
-`docsAffected: false` is legal only for zero-doc-surface changes (comment typo, log-message string,
-cosmetic-only); report "Documenter skipped — no doc surface (classifier + {reason})". Any change
-that adds/removes/renames a function, changes a config constant, modifies a data flow, or alters
-test patterns HAS doc surface — a classifier verdict to the contrary is wrong; run the documenter.
+`docsAffected: false` is legal only for zero-doc-surface changes (comment typo, log-message string, cosmetic-only); report "Documenter skipped — no doc surface (classifier + {reason})". Any change that adds/removes/renames a function, changes a config constant, modifies a data flow, or alters test patterns HAS doc surface — a classifier verdict to the contrary is wrong; run the documenter.
 
 ---
 

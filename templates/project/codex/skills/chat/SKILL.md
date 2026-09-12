@@ -1,6 +1,6 @@
 ---
 name: chat
-description: Message the tmux-based agent chats in this repo through `pfm chat` — inject a turn into a teammate's pane, find your own address, and read delivery receipts. Use when a protocol says "ping", "inject", or "reply to {session}".
+description: Messages the tmux agent chats through `pfm chat` — `pfm chat inject {target} '{one line}'` sends a turn to a teammate's pane, `pfm whoami` gives your own address; read the delivery receipt. Use when a protocol says "ping", "inject", or "reply to {session}". Compaction → `pfm chat self-compact`.
 ---
 
 <!--

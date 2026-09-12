@@ -46,9 +46,9 @@ git blame {project}/{file}           # works through the merge boundary
 
 Candidates for a future `git filter-repo` / BFG pass if repo size becomes a problem. Seed the table from your repo, or delete this section.
 
-| File                | Size | Location  | Introduced | Purpose |
+| File | Size | Location | Introduced | Purpose |
 | ------------------- | ---- | --------- | ---------- | ------- |
-| {path/to/large.bin} | {MB} | {project} | {when}     | {why}   |
+| {path/to/large.bin} | {MB} | {project} | {when} | {why} |
 
 **To nuke from history later** (if migrating to LFS or removing):
 

@@ -32,12 +32,12 @@ A multi-agent verification engine that runs as a Claude Code **Workflow script**
 
 Mode is computed in the `Configs` constructor, precedence top to bottom; construction throws if no selector is present:
 
-| Selector arg   | Mode            | What runs                                                                                           |
+| Selector arg | Mode | What runs |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------- |
-| `manifestPath` | manifest-verify | claimExtractor mines the manifest → claim panel → consistencyJudge                                  |
-| `claims[]`     | verify          | claim panel only (one verifier per claim × `votes`, or file-clustered batches past `soloThreshold`) |
-| `goal`         | investigate     | lens probes → brainer-steered pursue/attack waves over a quote-pinned claim ledger → synthesiser    |
-| `reportPath`   | walk (default)  | the full thread walk + ledger spine + security fan-out described below                              |
+| `manifestPath` | manifest-verify | claimExtractor mines the manifest → claim panel → consistencyJudge |
+| `claims[]` | verify | claim panel only (one verifier per claim × `votes`, or file-clustered batches past `soloThreshold`) |
+| `goal` | investigate | lens probes → brainer-steered pursue/attack waves over a quote-pinned claim ledger → synthesiser |
+| `reportPath` | walk (default) | the full thread walk + ledger spine + security fan-out described below |
 
 ## Walk-mode flow
 
@@ -78,43 +78,43 @@ FOLD (1)                            writes ## Professor's Wave Review; returns l
 
 Nineteen seats, closed by the `Seat` union in `src/types/agents.ts` and mirrored one-to-one by `Configs.TIER`/`Configs.EFFORT`. Per-seat overrides ride `args.agents.<seat>.{model,effort}`; unknown seat or tier throws.
 
-| Seat             | Tier/effort  | Cardinality         | Duty                                                                   |
+| Seat | Tier/effort | Cardinality | Duty |
 | ---------------- | ------------ | ------------------- | ---------------------------------------------------------------------- |
-| scout            | sonnet/high  | 1 (+1 retry)        | enumerate threads, sensor jobs, gate files; extract the live auth rule |
-| threadWalker     | sonnet/high  | per thread          | confirm one flow reaches its terminal state                            |
-| sliceSensor      | haiku/medium | per job             | extract producer/consumer/dbColumn/SDL cards                           |
-| gateSweep        | haiku/medium | per gate file       | extract resolver guard-chain cards                                     |
-| securityAuditor  | sonnet/xhigh | per file cluster    | 8A–8K sweep of its slice, full set as context                          |
-| invariantHunter  | sonnet/high  | per armed invariant | refute-first hunt of one registered invariant                          |
-| coverageCritic   | sonnet/high  | 0–1                 | name what the invariant hunt did NOT cover                             |
-| anomalyJudge     | sonnet/high  | per 6-chunk         | CONFIRMED / FALSE / UNPROVEN on flagged anomalies                      |
-| territoryDigest  | sonnet/high  | per territory       | the un-mechanizable smells rules cannot see                            |
-| secondOpinion    | opus/high    | per 4-chunk         | re-examine escalated verdicts, both directions                         |
-| finalJudge       | opus/high    | 1                   | rule the walk; reinstate wrong kills; name missed risks                |
-| fold             | sonnet/high  | 1                   | merge everything into the written review                               |
-| claimExtractor   | sonnet/xhigh | 0–1                 | mine a manifest's load-bearing claims                                  |
-| claimVerifier    | sonnet/xhigh | per claim×vote      | fact-check one claim (or a ≤4-claim batch)                             |
-| consistencyJudge | sonnet/xhigh | 1                   | cross-task conflicts, refuted premises, freeloaders                    |
-| probe            | sonnet/xhigh | per lane            | pursue/attack one investigate lane, quote-pinned                       |
-| brainer          | opus/xhigh   | per wave            | steer the investigate ledger                                           |
-| claimAuditor     | haiku/medium | per wave            | grep every quote-pin; pass/fail mechanically                           |
-| synthesiser      | sonnet/xhigh | 1                   | cited closing report, confidence floored by computed value             |
+| scout | sonnet/high | 1 (+1 retry) | enumerate threads, sensor jobs, gate files; extract the live auth rule |
+| threadWalker | sonnet/high | per thread | confirm one flow reaches its terminal state |
+| sliceSensor | haiku/medium | per job | extract producer/consumer/dbColumn/SDL cards |
+| gateSweep | haiku/medium | per gate file | extract resolver guard-chain cards |
+| securityAuditor | sonnet/xhigh | per file cluster | 8A–8K sweep of its slice, full set as context |
+| invariantHunter | sonnet/high | per armed invariant | refute-first hunt of one registered invariant |
+| coverageCritic | sonnet/high | 0–1 | name what the invariant hunt did NOT cover |
+| anomalyJudge | sonnet/high | per 6-chunk | CONFIRMED / FALSE / UNPROVEN on flagged anomalies |
+| territoryDigest | sonnet/high | per territory | the un-mechanizable smells rules cannot see |
+| secondOpinion | opus/high | per 4-chunk | re-examine escalated verdicts, both directions |
+| finalJudge | opus/high | 1 | rule the walk; reinstate wrong kills; name missed risks |
+| fold | sonnet/high | 1 | merge everything into the written review |
+| claimExtractor | sonnet/xhigh | 0–1 | mine a manifest's load-bearing claims |
+| claimVerifier | sonnet/xhigh | per claim×vote | fact-check one claim (or a ≤4-claim batch) |
+| consistencyJudge | sonnet/xhigh | 1 | cross-task conflicts, refuted premises, freeloaders |
+| probe | sonnet/xhigh | per lane | pursue/attack one investigate lane, quote-pinned |
+| brainer | opus/xhigh | per wave | steer the investigate ledger |
+| claimAuditor | haiku/medium | per wave | grep every quote-pin; pass/fail mechanically |
+| synthesiser | sonnet/xhigh | 1 | cited closing report, confidence floored by computed value |
 
 ## The rule engine
 
 `computeAnomalies` (R1–R8, one sequential pass) plus `computeInvariantAnomalies` (R9-INV) in `src/rules.ts`; meanings in `ruleMeaning` (`src/constants.ts`). All zero-token — judges see only what these flag.
 
-| Rule                       | Detects                                                                                       |
+| Rule | Detects |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
-| R1 orphan producer         | produced field with zero production consumers (deadness-bar gated)                            |
-| R2 phantom consumer        | consumed field nothing produces, or an undeclared field read                                  |
-| R3 encoding mismatch       | producer encoding vs consumer decode incompatible, incl. double-encode                        |
-| R4 value-set mismatch      | compared literals no producer emits (casing-only = critical)                                  |
-| R5 type drift              | hand-typed base type ≠ generated/SDL base type                                                |
-| R6 gate outlier            | fenced+unfenced gates on one resource class; owner role with client id and no ownership fence |
-| R7 unfenced ID flow        | client-supplied id reaches data access with neither org nor ownership fence                   |
-| R8 dangling reference      | a reference that resolves to nothing                                                          |
-| R9-INV invariant violation | hunter-confirmed breach of a registered cross-cutting invariant                               |
+| R1 orphan producer | produced field with zero production consumers (deadness-bar gated) |
+| R2 phantom consumer | consumed field nothing produces, or an undeclared field read |
+| R3 encoding mismatch | producer encoding vs consumer decode incompatible, incl. double-encode |
+| R4 value-set mismatch | compared literals no producer emits (casing-only = critical) |
+| R5 type drift | hand-typed base type ≠ generated/SDL base type |
+| R6 gate outlier | fenced+unfenced gates on one resource class; owner role with client id and no ownership fence |
+| R7 unfenced ID flow | client-supplied id reaches data access with neither org nor ownership fence |
+| R8 dangling reference | a reference that resolves to nothing |
+| R9-INV invariant violation | hunter-confirmed breach of a registered cross-cutting invariant |
 
 ## The project profile
 

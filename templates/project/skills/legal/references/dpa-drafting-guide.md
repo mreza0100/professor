@@ -23,16 +23,16 @@ The contract must specify, concretely:
 
 The processor, by contract, must:
 
-| Clause | Requirement                                                                                                                                                                                   |
+| Clause | Requirement |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| (a)    | Process **only on the controller's documented instructions**, including for any third-country transfer, unless required by law (then inform the controller first, unless the law forbids it). |
-| (b)    | Ensure persons authorised to process are under a **confidentiality** obligation.                                                                                                              |
-| (c)    | Take all **Art. 32 security** measures.                                                                                                                                                       |
-| (d)    | Respect the **sub-processor** conditions of Art. 28(2) & (4) — prior authorisation, flow-down of the same obligations, processor stays fully liable.                                          |
-| (e)    | **Assist the controller** with data-subject-rights requests by appropriate technical/organisational measures.                                                                                |
-| (f)    | **Assist the controller** with Arts. 32–36 (security, breach notification 33/34, DPIA 35, prior consultation 36).                                                                             |
-| (g)    | **Delete or return** all personal data at the end of the service and delete existing copies, unless law requires storage.                                                                     |
-| (h)    | Make available all info needed to **demonstrate compliance**, and allow for and contribute to **audits/inspections**.                                                                         |
+| (a) | Process **only on the controller's documented instructions**, including for any third-country transfer, unless required by law (then inform the controller first, unless the law forbids it). |
+| (b) | Ensure persons authorised to process are under a **confidentiality** obligation. |
+| (c) | Take all **Art. 32 security** measures. |
+| (d) | Respect the **sub-processor** conditions of Art. 28(2) & (4) — prior authorisation, flow-down of the same obligations, processor stays fully liable. |
+| (e) | **Assist the controller** with data-subject-rights requests by appropriate technical/organisational measures. |
+| (f) | **Assist the controller** with Arts. 32–36 (security, breach notification 33/34, DPIA 35, prior consultation 36). |
+| (g) | **Delete or return** all personal data at the end of the service and delete existing copies, unless law requires storage. |
+| (h) | Make available all info needed to **demonstrate compliance**, and allow for and contribute to **audits/inspections**. |
 
 Plus the standalone duty (Art. 28(3) final sub-paragraph): the processor **immediately informs the controller if an instruction infringes** the GDPR.
 
@@ -121,9 +121,9 @@ Plus the standalone duty (Art. 28(3) final sub-paragraph): the processor **immed
 
 ## Sources
 
-- GDPR Art. 28 (full text): https://gdpr-info.eu/art-28-gdpr/
-- ICO — what a controller-processor contract must contain: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/accountability-and-governance/contracts-and-liabilities-between-controllers-and-processors-multi/what-needs-to-be-included-in-the-contract/
-- Irish DPC — Practical Guide to Controller-Processor Contracts: https://www.dataprotection.ie/en/dpc-guidance/data-processing-agreements
-- EDPB Guidelines 07/2020 (controller & processor concepts): https://www.edpb.europa.eu/system/files/2023-10/EDPB_guidelines_202007_controllerprocessor_final_en.pdf
-- EU Commission SCCs (controller-processor, Art. 28): https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-protection/standard-contractual-clauses-scc_en
-- Cooley — DPAs: the 10 most important considerations: https://cdp.cooley.com/data-processing-agreements-the-10-most-important-considerations/
+- GDPR Art. 28 (full text): <https://gdpr-info.eu/art-28-gdpr/>
+- ICO — what a controller-processor contract must contain: <https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/accountability-and-governance/contracts-and-liabilities-between-controllers-and-processors-multi/what-needs-to-be-included-in-the-contract/>
+- Irish DPC — Practical Guide to Controller-Processor Contracts: <https://www.dataprotection.ie/en/dpc-guidance/data-processing-agreements>
+- EDPB Guidelines 07/2020 (controller & processor concepts): <https://www.edpb.europa.eu/system/files/2023-10/EDPB_guidelines_202007_controllerprocessor_final_en.pdf>
+- EU Commission SCCs (controller-processor, Art. 28): <https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-protection/standard-contractual-clauses-scc_en>
+- Cooley — DPAs: the 10 most important considerations: <https://cdp.cooley.com/data-processing-agreements-the-10-most-important-considerations/>

@@ -1,6 +1,6 @@
 ---
 name: wave:live
-description: Batch a set of tasks live on `develop` — grouping and parallelism without the per-wave orchestration ceremony. Filesystem-safe parallel dev-agent builds, end-of-wave qa agents writing tests, one gitter commit, then /wave:walker with inline remediation. Trigger — /wave:live [file|tasks] (empty → root wave.md). Use for related changes that land together on develop.
+description: Batches tasks straight onto develop, skipping the train ceremony — `/wave:live [task file | inline tasks]` (empty → root wave.md; usually the spec /wave:refine queued). dev builds, qa tests, one gitter commit, then /wave:walker post-commit with inline remediation.
 argument-hint: [task file | inline tasks]
 ---
 

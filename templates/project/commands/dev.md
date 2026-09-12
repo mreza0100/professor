@@ -1,6 +1,6 @@
 ---
 name: dev
-description: Manage the {PROJECT_NAME} local dev environment: `/dev`/`up`/`start` (boot), `kill`/`stop`/`down`, `restart [{project}]`, `status`, `log`/`logs` `[{project}] [N]`, `drop` (nuke containers + DB volume, rebuild — destructive), `fresh` (kill+drop+start, same wipe, always restarts servers — destructive), `clear-logs`/`cl`, `export` (DB→seed-data), `credentials`/`creds` `[demo]`, `iso init|pull|merge|destroy|list|{cmd} {profile}` (isolated env). Route dev-environment, port, and local/test-mode requests here.
+description: Runs the {PROJECT_NAME} local dev stack — `/dev`/`up`/`start`, `kill`/`stop`/`down`, `restart [{project}]`, `status`, `log`/`logs [{project}] [N]`, `drop` (wipe containers + DB volume), `fresh` (kill+drop+start), `clear-logs`/`cl`, `export` (DB→seed-data), `credentials`/`creds [demo]`, `iso init|pull|merge|destroy|list|{cmd} {profile}`. Route dev-environment, port and local/test-mode asks here.
 argument-hint: [up|kill|restart|status|log|drop|fresh|clear-logs|export|creds|iso]
 ---
 

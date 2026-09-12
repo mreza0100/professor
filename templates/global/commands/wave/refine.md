@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:refine
-description: Wave refinement — walks the code and writes ONE zero-gap, feature-scoped wave spec (tasks inside-out) to docs/dev/trains/queue/{YYYY-MM-DD}-{slug}.md, asking the user only what the code cannot answer; partitioning belongs to the scheduler agent, which also invokes merge mode (two+ specs in, one out, non-interactive). Subcommand `poc <goal>` refines AND builds it under .professor/RND/POC/{name}/. Triggers: "refine", "refine this", "/wave:refine", "refine tasks", "refine poc".
+description: Writes ONE zero-gap wave spec — to docs/dev/trains/queue/{date}-{slug}.md, asking only what the code cannot answer. Chain head — refine → /wave:orchestrator → /wave:builder → /wave:walker. `poc <goal>` refines AND builds under .professor/RND/POC/{name}/; merge mode (scheduler-invoked, non-interactive) unifies two+ specs into one. Triggers "refine", "refine this/tasks/poc".
 argument-hint: [tasks | poc <goal>]
 ---
 

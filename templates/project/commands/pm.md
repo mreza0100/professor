@@ -1,6 +1,6 @@
 ---
 name: pm
-description: The PM — {USER_PERSONA}-product hybrid for product decisions, {USER_NOUN} workflows, UX, prioritization, and the PRD. Modes: `review`/`refine` {feature}, `prioritize`/`backlog`, `ux`/`workflow`/`friction`, `persona {type}`, `compete`, `pitch {feature}`, `kill-list`, `onboarding`, `session-flow`, `post-session`, `dashboard`; `wave-consult`/`wave-post-review` for wave refinement. Route product-strategy and workflow-design questions here.
+description: Product calls from a {USER_PERSONA}-product hybrid — {USER_NOUN} workflows, UX, PRD; modes `review`/`refine {feature}`, `prioritize`/`backlog`, `ux`/`workflow`/`friction`, `persona {type}`, `compete`, `pitch {feature}`, `kill-list`, `onboarding`, `session-flow`, `post-session`, `dashboard`; `wave-consult`/`wave-post-review` serve wave refinement. Route product-strategy and workflow asks here.
 argument-hint: [request]
 ---
 

@@ -1,18 +1,13 @@
 ---
 name: wave:walker-invariants
-description: The wave walker's engine config and invariant registry — the engine's script path and `args.project` profile (§ Engine Config), plus durable, machine-readable sacred cross-cutting semantics that a per-wave diff-scoped walk misses by construction. Consumed by the wave-walker engine's scout + invariantHunter + coverageCritic seats via `args.invariants` and by every caller via `args.project` (see § Consumption Contract below). Guarded, pfm-owned like `walker.md`.
+description: Read by every /wave:walker caller, never run directly — the wave-walker engine's script path and `args.project` profile (§ Engine Config) plus the machine-readable registry of cross-cutting invariants a diff-scoped walk misses; callers pass both verbatim.
 ---
 
 # Wave Walker — Engine Config & Invariant Registry
 
-> Everything about the wave walker that is specific to THIS project lives here: the engine's script
-> path and profile in § Engine Config, and the invariant registry below it. `walker.md` is the manual
-> — identical in every install; this file is the config — different in every install.
+> Everything about the wave walker that is specific to THIS project lives here: the engine's script path and profile in § Engine Config, and the invariant registry below it. `walker.md` is the manual — identical in every install; this file is the config — different in every install.
 >
-> The registry ships with ONE illustrative entry. Replace it with YOUR project's real cross-cutting
-> invariants — the sacred rules, frozen-record classes, lifecycle state machines, and fail-closed guards
-> a diff-scoped walk can't see. A registry that only holds the example arms nothing (the example's
-> exemplar list is empty, so it stays a floor); it is here to teach the format, not to seed real coverage.
+> The registry ships with ONE illustrative entry. Replace it with YOUR project's real cross-cutting invariants — the sacred rules, frozen-record classes, lifecycle state machines, and fail-closed guards a diff-scoped walk can't see. A registry that only holds the example arms nothing (the example's exemplar list is empty, so it stays a floor); it is here to teach the format, not to seed real coverage.
 
 ## § Engine Config
 
@@ -52,47 +47,27 @@ An absent profile — or an invalid gate regex — makes the gate machinery (gat
 
 One `##` section per invariant. Each entry:
 
-- **Law** — the invariant's rule, quoted VERBATIM from its CLAUDE.md source, with the source pointer.
-  Where no CLAUDE.md bullet codifies a dimension, the closest codified law is quoted and the gap is
-  flagged.
-- **Territory** — globs (`*` = one path segment, `**` = any depth; no brace expansion — list
-  alternatives as separate globs) naming where violations of this class live, REGARDLESS of the current
-  diff. This is what lets the hunter catch pre-existing bugs no wave ever touches. A territory narrower
-  than its own exemplars makes the registry's blind spot the walker's.
-- **Triggers** — free-text diff predicates the scout judges semantically; the zero-token engine-side
-  fail-safe floor beneath it is a territory-glob match (`computeArmedInvariants`,
-  `.professor/engines/wave-walker/engine/src/engine.ts`).
-- **Exemplars** — 2-4 confirmed bugs of exactly this class, cited `file:line`, each carrying its STATUS:
-  LIVE, or FIXED naming the pin that closed it. A fixed exemplar still teaches the shape; an unmarked one
-  sends a hunter to an anchor that no longer holds and teaches it the registry cannot be trusted. Anchors
-  rot as code moves — a hunter re-reads a cited line before treating it as evidence and names a stale
-  anchor in its coverage.
+- **Law** — the invariant's rule, quoted VERBATIM from its CLAUDE.md source, with the source pointer. Where no CLAUDE.md bullet codifies a dimension, the closest codified law is quoted and the gap is flagged.
+- **Territory** — globs (`*` = one path segment, `**` = any depth; no brace expansion — list alternatives as separate globs) naming where violations of this class live, REGARDLESS of the current diff. This is what lets the hunter catch pre-existing bugs no wave ever touches. A territory narrower than its own exemplars makes the registry's blind spot the walker's.
+- **Triggers** — free-text diff predicates the scout judges semantically; the zero-token engine-side fail-safe floor beneath it is a territory-glob match (`computeArmedInvariants`, `.professor/engines/wave-walker/engine/src/engine.ts`).
+- **Exemplars** — 2-4 confirmed bugs of exactly this class, cited `file:line`, each carrying its STATUS: LIVE, or FIXED naming the pin that closed it. A fixed exemplar still teaches the shape; an unmarked one sends a hunter to an anchor that no longer holds and teaches it the registry cannot be trusted. Anchors rot as code moves — a hunter re-reads a cited line before treating it as evidence and names a stale anchor in its coverage.
 - **Hunt Brief** — the enumeration duty handed to the invariantHunter verbatim.
 
 ## § Registration Duty
 
-A wave that INTRODUCES a new invariant (a new sacred rule, a new frozen-record class, a new lifecycle
-state machine) registers it here in the SAME wave — a process duty for `/wave:refine`'s spec checklist
-and the orchestrator's archive duties, not an engine mechanism. A registry that is never updated is
-exactly as blind as no registry.
+A wave that INTRODUCES a new invariant (a new sacred rule, a new frozen-record class, a new lifecycle state machine) registers it here in the SAME wave — a process duty for `/wave:refine`'s spec checklist and the orchestrator's archive duties, not an engine mechanism. A registry that is never updated is exactly as blind as no registry.
 
 ## § Curation
 
-Any addition is `/pfm`-routed (guarded file) with the SAME rigor as a CLAUDE.md edit: a bad entry
-either arms nothing (dead territory globs) or arms everything (a territory of `**`), both silently.
+Any addition is `/pfm`-routed (guarded file) with the SAME rigor as a CLAUDE.md edit: a bad entry either arms nothing (dead territory globs) or arms everything (a territory of `**`), both silently.
 
 ---
 
 ## HONEST-ABSENCE
 
-> Illustrative entry — a domain-agnostic invariant that fits any codebase. Fill Territory/Exemplars with
-> your project's real paths and confirmed bugs; delete this note when you do.
+> Illustrative entry — a domain-agnostic invariant that fits any codebase. Fill Territory/Exemplars with your project's real paths and confirmed bugs; delete this note when you do.
 
-**Law:** "An error never renders as ABSENCE — absence is a claim about the world ('no data exists'); an
-error is a claim about ourselves ('we failed to look'). Every empty/no-data/degraded state distinguishes
-the two. The test: ask what this mechanism would report if it were BROKEN — same answer as 'nothing
-here'? That is the bug, found before it reaches a user." — `CLAUDE.md` (root, § Code). A universal
-cross-cutting law: it applies to every empty-state render, health check, and gate verdict in any project.
+**Law:** "An error never renders as ABSENCE — absence is a claim about the world ('no data exists'); an error is a claim about ourselves ('we failed to look'). Every empty/no-data/degraded state distinguishes the two. The test: ask what this mechanism would report if it were BROKEN — same answer as 'nothing here'? That is the bug, found before it reaches a user." — `CLAUDE.md` (root, § Code). A universal cross-cutting law: it applies to every empty-state render, health check, and gate verdict in any project.
 
 **Territory:**
 
@@ -100,25 +75,17 @@ cross-cutting law: it applies to every empty-state render, health check, and gat
 - `{project}/src/**/*status*`
 - `.github/workflows/deploy-*.yml`
 
-**Triggers:** diff touches a probe/gate/healthcheck/empty-state branch; diff adds an error-suppressing
-idiom (`2>/dev/null`, `|| true`, `set +e`, a `catch`/`except` with no re-raise).
+**Triggers:** diff touches a probe/gate/healthcheck/empty-state branch; diff adds an error-suppressing idiom (`2>/dev/null`, `|| true`, `set +e`, a `catch`/`except` with no re-raise).
 
-**Exemplars:** *(cite 2-4 real confirmed bugs of this class once you have them — STATUS (LIVE, or FIXED
-naming the pin that closed it) + `file:line` + a one-line description + severity. Exemplars are what make
-a finder sharp; an empty list still arms the hunter on territory + triggers alone.)*
+**Exemplars:** *(cite 2-4 real confirmed bugs of this class once you have them — STATUS (LIVE, or FIXED naming the pin that closed it) + `file:line` + a one-line description + severity. Exemplars are what make a finder sharp; an empty list still arms the hunter on territory + triggers alone.)*
 
-**Hunt Brief:** For every probe/gate/empty-state in the territory, apply the broken-mechanism test: what
-does this step report when the thing it checks ERRORS (permission, timeout, malformed output) — does it
-read the same as "nothing here" / "all clear"? Enumerate every swallowed exit code, `2>/dev/null`,
-`|| true`, and empty catch in the territory and judge each by name — an unnamed swallow is an unjudged
-swallow.
+**Hunt Brief:** For every probe/gate/empty-state in the territory, apply the broken-mechanism test: what does this step report when the thing it checks ERRORS (permission, timeout, malformed output) — does it read the same as "nothing here" / "all clear"? Enumerate every swallowed exit code, `2>/dev/null`, `|| true`, and empty catch in the territory and judge each by name — an unnamed swallow is an unjudged swallow.
 
 ---
 
 ## § Consumption Contract (`args.invariants`)
 
-The engine never reads this file directly — the JS engine layer has no filesystem access (Workflow
-sandbox). The registry's data arrives structured via `args.invariants`, an array of:
+The engine never reads this file directly — the JS engine layer has no filesystem access (Workflow sandbox). The registry's data arrives structured via `args.invariants`, an array of:
 
 ```json
 {
@@ -131,9 +98,4 @@ sandbox). The registry's data arrives structured via `args.invariants`, an array
 }
 ```
 
-Each field maps directly from this doc's per-entry `**Law:**` / `**Territory:**` / `**Triggers:**` /
-`**Exemplars:**` / `**Hunt Brief:**` lines — mechanical, list-to-array transcription. `Configs.
-parseInvariants` (`.professor/engines/wave-walker/engine/src/config.ts`) validates the shape and throws
-loudly on a malformed entry (missing `id`/`law`/`huntBrief`, empty/non-array `territory`). Absent or `[]`
-→ THE FLOOR: no `invariantHunter`/`coverageCritic` dispatched, walker behavior byte-identical to the
-registry-less walker. The caller-side transcription duty is documented in `walker.md` § Entry points.
+Each field maps directly from this doc's per-entry `**Law:**` / `**Territory:**` / `**Triggers:**` / `**Exemplars:**` / `**Hunt Brief:**` lines — mechanical, list-to-array transcription. `Configs. parseInvariants` (`.professor/engines/wave-walker/engine/src/config.ts`) validates the shape and throws loudly on a malformed entry (missing `id`/`law`/`huntBrief`, empty/non-array `territory`). Absent or `[]` → THE FLOOR: no `invariantHunter`/`coverageCritic` dispatched, walker behavior byte-identical to the registry-less walker. The caller-side transcription duty is documented in `walker.md` § Entry points.

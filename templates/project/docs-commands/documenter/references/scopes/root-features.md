@@ -2,8 +2,7 @@
 
 Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration scope table is the card index). Read `docs/commands/documenter/references/doc-approval.md` FIRST — write rules, sacred boundaries, Approval gate, finish steps.
 
-**Write set (yours alone):** `docs/agents/features/**` + `docs/dev/backlog/backlog.md`.
-**Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md`.
+**Write set (yours alone):** `docs/agents/features/**` + `docs/dev/backlog/backlog.md`. **Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md`.
 
 ## Features cluster
 

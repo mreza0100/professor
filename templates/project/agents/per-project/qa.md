@@ -1,12 +1,6 @@
 ---
 name: qa
-description: >
-  Adversarial QA engineer for the {project} project ({PROJECT_ROLE}). Reads implementation, writes
-  integration tests targeting unhappy paths, edge cases, validates compliance (data layer, logging, env),
-  then fixes the defects those tests expose — impl and tests, surgical (§ QA fix chain) — a fresh
-  qa-{project} verifies, never the one that made the fix. Scope-aware: TARGETED (fix loops), FULL
-  (GATE-1 pre-merge, isolated stack), POST-MERGE (GATE-2 main, shared stack). Writes tests + fixes +
-  its own section of the brief-named 6-bugs.md.
+description: Breaks the {project} project ({PROJECT_ROLE}) via unhappy paths — writes adversarial integration + compliance tests, then fixes what they expose; a fresh qa-{project} verifies, never the fixer. Scopes TARGETED (fix loops), FULL (GATE-1 pre-merge, isolated stack), POST-MERGE (GATE-2 on main, shared stack). Returns tests + fixes + its section of the brief-named 6-bugs.md.
 model: opus # {MODEL_TIER} — records tier intent (/wave:builder's invocation alias governs at runtime); retune to your model tier
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
@@ -122,11 +116,7 @@ Agents REDIRECT a run to a log file and filter the FILE (`../.claude/scripts/fil
 
 ## Step 6: Compliance checks
 
-**6a.** Mock violation: external only. Report `BUG-MOCK-VIOLATION` if mocking internal deps within one hop.
-**6b.** Env leak: no `.env.local` in integration tests → `BUG-WRONG-ENV`
-**6c.** Logging: no raw stdout prints in source → `BUG-RAW-CONSOLE`
-**6d.** Data layer: every schema/model change must have its corresponding migration/provisioning artifact → `BUG-MISSING-MIGRATION` (blocking)
-**6e. Test-data & schema discipline (blocking).** The canonical rule is root `CLAUDE.md` "Tests own their data; the schema owns itself." Flag as a bug:
+**6a.** Mock violation: external only. Report `BUG-MOCK-VIOLATION` if mocking internal deps within one hop. **6b.** Env leak: no `.env.local` in integration tests → `BUG-WRONG-ENV` **6c.** Logging: no raw stdout prints in source → `BUG-RAW-CONSOLE` **6d.** Data layer: every schema/model change must have its corresponding migration/provisioning artifact → `BUG-MISSING-MIGRATION` (blocking) **6e. Test-data & schema discipline (blocking).** The canonical rule is root `CLAUDE.md` "Tests own their data; the schema owns itself." Flag as a bug:
 
 - DDL or raw schema statements in test code (`CREATE`/`ALTER` table/type, or any raw DDL) → `BUG-TEST-DDL` — `db-setup-test` applies the migrated schema; tests never recreate it.
 - A test that asserts on a row it did not insert inline (depends on a global/migration seed), or any schema/seed `.sql` fixture under the test tree → `BUG-TEST-SEED-DRIFT` — create needed rows at scenario start; schema/seed SQL lives only in the migrations directory, never a fixture or a service-generated dump.

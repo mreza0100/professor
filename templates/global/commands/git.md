@@ -1,6 +1,6 @@
 ---
 name: git
-description: Gateway to gitter, the only agent allowed to run git WRITES — routes push/pull to gitter phases and forwards anything else git-related as freeform. Route ALL git WRITES here; read-only git (status/diff/log/show/rev-parse) runs directly.
+description: Gateway to gitter, the only git WRITER — `push [msg]` → Phase PUSH, `pull` → Phase PULL, anything else forwards verbatim as freeform. Route every git WRITE here; read-only git (status/diff/log/show/rev-parse) runs directly.
 argument-hint: [push|pull|freeform request]
 ---
 

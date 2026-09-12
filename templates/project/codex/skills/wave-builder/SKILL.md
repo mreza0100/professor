@@ -1,6 +1,6 @@
 ---
 name: wave-builder
-description: Act as a {PROJECT_NAME} wave-builder lane (Codex dialect) when a message names a wave BRIEF to execute — e.g. "/wave:builder {path}", "Use the wave-builder skill: BRIEF {path}", or an orchestrator dispatch. The full builder protocol, adapted to the Codex harness.
+description: ORCHESTRATOR-ONLY — the {PROJECT_NAME} builder lane for Codex; acts only on an injected turn naming a wave BRIEF ("/wave:builder {path}", a "Use the wave-builder skill" turn carrying BRIEF {path}, or an orchestrator dispatch). Maps Codex mechanics onto the binding /wave:builder protocol; predecessor /wave:orchestrator, gate qa-{project} PRE-MERGE.
 ---
 
 <!--
@@ -20,8 +20,7 @@ belongs in `.claude/`, not here.
 
 ## Toolset (read at its source)
 
-Read each tool at its canonical path. Repo-relative paths resolve inside the lane's own worktree;
-host-level paths deliberately resolve to the shared machine surface:
+Read each tool at its canonical path. Repo-relative paths resolve inside the lane's own worktree; host-level paths deliberately resolve to the shared machine surface:
 
 - `$HOME/.claude/commands/wave/builder.md` — the binding protocol.
 - `$HOME/.local/bin/pfm chat` — the chat CLI. Ping with `pfm chat inject {orchestrator-session} '{one-line msg}'`; resolve your identity with `pfm whoami`.

@@ -1,7 +1,7 @@
 ---
 name: audit:security
 version: "1.0.0"
-description: "Security deep scan, scoped to any section — info-leak, injection, auth, {API_PROTOCOL}, LLM/prompt, {SENSITIVE_DATA}, health endpoints, crypto, secrets, transport, supply-chain, CI/CD, concurrency/SoD. Use to run a security scan on a scope."
+description: Scans every attack surface by section — info-leak, injection, auth, {API_PROTOCOL}, LLM/prompt, {SENSITIVE_DATA}, health, crypto, secrets, transport, supply-chain, CI/CD, concurrency/SoD; bare `security` runs all, a scope names a section by letter (`8C`) or topic (`injection`, `auth`, `llm`, `secrets`, …). Returns SECURITY findings by severity.
 argument-hint: [scope]
 ---
 
@@ -9,9 +9,9 @@ argument-hint: [scope]
 
 > {PROJECT_NAME} handles {SESSION_NOUN} records, {SUBJECT_NOUN} data, and {DOMAIN_ADJ} observations — among the most sensitive data categories in this domain. A security breach here doesn't just leak emails; it exposes someone's most private information to whoever should never see it. This is not a checkbox — it's a fortress inspection. {SACRED_GROUND}
 
-**Trigger:** `security`, `security <scope>`, or when `/audit` routes to security scopes.
+**Trigger:** `security`, `security <scope>`.
 
-**Scopes:** bare `security` runs every section; a scope names a section by letter (`8C`) or a topic (`injection`, `auth`, `{API_PROTOCOL}`, `llm`, `prompt`, `phi`, `health`, `crypto`, `secrets`, `transport`, `supply-chain`, `ci-cd`, `concurrency`) and runs only the section(s) covering it. Sections are independent.
+**Scopes:** bare `security` runs every section; a scope names a section by letter (`8C`) or a topic (`injection`, `auth`, `{API_PROTOCOL}`, `llm`, `prompt`, `{SENSITIVE_DATA}`, `health`, `crypto`, `secrets`, `transport`, `supply-chain`, `ci-cd`, `concurrency`) and runs only the section(s) covering it. Sections are independent.
 
 **Report format (used across all sub-categories):**
 

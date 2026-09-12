@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Professor Framework Management — owns .claude/, CLAUDE.md, child CLAUDE.md, agents, commands, skills, and scripts. Mandatory route for any framework or process-file change; also runs pipeline audits (`audit [scope]`, e.g. `audit all`) and folds the steering-conscience inbox (`retro`). Release-bound framework changes route to the blueprint clone per § Where a change lands.
+description: MANDATORY — route every framework or process-file change here; owns CLAUDE.md, .claude/ (agents, commands, skills, scripts, settings) and the .codex/ mirror. `audit [scope]` (`audit all`) runs the read-only pipeline audit; `retro` folds the steering-conscience inbox.
 ---
 
 # PFM — Professor Framework Management
@@ -11,7 +11,7 @@ $ARGUMENTS
 
 ## Mandatory skill load (before any prompt-file edit)
 
-Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/prompt.md` is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
+Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/prompt.md` is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; `/quality:description` governs every `description:` field and loads before one is written; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
 
 ---
 
@@ -33,7 +33,7 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 - **Path variables** — agents use `$DOCS`, `$DOCS_REL`, `$DOCS_POST`, never hardcoded paths. Defined in `wave/builder.md` § Step 0.
 - **Pipeline flow lives in wave/builder.md** — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
-- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
+- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
 - **Never hardcode names, counts, or rosters that change** — table names, enum values, chain names, agent/queue/chain tallies evolve. Tell agents WHERE to discover (`ls`, a registry file, the owning script), not WHAT the values are.
 - **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A child agent needing frontmatter features needs a thin root wrapper (the `qa-{proj}` pattern: registration shell at root, protocol stays in the child file).
@@ -62,7 +62,6 @@ In the Claude Code harness the LLM reads one concatenated context: root `CLAUDE.
 
 - CLAUDE.md (any): ≤ 200 lines
 - SKILL.md body: ≤ 500 lines — split via progressive disclosure above this
-- Skill `description` + `when_to_use`: ≤ 1,536 chars combined
 - Sub-agent body: no formal cap — Anthropic's own examples run 20–35 lines
 
 Above threshold = split into a referenced file (one level deep, with a Table of Contents at the top if >100 lines).
@@ -237,19 +236,15 @@ The skeleton every framework file follows. `quality:prompt` governs how lean the
 
 ### Descriptions — the routing registry
 
-The `description:` is all the model sees at routing time — the harness injects every command/skill description into each session; the body loads only on a match. Write it as the router:
-
-- **Name every user-nameable entry point** — each subcommand, mode, flag, and alias the body handles (`rr fast`, `audit {scope}`, `epic`, `--detach`) appears with its trigger form; a sub-functionality absent from the description is unroutable.
-- **Every clause routes or instructs** — what it does, when to invoke it, how to call it; cut anything else.
-- Compact — telegraphic clauses over sentences; every description is re-injected into every session, a recurring tax.
+The `description:` is all the model sees at routing time — the harness injects every command/skill/agent description into each session and every sub-agent spawn; the body loads only on a match. `/quality:description` is the law for writing one — grammar, per-kind char caps, cut order, family and USER-ONLY declaration, MCP self-containment, Approval gate. Load it before writing or editing any description, including an MCP tool's.
 
 ### File-type laws
 
 Shape: match the existing files of the same kind — the live registry is the template.
 
-- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (one sentence carrying a "when to delegate" phrase — the auto-delegation routing weight), `tools` (minimal allowlist), `model: inherit|opus|sonnet|haiku`. Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
-- **Slash commands** (`.claude/commands/*.md`): frontmatter `name`, `description` (action verb first; names every subcommand/mode/flag — § Descriptions), `argument-hint`, `disable-model-invocation: true` on side-effect commands. `$ARGUMENTS`/`$1`/`$N` substitute at invocation; a bang-prefixed backticked command (!`cmd`) injects live shell output before Claude sees the prompt.
-- **Skills** (`.claude/skills/*/SKILL.md`): frontmatter `name` (lowercase-hyphenated, ≤64 chars, no reserved words anthropic/claude), `description` (what AND when, every mode/trigger named, highest-signal case first, third person, ≤1,024 chars; with `when_to_use` combined ≤1,536). Body: role line, triggers, behavioral steps, 3–5 diverse `### Example` sections, only non-obvious constraints. Skill content stays in context all session and re-attaches after compaction — every line is a recurring tax.
+- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (§ Descriptions — it carries the auto-delegation routing weight), `tools` (minimal allowlist), `model: inherit|opus|sonnet|haiku`. Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
+- **Slash commands** (`.claude/commands/*.md`): frontmatter `name`, `description` (§ Descriptions), `argument-hint`, `disable-model-invocation: true` on user-triggered-by-design commands. `$ARGUMENTS`/`$1`/`$N` substitute at invocation; a bang-prefixed backticked command (!`cmd`) injects live shell output before Claude sees the prompt.
+- **Skills** (`.claude/skills/*/SKILL.md`): frontmatter `name` (lowercase-hyphenated, ≤64 chars, no reserved words anthropic/claude), `description` (§ Descriptions; third person, highest-signal case first). Body: role line, triggers, behavioral steps, 3–5 diverse `### Example` sections, only non-obvious constraints. Skill content stays in context all session and re-attaches after compaction — every line is a recurring tax.
 
 ### CLAUDE.md (root + child)
 

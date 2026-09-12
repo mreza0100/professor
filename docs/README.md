@@ -56,9 +56,7 @@ engines/deep-rr/           ← bundled research skill
 engines/wave-walker/engine/ ← shared Claude/Codex walker implementation
 ```
 
-Host fleet tooling has one source outside the template tree: the Go engine under `../pfm/`, with
-every staged host asset under `../pfm/internal/installer/assets/`. A fresh box gets the `pfm`
-binary, then runs `pfm install --yes`; no separate host template bundle is copied.
+Host fleet tooling has one source outside the template tree: the Go engine under `../pfm/`, with every staged host asset under `../pfm/internal/installer/assets/`. A fresh box gets the `pfm` binary, then runs `pfm install --yes`; no separate host template bundle is copied.
 
 ---
 
@@ -107,7 +105,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 - **/pfm** — Professor Template Management. Edits pipeline rules at the source.
 - **/wave:{orchestrator,builder,refine,walker,live,schedule,watcher}, /dev, /git, /documenter** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`. `/rnd` is project-scope and spawns the `rndier` agent to execute one research run.
+**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:forlint`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`. `/rnd` is project-scope and spawns the `rndier` agent to execute one research run.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `engines/deep-rr/`; `architecture-design` ships in-tree under `templates/global/skills/architecture-design/`; `legal` is bundled under `templates/project/skills/`.
 

@@ -1,10 +1,6 @@
 ---
 name: mono-documenter
-description: >
-  Documentation scout. Spawned at the start of every doc consolidation (ARCHIVE after a pipeline
-  ships, JC-UPDATE after a /jc hotfix) to examine the blast radius and return the DISJOINT scope
-  manifest the fan-out runs in parallel. Read-only — it never writes docs; the per-scope Sonnet
-  workers do. Source of truth: .claude/commands/documenter.md § Orchestration.
+description: Scouts a doc-consolidation blast radius — ARCHIVE after a pipeline ships, JC-UPDATE after a /jc hotfix — into DISJOINT scopes; read-only, never writes docs. Spawn at the start of every /documenter ARCHIVE or JC-UPDATE. Returns the scope manifest.
 model: sonnet # {MODEL_TIER} — ships as the default pin; retune to your model tier
 effort: medium
 tools: Read, Glob, Grep, Bash

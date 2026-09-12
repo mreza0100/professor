@@ -16,16 +16,16 @@ Use when reading a new statute, regulation, or rule (e.g. a new NZ Information P
 - **Start with definitions** — terms may carry statutory meanings differing from ordinary usage. Note whether a definition is exhaustive ("means") or illustrative ("includes").
 - **Parse the operator words** — they have consistent legal force:
 
-| Term                               | Force                               |
+| Term | Force |
 | ------------------------------------- | -------------------------------------- |
-| **shall**                          | mandatory                           |
-| **may**                            | permissive                          |
-| **and**                            | conjunctive — ALL elements required |
-| **or**                             | disjunctive — ANY one suffices      |
-| **unless / except**                | an exception to the general rule    |
-| **subject to**                     | limited by another provision        |
-| **notwithstanding**                | applies despite other provisions    |
-| **if…then / upon / provided that** | a precondition must be met          |
+| **shall** | mandatory |
+| **may** | permissive |
+| **and** | conjunctive — ALL elements required |
+| **or** | disjunctive — ANY one suffices |
+| **unless / except** | an exception to the general rule |
+| **subject to** | limited by another provision |
+| **notwithstanding** | applies despite other provisions |
+| **if…then / upon / provided that** | a precondition must be met |
 
 Misreading "and" as "or", or "shall" as "may", changes the obligation entirely.
 

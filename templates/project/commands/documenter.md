@@ -1,6 +1,6 @@
 ---
 name: documenter
-description: Documentation source of truth — archives pipeline docs, merges shipped decisions into the docs/agents/ hub and clusters, audits cross-references, updates the doc registry (`registry`), regenerates Mermaid workflow diagrams (`graphs`), and bootstraps missing docs. Route permanent documentation updates here. Subcommand `epic` consolidates the current session's work into the active epic for "Load epic" continuation — trigger /documenter epic {epic-name?}.
+description: Source of truth for permanent docs — merges shipped decisions into the docs/agents/ hub and clusters (ARCHIVE after a pipeline, JC-UPDATE after a /jc hotfix); `audit` checks cross-references, `registry` updates the doc registry, `graphs` regenerates Mermaid diagrams, `epic {name?}` consolidates the session into the active epic for "Load epic" continuation. Route permanent-doc updates here.
 argument-hint: [request]
 ---
 
@@ -21,15 +21,15 @@ ARCHIVE and JC-UPDATE parallelize along **disjoint write-sets**. **Canonical eng
 
 **Scope table** (the card index — two scopes never name the same file; each key's card is `scopes/{key}.md`):
 
-| Scope           | Owns (write targets)                                   |
+| Scope | Owns (write targets) |
 | --------------- | ------------------------------------------------------ |
-| `{project}`     | `{project}/docs/**` + `docs/agents/graph/{project}/**` |
-| `root-arch`     | `docs/agents/architecture/**`                          |
-| `root-api`      | `docs/agents/api/**`                                   |
-| `root-map`      | `docs/agents/map/**`                                   |
+| `{project}` | `{project}/docs/**` + `docs/agents/graph/{project}/**` |
+| `root-arch` | `docs/agents/architecture/**` |
+| `root-api` | `docs/agents/api/**` |
+| `root-map` | `docs/agents/map/**` |
 | `root-features` | `docs/agents/features/**` + `docs/dev/backlog/backlog.md` |
-| `root-db`       | `docs/agents/db/**` + `docs/agents/graph/db/**`        |
-| `epic`          | `docs/epics/{name}/**`                                 |
+| `root-db` | `docs/agents/db/**` + `docs/agents/graph/db/**` |
+| `epic` | `docs/epics/{name}/**` |
 
 <!-- Install-time: the `{project}` row is a PATTERN — SETUP expands one such row (and one `scopes/{project}.md` card) per roster entry (single-project install = one row); the root-* rows are fixed cross-project scopes. Each card's merge steps are canonical — documenter.md defers to the card, it does not carry its own step menu. -->
 
@@ -41,12 +41,12 @@ Several scopes read the same pipeline doc, but each writes only its own slice �
 
 ## Owned Documents
 
-| Document         | Path                                    | Purpose                                                                   | When to update                                                                    |
+| Document | Path | Purpose | When to update |
 | ---------------- | ---------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Doc Registry** | § Document Registry below               | Master inventory of all permanent docs                                    | When docs are added, removed, renamed, or ownership changes                       |
-| **Sync Rules**   | `$CDOCS/documenter/$REFS/sync-rules.md` | Cross-reference rules the audit checks                                    | When new sync relationships are discovered                                        |
-| **Backlog**      | `docs/dev/backlog/backlog.md`           | Roadmap-candidate feature ideas parked for later                          | Every ARCHIVE and JC-UPDATE mode (cleanup); AUDIT mode (rot detection)            |
-| **Epic docs**    | `docs/epics/*/`                         | Consolidate shipped/session work into active epics — current-state merges | ARCHIVE `epic` scope card (pipeline matches an active epic); EPIC mode (`/documenter epic`) |
+| **Doc Registry** | § Document Registry below | Master inventory of all permanent docs | When docs are added, removed, renamed, or ownership changes |
+| **Sync Rules** | `$CDOCS/documenter/$REFS/sync-rules.md` | Cross-reference rules the audit checks | When new sync relationships are discovered |
+| **Backlog** | `docs/dev/backlog/backlog.md` | Roadmap-candidate feature ideas parked for later | Every ARCHIVE and JC-UPDATE mode (cleanup); AUDIT mode (rot detection) |
+| **Epic docs** | `docs/epics/*/` | Consolidate shipped/session work into active epics — current-state merges | ARCHIVE `epic` scope card (pipeline matches an active epic); EPIC mode (`/documenter epic`) |
 
 **Scope guard (single rule — applies everywhere):**
 
@@ -155,10 +155,8 @@ Read `$CDOCS/documenter/$REFS/sync-rules.md` for the full rule set. Then execute
 5. **Command table** (Rule 4) — Compare root CLAUDE.md table ↔ actual `.claude/commands/*.md` files. Flag orphans/phantoms.
 6. **Agent table** (Rule 8) — Compare root CLAUDE.md agent tables ↔ actual agent files.
 7. **Developer reference vs CLAUDE.md** (Rule 5) — Standards match? No contradictions? Flag `DRIFT`.
-8. **Stale pipelines** (Rule 10) — Check `docs/dev/builds/` for non-archived pipeline dirs.
-   8.5. **Backlog rot** (Rule 13) — Cross-reference `docs/dev/backlog/backlog.md` sections against the `docs/agents/features/` cluster. Spot-check 5-10 sections. Flag `STALE-ROADMAP`. Do NOT fix during audit.
-9. **Ownership enforcement** (Rule 11) — Verify each doc sits under its owner's path; when an edit looks out of bounds, confirm the last editor with `git log -1 <file>`. Flag violations.
-   9.5. **Epic consistency** (Rule 14) — Check `docs/epics/` for active manifests. Verify pipeline references resolve. Flag `STALE-EPIC` if no activity in 30 days.
+8. **Stale pipelines** (Rule 10) — Check `docs/dev/builds/` for non-archived pipeline dirs. 8.5. **Backlog rot** (Rule 13) — Cross-reference `docs/dev/backlog/backlog.md` sections against the `docs/agents/features/` cluster. Spot-check 5-10 sections. Flag `STALE-ROADMAP`. Do NOT fix during audit.
+9. **Ownership enforcement** (Rule 11) — Verify each doc sits under its owner's path; when an edit looks out of bounds, confirm the last editor with `git log -1 <file>`. Flag violations. 9.5. **Epic consistency** (Rule 14) — Check `docs/epics/` for active manifests. Verify pipeline references resolve. Flag `STALE-EPIC` if no activity in 30 days.
 
 ### Step 10 — Report
 

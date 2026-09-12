@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:orchestrator
-description: End-to-end wave-train runner — /wave:orchestrator {waves | all} [builders N] [seat-name]: the scheduler agent writes the train under docs/dev/trains/{train}/, the user approves the table; the orchestrator spawns role-bound builder/gate seats itself via the chat MCP (chat_new + --role), then per wave — gitter SETUP, chat_goal the builder, wait for BUILD-GREEN and DONE, census + merge-gating `reviewer`, gitter MERGE, post-merge tests on main. STATE.md ledger lines only. Resume: /wave:orchestrator resume {train}. Trigger — "/wave:orchestrator", "run the train".
+description: Runs a wave train end to end — /wave:orchestrator {waves | all} [builders N] [seat-name]; after /wave:refine, the scheduler agent writes docs/dev/trains/{train}/ and the user approves the table; each wave then goes to /wave:builder and lands through a reviewer-gated gitter MERGE. `resume {train}` continues from the ledger. Triggers "/wave:orchestrator", "run the train".
 ---
 
 # Orchestrator — run the train

@@ -2,7 +2,7 @@
 name: deep-rr
 version: "3.2.4"
 repo: "https://github.com/mreza0100/rr"
-description: USER-ONLY — launch only on the user's explicit request for it; never start a run on your own initiative, and never as a step inside some other task. Launches Research and Report (RR) — a background Workflow that crawls the web best-first and derives a cited, confidence-scored report from a quote-pinned claim ledger. Use when the user has asked and one web search won't do: "research X", "look into X", "deep-rr X". Modes: goal (one question), collect (inventory a topic); "deep-rr fast X" answers inline instead. Persists to RR/{slug}/; resumable, progress via midrun.js.
+description: 'USER-ONLY — launch only on the user''s explicit request for it; never start a run on your own initiative, and never as a step inside some other task. Launches Research and Report (RR) — a background Workflow that crawls the web best-first and derives a cited, confidence-scored report from a quote-pinned claim ledger. Use when the user has asked and one web search won''t do: "research X", "look into X", "deep-rr X". Modes: goal (one question), collect (inventory a topic); "deep-rr fast X" answers inline instead. Persists to RR/{slug}/; resumable, progress via midrun.js.'
 ---
 
 # Research and Report (RR)
@@ -71,8 +71,7 @@ The only string the whole crawl shares; the judge holds the final answer against
 
 The reasoning tier reads this as an operator's steering memo. It shapes prioritization, judgment, and the report's emphasis — the same evidence, approached differently.
 
-Belongs here: who the answer is FOR and what they'll do with it; priority order among the query's sub-questions; honesty demands ("be explicit about what the evidence can NOT support"); framing constraints ("engineering audience — mechanisms over narrative"); report emphasis ("the deliverable shapes a build decision — lead with the decision").
-Does NOT belong: extra research questions (query), source/venue steering (researcherNote), derivation method (computeNote).
+Belongs here: who the answer is FOR and what they'll do with it; priority order among the query's sub-questions; honesty demands ("be explicit about what the evidence can NOT support"); framing constraints ("engineering audience — mechanisms over narrative"); report emphasis ("the deliverable shapes a build decision — lead with the decision"). Does NOT belong: extra research questions (query), source/venue steering (researcherNote), derivation method (computeNote).
 
 - Good: `Audience: the design team of a clinical tool — never diagnosing. Prioritize (1) fidelity to real clinical practice over pop-science, (2) what is detectable from text alone vs what requires video — be honest about the limits, (3) what practitioners actually read vs ignore.`
 - Bad: `Also find out what EFT therapists track.` (a second research question — widen the query instead)
@@ -174,20 +173,15 @@ The task output file stays empty until the run completes — mid-run, the only t
 - Avoid self-referential queries about the local repo — they make the crawl over-explore local files instead of researching.
 
 <example>
-Vague: "vector databases"
-Good (goal): { query: "Which self-hosted open-source vector database has the best recall-vs-latency tradeoff for ~10M embeddings on a single 16-core box, and what should a small team deploy?", mode: "goal" }
-Why: names the constraints, poses one decision, states the deliverable.
+Vague: "vector databases" Good (goal): { query: "Which self-hosted open-source vector database has the best recall-vs-latency tradeoff for ~10M embeddings on a single 16-core box, and what should a small team deploy?", mode: "goal" } Why: names the constraints, poses one decision, states the deliverable.
 </example>
 
 <example>
-Vague: "tell me about Tailscale"
-Good (collect): { query: "Exhaustively inventory Tailscale across these dimensions: products, funding history, leadership, security posture, notable incidents, and how the WireGuard mesh works.", mode: "collect" }
-Why: the collect frame + named dimensions give a saturation target, not an open browse.
+Vague: "tell me about Tailscale" Good (collect): { query: "Exhaustively inventory Tailscale across these dimensions: products, funding history, leadership, security posture, notable incidents, and how the WireGuard mesh works.", mode: "collect" } Why: the collect frame + named dimensions give a saturation target, not an open browse.
 </example>
 
 <example>
-Good (goal, derive): { query: "Estimate the distance to the nearest yet-undetected stellar-mass black hole, with error bars, and say which method (Gaia astrometry, microlensing, X-ray, radial velocity) finds it first and roughly when." }
-Why: no single source holds this — the brainer authors a stored, seeded Python derivation once, a rerunner re-executes it every wave as evidence lands, and its variance decomposition steers which components get chased next (compute defaults on).
+Good (goal, derive): { query: "Estimate the distance to the nearest yet-undetected stellar-mass black hole, with error bars, and say which method (Gaia astrometry, microlensing, X-ray, radial velocity) finds it first and roughly when." } Why: no single source holds this — the brainer authors a stored, seeded Python derivation once, a rerunner re-executes it every wave as evidence lands, and its variance decomposition steers which components get chased next (compute defaults on).
 </example>
 
 ## Build & maintenance

@@ -25,17 +25,15 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ## Three Tiers
 
-| Tier                         | Description                                            | Ships                                                              | Gets parameterized                                                                |
+| Tier | Description | Ships | Gets parameterized |
 | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| **A — Universal archetypes** | Personalities that work in any domain. Voice IS value. | Full character, structure, identity                                | Domain REFERENCES inside the character (Professor's PhDs, JC's stack traces)      |
-| **B — Domain archetypes**    | Roles every project needs, content domain-shaped       | Archetype skeleton: identity, voice, charter, modes, doc structure | Regulation, knowledge domain, user persona, market segment — filled via interview |
-| **C — Pure mechanics**       | Infrastructure agents and plumbing                     | Mechanics only — no character                                      | Tech-specific commands (test runner, package manager, build tool)                 |
+| **A — Universal archetypes** | Personalities that work in any domain. Voice IS value. | Full character, structure, identity | Domain REFERENCES inside the character (Professor's PhDs, JC's stack traces) |
+| **B — Domain archetypes** | Roles every project needs, content domain-shaped | Archetype skeleton: identity, voice, charter, modes, doc structure | Regulation, knowledge domain, user persona, market segment — filled via interview |
+| **C — Pure mechanics** | Infrastructure agents and plumbing | Mechanics only — no character | Tech-specific commands (test runner, package manager, build tool) |
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/jc`, `/pfm` (with its `update` and `release` subcommands), `/wave:builder`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`, `/save`
-**Tier B** — `/officer` `{REGULATION}`, `/km` `{KNOWLEDGE_DOMAIN}`, `/pm` `{USER_PERSONA}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}`
-**Tier C** — root agents (mono-planner, mono-architect, mono-documenter, gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/jc`, `/pfm` (with its `update` and `release` subcommands), `/wave:builder`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/km` `{KNOWLEDGE_DOMAIN}`, `/pm` `{USER_PERSONA}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (mono-planner, mono-architect, mono-documenter, gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -120,11 +118,11 @@ Exports an interview Claude conducts before touching files. Structure:
 
 Skills ship as **empty shells** when their content is project-specific — the structure (frontmatter, headings, report format) is universal, but the audit categories, detection patterns, file paths, and domain concerns must be researched per project.
 
-| Skill                                                     | What's universal (ships)                                                                                 | What's project-specific (hydrated by RR)                                                                                                                                                                                                                                  |
+| Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Analysis Protocol (in the fleet prompt, `templates/prompts/professor.md`) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
-| `audit:code-hygiene`                                      | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality)      | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples                                                                                                                                                       |
-| `audit:security`                                          | OWASP category structure (8A-8I), severity guide, report format                                          | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories                                                                                                                                     |
+| `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
+| `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
 **Hydration process:**
 

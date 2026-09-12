@@ -1,6 +1,6 @@
 ---
 name: audit:code-hygiene
-description: "Code hygiene audit for AI-authored code — scans the repo for duplication & missed reuse, ghost fields, dead code, dependency, architecture, type, naming, and quality issues, and magic numbers. Use when auditing code hygiene or running a code-hygiene audit on a scope (including a per-project scope for each {project} in the roster, and diff — restricted to a changed-file set, used by /wave:walker); the sweep scope additionally removes confirmed-dead code and unused dependencies end-to-end behind QA."
+description: Scans AI-authored code for duplication, ghost fields, dead code, deps, architecture, types, naming, quality, magic numbers — scopes `all`, `dup`, `ghosts`, `dead`, `deps`, `arch`, `types`, `naming`, `quality`, `magic`, `{project}` per roster entry, `diff` (a changed-file set, /wave:walker's), `sweep [{project}|all]` — the one scope that removes dead code, gated by approval; else report-only.
 argument-hint: [scope]
 ---
 

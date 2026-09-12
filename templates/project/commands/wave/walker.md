@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:walker
-description: Wave walk that verifies the code works — read-only multi-agent verification of a wave's changed set, ending in one authoritative verdict and a written review. Auto-invoked pre-merge by /wave:orchestrator (branch mode) and post-commit by /wave:live (merge-SHA mode); the `reviewer` agent gates the merge, never this. Also standalone code investigation (args.goal) and claim-verification panels (args.claims, args.manifestPath). Fast mode routes to the `tracer` agent — § Fast mode. Triggers — "wave walker", "/wave:walker", "walker fast", "fast walk".
+description: Verifies a wave's changed set works — read-only, one verdict + a written review; supplements the reviewer gate. Run pre-merge by /wave:orchestrator (branch mode), post-commit by /wave:live (merge-SHA mode); `args.goal` investigates a code question, `args.claims`/`args.manifestPath` run claim panels; `walker fast <mission>` → the tracer agent. Triggers "wave walker", "walker fast", "fast walk".
 argument-hint: [report path | fast <mission>]
 ---
 
@@ -40,19 +40,11 @@ An absent or invalid profile makes the gate machinery report `gates: SKIPPED —
 
 ## Fast mode — `walker fast <mission>`
 
-Inline consumer-tree trace, minutes-scale, no Workflow: every writer and every consumer of a target
-(a table, an API field, a prompt slot, a queue message, an API entry), hop-by-hop to
-terminals. Deliverable: ONE consumer tree — file:line per node, fields per edge, quote-pinned edges,
-terminals typed, closed-world coverage accounting. Raw map only, read-only, like every walk.
+Inline consumer-tree trace, minutes-scale, no Workflow: every writer and every consumer of a target (a table, an API field, a prompt slot, a queue message, an API entry), hop-by-hop to terminals. Deliverable: ONE consumer tree — file:line per node, fields per edge, quote-pinned edges, terminals typed, closed-world coverage accounting. Raw map only, read-only, like every walk.
 
-It runs as the registered **`tracer`** agent — spawn `subagent_type: tracer` with the
-mission in the prompt; it holds the lead protocol, the tracer prompt, the hop recipes, and the knobs,
-and dispatches its own Haiku tracers. Relay its map; persist to `tmp/walks/{slug}.md` when it
-outgrows chat.
+It runs as the registered **`tracer`** agent — spawn `subagent_type: tracer` with the mission in the prompt; it holds the lead protocol, the tracer prompt, the hop recipes, and the knobs, and dispatches its own Haiku tracers. Relay its map; persist to `tmp/walks/{slug}.md` when it outgrows chat.
 
-**Gear selection:** "where does X go / who feeds X / map it NOW" → `tracer`. An open question
-needing adjudicated evidence → investigate (`args.goal`). Merge-gating wave verification → the full
-walk. The tracer's map may FEED a judgment; it never makes one.
+**Gear selection:** "where does X go / who feeds X / map it NOW" → `tracer`. An open question needing adjudicated evidence → investigate (`args.goal`). Merge-gating wave verification → the full walk. The tracer's map may FEED a judgment; it never makes one.
 
 ## § Orchestration (the `wave-walker` workflow)
 
@@ -77,15 +69,15 @@ Enumerate BOTH the threads to walk AND the ledger schedule, from the wave's actu
 
 **Threads** — aim for **at least 4**; one per feature flow, plus a thread for each seam, field, schema change, or invariant the diff puts at risk. Merge trivial threads; never split for count. Every thread is one of:
 
-| Type                     | Walk path                                                                                           |
+| Type | Walk path |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| **Feature flow**         | a user-facing capability — entry (UI/handler) → each hop → terminal state                           |
-| **Seam**                 | a cross-project contract (API field, realtime channel, queue message) — both sides agree |
-| **Field**                | a new/changed persisted field — producer → transport → persist → read → surface                     |
-| **Schema/DB**            | migrations + constraints — migration ↔ schema ↔ app-layer enforcement                               |
-| **Invariant**            | a sacred domain-safety rule — every enforcement point holds                                   |
-| **Test-data discipline** | changed test + migration files honor the data/schema separation           |
-| **Dead-code ripple**     | trace each removed/renamed caller, deleted reference, or dropped field outward into unchanged files |
+| **Feature flow** | a user-facing capability — entry (UI/handler) → each hop → terminal state |
+| **Seam** | a cross-project contract (API field, realtime channel, queue message) — both sides agree |
+| **Field** | a new/changed persisted field — producer → transport → persist → read → surface |
+| **Schema/DB** | migrations + constraints — migration ↔ schema ↔ app-layer enforcement |
+| **Invariant** | a sacred domain-safety rule — every enforcement point holds |
+| **Test-data discipline** | changed test + migration files honor the data/schema separation |
+| **Dead-code ripple** | trace each removed/renamed caller, deleted reference, or dropped field outward into unchanged files |
 
 Always emit a **Test-data discipline** thread when the diff touches any `tests/` or migration file, a **Dead-code ripple** thread when the diff removes/renames a caller or drops a persisted field/column/route/file, and a **Field** thread with an explicit READ-BACK check for every NEW persisted field — the writer AND the reader mapping; a field that writes fine but reads back undefined is the archetypal silent kill (it passes every green gate).
 

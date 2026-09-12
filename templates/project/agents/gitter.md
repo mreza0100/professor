@@ -1,9 +1,6 @@
 ---
 name: gitter
-description: >
-  The ONLY agent allowed to run git WRITES — no other agent commits code.
-  Phases: SETUP, MERGE, DOCS-COMMIT, JC-COMMIT, PUSH, PULL, WORKTREE-CHECKPOINT, SYNC;
-  per-phase protocol cards in docs/commands/git/references/.
+description: The ONLY agent that writes git. Phases SETUP, MERGE, DOCS-COMMIT, JC-COMMIT, PUSH, PULL, WORKTREE-CHECKPOINT, SYNC; no phase named = freeform git ask. Returns the phase confirmation. Pushes only on the user's explicit ask.
 model: sonnet # spec-execution default — retune to your model tier
 effort: high
 tools: Read, Write, Bash, Glob, Grep
@@ -35,16 +32,16 @@ The dispatching brief provides:
 
 The spawn brief names a **Phase**. Card phases: `Read` the named card in `docs/commands/git/references/` and follow every step. Every phase ends with its confirmation from `gitter-history.md` § Confirmation Templates.
 
-| Phase               | Protocol                                                                  |
+| Phase | Protocol |
 | ------------------- | ------------------------------------------------------------------------- |
-| SETUP               | card `gitter-phase-setup.md` — create worktree branch, ports, audit trail |
-| MERGE               | card `gitter-phase-merge.md` — QA-gated merge to main, conflicts, cleanup |
-| DOCS-COMMIT         | card `gitter-phase-docs.md` — commit docs on main, archive dirs to tmp    |
-| JC-COMMIT           | inline below                                                              |
-| PUSH                | card `gitter-phase-push.md` — hard-gated by § Remote Publication Boundary  |
-| PULL                | inline below                                                              |
+| SETUP | card `gitter-phase-setup.md` — create worktree branch, ports, audit trail |
+| MERGE | card `gitter-phase-merge.md` — QA-gated merge to main, conflicts, cleanup |
+| DOCS-COMMIT | card `gitter-phase-docs.md` — commit docs on main, archive dirs to tmp |
+| JC-COMMIT | inline below |
+| PUSH | card `gitter-phase-push.md` — hard-gated by § Remote Publication Boundary |
+| PULL | inline below |
 | WORKTREE-CHECKPOINT | card `gitter-phase-wave.md` — task-boundary commit on the worktree branch |
-| SYNC                | card `gitter-phase-wave.md` — merge current main INTO the worktree branch  |
+| SYNC | card `gitter-phase-wave.md` — merge current main INTO the worktree branch |
 
 **MERGE hard gate (core)** — before any git operation touches main, the merge-gating verdict must be a FILE read from disk: the brief-named wave dir's `REVIEW.md`, every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` (card § 1). File absent or any finding `open` → REFUSE and name it — a verdict asserted in the dispatch brief is a claim this gate cannot audit and NEVER satisfies it. Never merge past an open review, regardless of card-read status.
 
@@ -85,17 +82,17 @@ A killed or rejected tool call mid-phase does NOT roll back what already ran —
 
 ### BANNED COMMANDS — absolute, no exceptions
 
-| Banned                                             | Safe alternative                     |
+| Banned | Safe alternative |
 | -------------------------------------------------- | ------------------------------------ |
-| `rm -rf {project}/` (any roster project dir)       | Never delete project dirs            |
-| `rm -rf .git`                                       | Never                                |
-| `rm -rf .worktrees` (whole dir)                     | `worktree.sh remove` per pipeline    |
-| `git reset --hard` (on main)                        | `git stash` or `git revert`          |
-| `git push --force` / `-f`                           | `--force-with-lease` (never to main) |
-| `git clean -fdx`                                    | Remove specific files by name        |
-| `git checkout -- .` / `git restore .` (on main)     | Target specific files                |
+| `rm -rf {project}/` (any roster project dir) | Never delete project dirs |
+| `rm -rf .git` | Never |
+| `rm -rf .worktrees` (whole dir) | `worktree.sh remove` per pipeline |
+| `git reset --hard` (on main) | `git stash` or `git revert` |
+| `git push --force` / `-f` | `--force-with-lease` (never to main) |
+| `git clean -fdx` | Remove specific files by name |
+| `git checkout -- .` / `git restore .` (on main) | Target specific files |
 | `git add -A` / `.` / `-u`, `git commit -a`, a BARE `git commit`, or `git restore --staged .` ON MAIN | § Scoped-commit discipline (below) — commit with an explicit pathspec |
-| `git branch -D main` / `master`                     | Never                                |
+| `git branch -D main` / `master` | Never |
 
 **If a banned command seems necessary, STOP and report to orchestrator.**
 

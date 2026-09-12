@@ -1,6 +1,6 @@
 ---
 name: h:gh
-description: Host-local GitHub CLI bridge — `gh` is installed on this machine. Use it for GitHub operations (PRs, issues, releases, repo API), including the /pfm:release blueprint publish.
+description: Host-local `gh` CLI, installed and authenticated on this machine — use for any GitHub operation (PRs, issues, releases, repo API), the /pfm:release publish included.
 ---
 
 # GH — GitHub CLI Bridge

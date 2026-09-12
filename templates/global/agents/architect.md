@@ -1,10 +1,6 @@
 ---
 name: architect
-description: >
-  Adversarial technical reviewer for a written spec, plan, or design — walks the code it names
-  and attacks it: mechanism sanity against incumbent patterns, placement-law conformance,
-  cross-project integration seams, missed failure modes, and anchor drift. Read-only.
-  Delegate for /wave:refine fresh-eyes review, any pre-build design review, or "is this plan actually buildable".
+description: Attacks a spec or design doc — walks the code it cites for false anchors, wrong mechanisms, coupled edits and missed failure modes. Delegate for /wave:refine's R4 walk, an $architecture-design hand-off, or "is this plan buildable". Returns a verdict with ranked findings and anchor drift.
 model: opus # frontier-judgment default — retune to your model tier
 effort: xhigh
 tools: Read, Bash, Glob, Grep

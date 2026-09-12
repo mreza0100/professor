@@ -23,11 +23,11 @@ The discipline + character of the pipeline. Read this before installing it.
 
 Every command, agent, and rule sorts into one of three tiers:
 
-| Tier                         | Description                                                             | What ships                                                             | What gets parameterized                                                                           |
+| Tier | Description | What ships | What gets parameterized |
 | ---------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| **A — Universal archetypes** | Personalities that work in any domain. The voice IS the value.          | Full character, voice, structure, signature traits, archetype identity | Domain-specific REFERENCES inside the character (JC's example stack traces)                       |
-| **B — Domain archetypes**    | Roles every serious project needs, but content is heavily domain-shaped | Archetype skeleton: identity, voice, charter, mode list, doc structure | Regulation name, knowledge domain, user persona, market segment — filled at install via interview |
-| **C — Pure mechanics**       | Infrastructure agents and pipeline plumbing                             | Mechanics only — no character needed                                   | Tech-specific commands (test runner, package manager, build tool)                                 |
+| **A — Universal archetypes** | Personalities that work in any domain. The voice IS the value. | Full character, voice, structure, signature traits, archetype identity | Domain-specific REFERENCES inside the character (JC's example stack traces) |
+| **B — Domain archetypes** | Roles every serious project needs, but content is heavily domain-shaped | Archetype skeleton: identity, voice, charter, mode list, doc structure | Regulation name, knowledge domain, user persona, market segment — filled at install via interview |
+| **C — Pure mechanics** | Infrastructure agents and pipeline plumbing | Mechanics only — no character needed | Tech-specific commands (test runner, package manager, build tool) |
 
 ### The cast (Tier A — universal)
 
@@ -46,7 +46,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/wave:ccc** — the Control & Command Center: the standing command seat over a running train. Full audit from ground truth on arrival, then holds command until the train closes — verifies claims against the tree, rules scope-allocation escalations, dispatches through the orchestrator.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, spawning the `rndier` agent to execute one run.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
-- **/quality:doc** / **/quality:prompt** — doc-shaping and prompt-quality gates.
+- **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, and markdown lint/format mechanics.
 - **/audit:code-hygiene** / **/audit:security** / **/audit:ai-output** — code-hygiene, security, and AI-output audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
 - **/qa:live** — live end-to-end QA of the running app on the dev stack: no mocks, no seeded data, judgment-based rather than regression assertions.
 
@@ -74,6 +74,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - `mono-planner`, `mono-architect`, `mono-documenter`, `gitter`, `tracer`, `scheduler`, `architect`, and one `{role}-{project}` wrapper per roster entry per role (the `qa-{project}` gates among them) — root agents. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
+- `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:forlint` and by the `format-md.sh` hook.
 - `settings-global.json` — a handful of keys merged (never overwritten) into the adopter's own `~/.claude/settings.json`. Currently one key, `cleanupPeriodDays: 36500`, which turns off Claude Code's default 30-day auto-delete of session transcripts and orphaned git worktrees.
 - Per-project agents (`planner`, `architect`, `developer`, `qa`) — role-defined.
 
@@ -91,9 +92,7 @@ The `gitter` agent is the **single git operator**. No other agent runs `git add`
 - Prevents agents from racing each other for the merge.
 - Makes "what got committed" auditable.
 
-If an agent needs to commit, it asks gitter. Gitter has phases: SETUP, COMMIT, MERGE, PUSH, PULL,
-and TAG. The active main Codex chat may use the explicit-authority fallback only when the
-registered role is unavailable; subagents remain read-only.
+If an agent needs to commit, it asks gitter. Gitter has phases: SETUP, COMMIT, MERGE, PUSH, PULL, and TAG. The active main Codex chat may use the explicit-authority fallback only when the registered role is unavailable; subagents remain read-only.
 
 ### 2. QA gates the merge
 
@@ -103,17 +102,17 @@ The pipeline runs QA on the worktree branch BEFORE merging to main. Test failure
 
 Agents receive paths as variables:
 
-| Variable     | Purpose                            | Example                                  |
+| Variable | Purpose | Example |
 | ------------ | ---------------------------------- | ---------------------------------------- |
-| `$PIPELINE`  | Pipeline name (kebab-case, unique) | `{some-feature}`                         |
-| `$DOCS`      | Pipeline docs from repo root       | `docs/dev/tasks/{some-feature}`          |
-| `$DOCS_REL`  | Pipeline docs from worktree        | `../../../docs/dev/tasks/{some-feature}` |
-| `$WORKTREE`  | Worktree directory                 | `.worktrees/{some-feature}`              |
-| `$ARCHIVE`   | Archive parent                     | `docs/dev/tasks/archive`                 |
-| `$CDOCS`     | Command-owned docs root            | `docs/commands`                          |
-| `$REFS`      | Reference docs subdir              | `references`                             |
-| `$RESEARCH`  | Research docs subdir               | `research`                               |
-| `$RESOURCES` | Static resources subdir            | `resources`                              |
+| `$PIPELINE` | Pipeline name (kebab-case, unique) | `{some-feature}` |
+| `$DOCS` | Pipeline docs from repo root | `docs/dev/tasks/{some-feature}` |
+| `$DOCS_REL` | Pipeline docs from worktree | `../../../docs/dev/tasks/{some-feature}` |
+| `$WORKTREE` | Worktree directory | `.worktrees/{some-feature}` |
+| `$ARCHIVE` | Archive parent | `docs/dev/tasks/archive` |
+| `$CDOCS` | Command-owned docs root | `docs/commands` |
+| `$REFS` | Reference docs subdir | `references` |
+| `$RESEARCH` | Research docs subdir | `research` |
+| `$RESOURCES` | Static resources subdir | `resources` |
 
 Agents NEVER hardcode `docs/dev/tasks/...` — they use what `/wave:builder` passes them. Path conventions can change without rewriting every agent.
 
@@ -220,8 +219,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
                           └─────────────────────┘
 ```
 
-Hotfix path: `/jc {bug}` → locate → diagnose → fix → test → gitter JC-COMMIT. Same safety, less ceremony.
-Meta path: `/pfm {request}` → edits the agent definitions at the source.
+Hotfix path: `/jc {bug}` → locate → diagnose → fix → test → gitter JC-COMMIT. Same safety, less ceremony. Meta path: `/pfm {request}` → edits the agent definitions at the source.
 
 ---
 
@@ -231,6 +229,7 @@ Meta path: `/pfm {request}` → edits the agent definitions at the source.
 your-project/
 ├── CLAUDE.md                          ← root project rules; the harness supplies the Professor persona
 ├── AGENTS.md                          ← (OPTIONAL) COMPILED from local CLAUDE.md by `pfm codex build` (Codex reads this by convention)
+├── .rumdl.toml                        ← markdown policy per path category (`/quality:forlint`); the format hook reads it
 ├── .professor/
 │   ├── VERSION                        ← installed blueprint version (e.g., vX.Y.Z)
 │   ├── manifest.json                  ← interview answers (user-owned install record)
@@ -331,12 +330,12 @@ Professor's nervous system can optionally span **two AI runtimes**: Claude Code 
 
 **Division of labor:**
 
-| Task                             | Runtime             | Why                                                                              |
+| Task | Runtime | Why |
 | -------------------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| Planning, architecture, research | Claude              | Judgment-heavy, low token volume                                                 |
-| Heavy implementation             | Codex               | Cheaper per token                                                                |
-| QA / adversarial tests           | Claude              | Codex shouldn't grade itself                                                     |
-| Git operations                   | Registered `gitter` | Claude and Codex expose the same sole-writer role; every other role is read-only |
+| Planning, architecture, research | Claude | Judgment-heavy, low token volume |
+| Heavy implementation | Codex | Cheaper per token |
+| QA / adversarial tests | Claude | Codex shouldn't grade itself |
+| Git operations | Registered `gitter` | Claude and Codex expose the same sole-writer role; every other role is read-only |
 
 **Opting in:** the install interview asks its optional Codex question. If yes, it creates `.codex/` (`config.toml`, `rules/repo-law.rules`, and the generated registries), runs `pfm codex build` followed by `pfm codex check`, and wires `scripts/codex-sync.sh` so later local source edits recompile before the turn ends. If no, the entire layer is skipped. No pipeline operation requires Codex.
 
@@ -348,10 +347,10 @@ See `templates/project/codex/README.md` for the full integration guide.
 
 The blueprint evolves through semver git tags. Each tier has one source of truth and one update path:
 
-| Tier                                                        | Truth                              | Staying current                                                                                                                                         |
+| Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Machine-global commands, agents, and skills                 | Blueprint originals                | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations.              |
-| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts)    | **The local file, full stop**      | `pfm init` scaffolds it once. `pfm update check` reports upstream template deltas for review and hand application; pfm never rewrites it during update. |
+| Machine-global commands, agents, and skills | Blueprint originals | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
+| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | **The local file, full stop** | `pfm init` scaffolds it once. `pfm update check` reports upstream template deltas for review and hand application; pfm never rewrites it during update. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, including `pfm codex build                                                                                 | check`, after changing local sources. |
 
 `pfm init` records each deployed local-to-template mapping in `.professor/baseline.json`. The pin hashes the template bytes with tokens intact and records the blueprint SHA; local token filling and later customization do not change that provenance. `.professor/manifest.json` remains the user-owned interview record.
@@ -376,7 +375,6 @@ The report is the update UI. Project updates never regenerate local files, repla
 
 **Could a neuropsychology lab, a tabletop RPG studio, and a SCADA controls team all read this blueprint and see _their version of the Professor, JC, and the audit cast_ — same archetypes, different content?**
 
-If yes, the blueprint is right.
-If anyone has to delete personality before using it, the blueprint failed.
+If yes, the blueprint is right. If anyone has to delete personality before using it, the blueprint failed.
 
 The mechanics survive every stack. The characters' voices survive every domain. Personality is not decoration — it's load-bearing. If you find yourself stripping voice to "make it generic," stop and parameterize the content instead.

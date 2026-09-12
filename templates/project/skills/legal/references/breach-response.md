@@ -17,12 +17,12 @@ Formula: **SE = (DPC × EI) + CB**
 - **EI** (ease of identification): negligible 0.25, limited 0.50, significant 0.75, maximum 1.00.
 - **CB** (circumstances, additive 0–2): confidentiality/integrity/availability loss each 0/+0.25/+0.50; malicious intent +0.50.
 
-| SE      | Level     | Notification                            |
+| SE | Level | Notification |
 | ------- | --------- | ---------------------------------------- |
-| < 2     | LOW       | Internal log only (Art. 33(5))          |
-| 2 – < 3 | MEDIUM    | SA notification (Art. 33)               |
-| 3 – < 4 | HIGH      | SA **and** data subjects (Art. 33 & 34) |
-| ≥ 4     | VERY HIGH | SA + subjects + consider public notice  |
+| < 2 | LOW | Internal log only (Art. 33(5)) |
+| 2 – < 3 | MEDIUM | SA notification (Art. 33) |
+| 3 – < 4 | HIGH | SA **and** data subjects (Art. 33 & 34) |
+| ≥ 4 | VERY HIGH | SA + subjects + consider public notice |
 
 When a score is within 0.25 of a threshold, flag it explicitly and lean conservative — the SA may disagree with a borderline LOW.
 

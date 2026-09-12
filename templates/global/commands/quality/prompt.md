@@ -1,6 +1,6 @@
 ---
 name: quality:prompt
-description: Use BEFORE editing any prompt file — CLAUDE.md, .claude/agents/*.md, .claude/commands/*.md, .claude/skills/*/SKILL.md, child CLAUDE.md, or /km knowledge files under {AI_PROJECT}/knowledge/. Subcommand `quality:prompt cut <file>` rewrites the target leaner in place. General prompt-quality law for ANY LLM-consumed prompt — leanness (cut test, compaction, positive framing, no time-sensitive narration, one canonical term) plus correctness (compute numbers in code, no conflicting directives, per-language validation). Claude-harness file rules (size limits, voice location, hooks, routing) live in /pfm § Claude-harness prompt law. Mandatory load for /pfm and /km.
+description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills, /km knowledge files); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pfm; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:forlint.
 ---
 
 # Prompt Quality

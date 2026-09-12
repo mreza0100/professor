@@ -1,7 +1,7 @@
 ---
 name: pfm:release
-description: Version, tag, and publish this repo — regenerating the portable blueprint from a live source project via the refresh pass when one is named, sweeping every linked project's .professor/release.md, then consuming the collected bullets into the CHANGELOG and a releases/ note. Invoked by /pfm:release, "blueprint release", or "publish the blueprint". Publication is explicit-request-only.
-argument-hint: {patch|minor|major} "{summary}" [--from {live-project-root}] [--ledger {root}]…
+description: Versions, tags and publishes this repo — `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}] [--ledger {root}]…`, "blueprint release", "publish the blueprint"; only on the user's explicit in-turn publish request. Sweeps every linked .professor/release.md into CHANGELOG.md + releases/vX.Y.Z.md, runs /pfm:refresh under --from, lands develop → main via gitter's release PR.
+argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--ledger {root}]…'
 ---
 
 # PFM Release — Publish the Blueprint
@@ -57,8 +57,7 @@ argument-hint: {patch|minor|major} "{summary}" [--from {live-project-root}] [--l
 
 9. **Clear EVERY ledger Step 2b reported as PENDING** — each one's entries shipped in this release; empty each pending list, keep each header. A ledger left unclear re-ships its bullets in the next release; clearing one this release never opened would delete work that never shipped, so clear exactly the paths the sweep printed.
 
-10. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), and the changelog bullets, ending with:
-    `Blueprint released: v{NEW_VERSION}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW_VERSION}`
+10. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), and the changelog bullets, ending with: `Blueprint released: v{NEW_VERSION}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW_VERSION}`
 
 ## Hard rules
 

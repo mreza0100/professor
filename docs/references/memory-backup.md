@@ -101,9 +101,11 @@ All three use the ambient git `user.name` / `user.email` — no hardcoded identi
 7. **Multi-writer safety.** `memory-sync.sh` and `memory-wire.sh` both `git pull --rebase --autostash` before any local commit, so two machines writing the same vault rebase cleanly instead of colliding. The vault is safe to share across machines concurrently.
 8. **Root-guard for a legacy single-project vault.** If you previously ran the single-project model (a memory dir symlinked directly to the vault root), `memory-wire.sh` and the consolidator both detect that and leave it untouched — your accumulated "main brain" is never re-homed into a subdir.
 9. **Permission-mode pitfall.** Installing the hooks edits global `~/.claude/settings.json` — a persistent, code-running config change that the classifier SILENTLY DENIES under auto-permission mode with `skipAutoPermissionPrompt`, without prompting. Have the USER run this idempotent one-liner (it won't duplicate or clobber existing hooks):
+
    ```
    python3 -c "import json,pathlib; p=pathlib.Path.home()/'.claude/settings.json'; d=json.loads(p.read_text()); h=d.setdefault('hooks',{}); h.setdefault('SessionStart',[]).append({'matcher':'','hooks':[{'type':'command','command':'sh \$HOME/.claude/scripts/memory-wire.sh'}]}); h.setdefault('SessionEnd',[]).append({'matcher':'','hooks':[{'type':'command','command':'sh \$HOME/.claude/scripts/memory-sync.sh'}]}); p.write_text(json.dumps(d,indent=2)); print('memory hooks added')"
    ```
+
 10. **Logging is the receipt.** `~/.claude/memory-sync.log` records `pushed` / `PUSH FAILED` with timestamps — it's how you confirm the hook ran. An empty log after a close that should have pushed = the push was cut off (window-close race) → the self-heal catches it next time.
 11. **Project-key portability.** The `<PROJECT-KEY>` segment under `~/.claude/projects/` is derived from the repo's absolute path on that machine, so it changes per machine / clone path. The vault subdir is keyed off the project BASENAME instead, so the same project shares one subdir everywhere regardless of clone path. No hardcoded key.
 

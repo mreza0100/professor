@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Frontmatter + description-budget gate over every tracked markdown file.
+#
+# Why a gate and not a rule: `/quality:description` states the law, but a prompt
+# rule cannot detect a `description:` whose unquoted `: ` breaks the YAML — the
+# Claude Code parser is lenient and registers the command anyway, while a
+# stricter runtime silently drops it. `rumdl check` does not look at frontmatter
+# validity either. This is the only thing that does.
+#
+# What this reports when IT is broken, each on its own exit code and message:
+#   exit 2  python3 or PyYAML is missing — TOOLCHAIN-MISSING, never a pass
+#   exit 3  the scan matched no files at all — the SCAN is broken, not the tree
+#   exit 1  at least one frontmatter does not parse (the failure it exists for)
+#   exit 0  every frontmatter parses; the budget ledger is INFO only
+#
+# The char budget is reported, never enforced: `/quality:description` § Budget
+# allows a justified 400-char tier, and a justification is not machine-readable.
+
+usage() {
+  echo "usage: description-check.sh [--files <path>...]" >&2
+  echo "  no args: every tracked *.md in the repo" >&2
+}
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "description-check: TOOLCHAIN-MISSING — python3 is absent; no frontmatter was parsed" >&2
+  exit 2
+fi
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+  echo "description-check: TOOLCHAIN-MISSING — PyYAML is absent; no frontmatter was parsed" >&2
+  exit 2
+fi
+
+if [[ "${1:-}" == "--files" ]]; then
+  shift
+  printf '%s\n' "$@" > /tmp/desc-check-files.$$
+else
+  git ls-files '*.md' > /tmp/desc-check-files.$$
+fi
+trap 'rm -f /tmp/desc-check-files.$$' EXIT
+
+python3 - "/tmp/desc-check-files.$$" <<'PY'
+import pathlib, sys, yaml
+
+listing = pathlib.Path(sys.argv[1]).read_text().split()
+scanned = withfront = 0
+broken, ledger = [], []
+for name in listing:
+    path = pathlib.Path(name)
+    if not path.is_file():
+        continue
+    scanned += 1
+    text = path.read_text(errors="replace")
+    if not text.startswith("---\n"):
+        continue
+    end = text.find("\n---\n", 3)
+    if end == -1:
+        broken.append((name, "frontmatter fence is never closed"))
+        continue
+    withfront += 1
+    front = text[4:end + 1]
+    try:
+        parsed = yaml.safe_load(front)
+    except yaml.YAMLError as err:
+        broken.append((name, str(err).split("\n")[0]))
+        continue
+    if not isinstance(parsed, dict):
+        broken.append((name, "frontmatter is not a mapping"))
+        continue
+    description = parsed.get("description")
+    if isinstance(description, str):
+        ledger.append((len(description.strip()), name))
+
+if scanned == 0:
+    print("description-check: NOTHING SCANNED — the file list was empty; the SCAN is broken, not the tree")
+    sys.exit(3)
+
+total = sum(n for n, _ in ledger)
+print(f"description-check: {scanned} tracked .md, {withfront} with frontmatter, {len(ledger)} descriptions, {total} chars total")
+if ledger:
+    ledger.sort(reverse=True)
+    over = [(n, f) for n, f in ledger if n > 400]
+    print(f"  budget: {len(over)} over the 400-char tier · heaviest:")
+    for n, f in ledger[:5]:
+        print(f"    {n:5}  {f}")
+if broken:
+    print(f"description-check: {len(broken)} frontmatter block(s) do NOT parse as YAML — a lenient harness registers them, a strict one drops them:")
+    for f, why in broken:
+        print(f"    {f} :: {why}")
+    sys.exit(1)
+print("description-check: every frontmatter parses")
+PY

@@ -56,7 +56,13 @@
     "global/commands/h/gh.md": {
       "curated": true
     },
+    "global/commands/quality/description.md": {
+      "curated": true
+    },
     "global/commands/quality/doc.md": {
+      "curated": true
+    },
+    "global/commands/quality/forlint.md": {
       "curated": true
     },
     "global/commands/quality/prompt.md": {
@@ -404,10 +410,11 @@
         ".claude/scripts/filter-test-output.sh": "355139e4e037ea58fc017ad4d32da4ab1286e5a5860c619024fc4f523a1ca3c2"
       }
     },
+    "project/rumdl-policy.toml": {
+      "curated": true
+    },
     "project/scripts/format-md.sh": {
-      "sources": {
-        ".claude/scripts/format-md.sh": "dc906de7c1c33ab811cbd67a2db067974cb8ea6f457efbbecef8c514ad2369dc"
-      }
+      "curated": true
     },
     "project/scripts/git-lock.sh": {
       "sources": {

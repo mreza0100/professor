@@ -2,8 +2,7 @@
 
 Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration scope table is the card index). Read `docs/commands/documenter/references/doc-approval.md` FIRST — write rules, sacred boundaries, Approval gate, finish steps.
 
-**Write set (yours alone):** `docs/agents/api/**`.
-**Sources:** `$DOCS/0-task.md` Contracts (legacy: `3-architecture.md`), `$DOCS/5-dev-report-{project}.md` files whose project exposes an API (API Reference sections). Read only what exists.
+**Write set (yours alone):** `docs/agents/api/**`. **Sources:** `$DOCS/0-task.md` Contracts (legacy: `3-architecture.md`), `$DOCS/5-dev-report-{project}.md` files whose project exposes an API (API Reference sections). Read only what exists.
 
 ## Inter-service API cluster
 

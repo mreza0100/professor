@@ -6,16 +6,16 @@ Every regeneration agent reads this file and applies it uniformly. One canonical
 
 ## Identity
 
-| Source value                                                                                                                             | Placeholder                                                                                         |
+| Source value | Placeholder |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| the project name — current AND any former/renamed-from brand (a rename orphans the old name in the source, so scrub both)                | `{PROJECT_NAME}`                                                                                    |
-| the project tagline                                                                                                                      | `{PROJECT_TAGLINE}`                                                                                 |
-| the project domain (its `.com` etc.)                                                                                                     | `{PROJECT_DOMAIN}`                                                                                  |
-| `Professor` (persona)                                                                                                                    | **keep `Professor`** — ships as default name with a "rename if you want" note; never placeholder it |
-| the canonical blueprint repo `owner/repo`                                                                                                | `{BLUEPRINT_REPO}`                                                                                  |
-| the blueprint repo owner (GH/GL handle)                                                                                                  | `{GH_USER}`                                                                                         |
-| the local blueprint clone path                                                                                                           | `{BLUEPRINT_CLONE_PATH}`                                                                            |
-| the memory-vault directory name (memory-backup scripts; default base `$HOME/work/{MEMORY_VAULT_DIR}`, env override `CLAUDE_MEMORY_REPO`) | `{MEMORY_VAULT_DIR}`                                                                                |
+| the project name — current AND any former/renamed-from brand (a rename orphans the old name in the source, so scrub both) | `{PROJECT_NAME}` |
+| the project tagline | `{PROJECT_TAGLINE}` |
+| the project domain (its `.com` etc.) | `{PROJECT_DOMAIN}` |
+| `Professor` (persona) | **keep `Professor`** — ships as default name with a "rename if you want" note; never placeholder it |
+| the canonical blueprint repo `owner/repo` | `{BLUEPRINT_REPO}` |
+| the blueprint repo owner (GH/GL handle) | `{GH_USER}` |
+| the local blueprint clone path | `{BLUEPRINT_CLONE_PATH}` |
+| the memory-vault directory name (memory-backup scripts; default base `$HOME/work/{MEMORY_VAULT_DIR}`, env override `CLAUDE_MEMORY_REPO`) | `{MEMORY_VAULT_DIR}` |
 
 > Blueprint self-references resolve at install: a user with push access to the canonical repo targets it directly; everyone else targets their own fork.
 
@@ -25,17 +25,17 @@ The blueprint does NOT assume a fixed set of sub-projects. Structure is a **rost
 
 Each roster entry has: directory, role label, tech stack, package manager, test runner, dev port(s). Templates reference the roster with generic per-entry tokens — never the source's concrete role names:
 
-| Concept                                              | Placeholder             | Notes                                                                                             |
+| Concept | Placeholder | Notes |
 | ---------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| the project roster (the list)                        | `{PROJECT_ROSTER}`      | 1..N entries; SETUP fills from the interview                                                      |
-| one entry's directory                                | `{project}`             | generic — used inside per-project PATTERN blocks                                                  |
-| one entry's directory, uppercase/shell-var-safe form | `{PROJECT}`             | e.g. `{PROJECT}_STATUS`; sibling of `{project}` for contexts needing an env-var-safe display form |
-| one entry's role label                               | `{PROJECT_ROLE}`        | the adopter's own labels, not `backend/frontend/ai/infra/web`                                     |
-| one entry's stack                                    | `{PROJECT_STACK}`       | lang / framework / ORM / UI etc. for that entry                                                   |
-| one entry's package manager                          | `{PROJECT_PKG_MGR}`     |                                                                                                   |
-| one entry's test runner                              | `{PROJECT_TEST_RUNNER}` |                                                                                                   |
-| one entry's dev port(s)                              | `{PROJECT_PORT}`        |                                                                                                   |
-| routing key for an entry                             | `{ROLE}-ONLY`           | per-roster; keep `CROSS` for multi-project changes                                                |
+| the project roster (the list) | `{PROJECT_ROSTER}` | 1..N entries; SETUP fills from the interview |
+| one entry's directory | `{project}` | generic — used inside per-project PATTERN blocks |
+| one entry's directory, uppercase/shell-var-safe form | `{PROJECT}` | e.g. `{PROJECT}_STATUS`; sibling of `{project}` for contexts needing an env-var-safe display form |
+| one entry's role label | `{PROJECT_ROLE}` | the adopter's own labels, not `backend/frontend/ai/infra/web` |
+| one entry's stack | `{PROJECT_STACK}` | lang / framework / ORM / UI etc. for that entry |
+| one entry's package manager | `{PROJECT_PKG_MGR}` | |
+| one entry's test runner | `{PROJECT_TEST_RUNNER}` | |
+| one entry's dev port(s) | `{PROJECT_PORT}` | |
+| routing key for an entry | `{ROLE}-ONLY` | per-roster; keep `CROSS` for multi-project changes |
 
 ### Materialization (how SETUP expands the roster)
 
@@ -49,149 +49,142 @@ When the roster has one entry: the worktree is the repo root (no per-project sub
 
 These are **NOT hand-filled.** SETUP renders them by expanding the per-project PATTERN blocks once per roster entry (roster size 1 = a single expansion). Each token below is an expansion product, not an interview answer.
 
-| Token                                | Concept                                                              |
+| Token | Concept |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| `{PROJECT_AGENT_ROSTER}`             | rendered list of every per-project agent across the roster           |
-| `{PROJECT_PLANNER_ROSTER}`           | per-roster list of planner agents                                    |
-| `{PROJECT_ARCHITECT_ROSTER}`         | per-roster list of architect agents                                  |
-| `{PROJECT_DEVELOPER_ROSTER}`         | per-roster list of developer agents                                  |
-| `{PROJECT_QA_ROSTER}`                | per-roster list of QA agents                                         |
-| `{PROJECT_ANALYSIS_REPORT_LIST}`     | per-roster analysis-report paths                                     |
-| `{PROJECT_ARCHITECTURE_REPORT_LIST}` | per-roster architecture-report paths                                 |
-| `{PROJECT_DEV_REPORT_LIST}`          | per-roster dev-report paths                                          |
-| `{PROJECT_BUG_REPORT_LIST}`          | per-roster bug-report paths                                          |
-| `{ROSTER_DOC_PATHS}`                 | space-joined roster doc directories                                  |
-| `{PROJECT_TYPING_RULES}`             | per-stack typing block (one per roster entry's language)             |
-| `{PROJECT_TYPECHECK}`                | per-project typecheck command                                        |
-| `{PROJECT_FORMAT}`                   | per-project format command                                           |
-| `{PROJECT_LINT}`                     | per-project lint command                                             |
-| `{PROJECT_INSTALL_CMD}`              | per-project install command                                          |
-| `{PROJECT_RUN_CMD}`                  | per-project run command                                              |
-| `{PROJECT_ENV_FILES}`                | per-project env-file set                                             |
-| `{HEALTH_PROBE}`                     | per-roster health-probe script block SETUP expands                   |
-| `{ENV_FILE_PROVISION}`               | per-roster env-file provisioning block                               |
-| `{ENV_BOOTSTRAP}`                    | per-roster env-bootstrap block                                       |
-| `{POST_INSTALL_HOOKS}`               | per-roster post-install hook block                                   |
-| `{STATUS_EXTRA_PROBES}`              | per-roster extra status probes                                       |
-| `{DEV_PROCESS_PATTERN}`              | per-roster dev-process pattern block                                 |
-| `{DEV_PREREQS}`                      | per-roster dev prerequisites                                         |
-| `{PORT_DEFAULTS}`                    | per-roster port-default assignments                                  |
-| `{SEED_PROJECT}`                     | optional-role marker — seed project (`"-"` sentinel when absent)     |
-| `{INFRA_PROJECT}`                    | optional-role marker — infra project (`"-"` sentinel when absent)    |
-| `{AI_PROJECT}`                       | optional-role marker — AI project (`"-"` sentinel when absent)       |
-| `{BACKEND_PROJECT}`                  | optional-role marker — backend project (`"-"` sentinel when absent)  |
-| `{FRONTEND_PROJECT}`                 | optional-role marker — frontend project (`"-"` sentinel when absent) |
-| `{WEB_PROJECT}`                      | optional-role marker — web project (`"-"` sentinel when absent)      |
-| `{MIGRATIONS_DIR}`                   | optional-role marker — migrations dir (`"-"` sentinel when absent)   |
+| `{PROJECT_AGENT_ROSTER}` | rendered list of every per-project agent across the roster |
+| `{PROJECT_PLANNER_ROSTER}` | per-roster list of planner agents |
+| `{PROJECT_ARCHITECT_ROSTER}` | per-roster list of architect agents |
+| `{PROJECT_DEVELOPER_ROSTER}` | per-roster list of developer agents |
+| `{PROJECT_QA_ROSTER}` | per-roster list of QA agents |
+| `{PROJECT_ANALYSIS_REPORT_LIST}` | per-roster analysis-report paths |
+| `{PROJECT_ARCHITECTURE_REPORT_LIST}` | per-roster architecture-report paths |
+| `{PROJECT_DEV_REPORT_LIST}` | per-roster dev-report paths |
+| `{PROJECT_BUG_REPORT_LIST}` | per-roster bug-report paths |
+| `{ROSTER_DOC_PATHS}` | space-joined roster doc directories |
+| `{PROJECT_TYPING_RULES}` | per-stack typing block (one per roster entry's language) |
+| `{PROJECT_TYPECHECK}` | per-project typecheck command |
+| `{PROJECT_FORMAT}` | per-project format command |
+| `{PROJECT_LINT}` | per-project lint command |
+| `{PROJECT_INSTALL_CMD}` | per-project install command |
+| `{PROJECT_RUN_CMD}` | per-project run command |
+| `{PROJECT_ENV_FILES}` | per-project env-file set |
+| `{HEALTH_PROBE}` | per-roster health-probe script block SETUP expands |
+| `{ENV_FILE_PROVISION}` | per-roster env-file provisioning block |
+| `{ENV_BOOTSTRAP}` | per-roster env-bootstrap block |
+| `{POST_INSTALL_HOOKS}` | per-roster post-install hook block |
+| `{STATUS_EXTRA_PROBES}` | per-roster extra status probes |
+| `{DEV_PROCESS_PATTERN}` | per-roster dev-process pattern block |
+| `{DEV_PREREQS}` | per-roster dev prerequisites |
+| `{PORT_DEFAULTS}` | per-roster port-default assignments |
+| `{SEED_PROJECT}` | optional-role marker — seed project (`"-"` sentinel when absent) |
+| `{INFRA_PROJECT}` | optional-role marker — infra project (`"-"` sentinel when absent) |
+| `{AI_PROJECT}` | optional-role marker — AI project (`"-"` sentinel when absent) |
+| `{BACKEND_PROJECT}` | optional-role marker — backend project (`"-"` sentinel when absent) |
+| `{FRONTEND_PROJECT}` | optional-role marker — frontend project (`"-"` sentinel when absent) |
+| `{WEB_PROJECT}` | optional-role marker — web project (`"-"` sentinel when absent) |
+| `{MIGRATIONS_DIR}` | optional-role marker — migrations dir (`"-"` sentinel when absent) |
 
 ### Per-project `CLAUDE.md` decomposition (templates/project/per-project/CLAUDE.md)
 
-This file decomposes the aggregate roster tokens above into individual bullets/headings.
-Real slots, register as siblings of their aggregate:
+This file decomposes the aggregate roster tokens above into individual bullets/headings. Real slots, register as siblings of their aggregate:
 
-| Token                                             | Concept                                                                                                                      | Sibling of                                           |
+| Token | Concept | Sibling of |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `{PROJECT_BUILD_CMD}`                             | per-project build command (was `{BUILD_CMD}` — see RENAME below)                                                             | `{PROJECT_INSTALL_CMD}` / `{PROJECT_RUN_CMD}` family |
-| `{RUNTIME}`                                       | "Runtime: …" bullet, decomposed from `{PROJECT_STACK}`                                                                       | `{PROJECT_STACK}`                                    |
-| `{FRAMEWORK}`                                     | stack framework name, also reused as a heading ("### {FRAMEWORK} Conventions")                                               | `{PROJECT_STACK}`                                    |
-| `{DATA_LAYER}`                                    | data-layer bullet, decomposed from `{PROJECT_STACK}`; close kinship to `{DATABASE}`/`{ORM}` — maintainer may fold in instead | `{PROJECT_STACK}`                                    |
-| `{UNIT_RUNNER}` / `{UNIT_TEST_DIR}`               | per-tier runner+dir pair                                                                                                     | `{PROJECT_TEST_RUNNER}`                              |
-| `{INTEGRATION_RUNNER}` / `{INTEGRATION_TEST_DIR}` | sibling pair                                                                                                                 | `{PROJECT_TEST_RUNNER}`                              |
-| `{PARALLEL_FLAG}`                                 | parallel-test-execution flag                                                                                                 | test-tier family                                     |
-| `{LOGGER_PATH}`                                   | structured-logger module path                                                                                                | —                                                    |
-| `{LOG_LEVEL_ENV}`                                 | env var controlling log verbosity                                                                                            | `{LOGGER_PATH}`                                      |
-| `{RAW_LOG_CALLS}`                                 | banned raw-log call name                                                                                                     | `{LOGGER_PATH}`                                      |
-| `{CONVENTION_1}` / `{CONVENTION_2}`               | framework-convention bullets                                                                                                 | —                                                    |
-| `{DATA_ACCESS_RULE}`                              | data-access rule bullet                                                                                                      | —                                                    |
-| `{ETHICS_RULE_1}` / `{ETHICS_RULE_2}`             | domain ethics-rule bullets                                                                                                   | `{SACRED_GROUND}`                                    |
-| `{PROJECT_TREE}`                                  | file-structure diagram slot                                                                                                  | —                                                    |
+| `{PROJECT_BUILD_CMD}` | per-project build command (was `{BUILD_CMD}` — see RENAME below) | `{PROJECT_INSTALL_CMD}` / `{PROJECT_RUN_CMD}` family |
+| `{RUNTIME}` | "Runtime: …" bullet, decomposed from `{PROJECT_STACK}` | `{PROJECT_STACK}` |
+| `{FRAMEWORK}` | stack framework name, also reused as a heading ("### {FRAMEWORK} Conventions") | `{PROJECT_STACK}` |
+| `{DATA_LAYER}` | data-layer bullet, decomposed from `{PROJECT_STACK}`; close kinship to `{DATABASE}`/`{ORM}` — maintainer may fold in instead | `{PROJECT_STACK}` |
+| `{UNIT_RUNNER}` / `{UNIT_TEST_DIR}` | per-tier runner+dir pair | `{PROJECT_TEST_RUNNER}` |
+| `{INTEGRATION_RUNNER}` / `{INTEGRATION_TEST_DIR}` | sibling pair | `{PROJECT_TEST_RUNNER}` |
+| `{PARALLEL_FLAG}` | parallel-test-execution flag | test-tier family |
+| `{LOGGER_PATH}` | structured-logger module path | — |
+| `{LOG_LEVEL_ENV}` | env var controlling log verbosity | `{LOGGER_PATH}` |
+| `{RAW_LOG_CALLS}` | banned raw-log call name | `{LOGGER_PATH}` |
+| `{CONVENTION_1}` / `{CONVENTION_2}` | framework-convention bullets | — |
+| `{DATA_ACCESS_RULE}` | data-access rule bullet | — |
+| `{ETHICS_RULE_1}` / `{ETHICS_RULE_2}` | domain ethics-rule bullets | `{SACRED_GROUND}` |
+| `{PROJECT_TREE}` | file-structure diagram slot | — |
 
 ## Tech stack (per role — keep the mechanics, swap the names)
 
-| Source tech                                                     | Placeholder                                                                  |
+| Source tech | Placeholder |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Express, GraphQL Yoga, Drizzle ORM, postgres.js                 | `{BACKEND_STACK}` (in CLAUDE.md headers); inline: `{ORM}`, `{API_FRAMEWORK}` |
-| Expo SDK 52, React Native 0.76, Expo Router, Apollo, NativeWind | `{FRONTEND_STACK}`; inline `{UI_FRAMEWORK}`                                  |
-| Python 3.12+, LangChain, LangGraph, SQLAlchemy                  | `{AI_STACK}`; inline `{AI_FRAMEWORK}`                                        |
-| Next.js 15, Tailwind                                            | `{WEB_STACK}`                                                                |
-| Docker Compose, LocalStack, PostgreSQL                          | `{INFRA_STACK}`                                                              |
-| package mgrs `pnpm` / `npm` / `uv`                              | `{BE_PKG_MGR}` / `{FE_PKG_MGR}` / `{AI_PKG_MGR}`                             |
-| test runners Vitest / Jest / pytest                             | `{BE_TEST_RUNNER}` / `{FE_TEST_RUNNER}` / `{AI_TEST_RUNNER}`                 |
-| `Postgres` / `postgres.mmd`                                     | `{DATABASE}` / keep `postgres.mmd` filename (generic)                        |
-| cross-cutting `GraphQL`, `WebSocket`, `SQS`                     | `{API_PROTOCOL}`, `{REALTIME_PROTOCOL}`, `{QUEUE}`                           |
+| Express, GraphQL Yoga, Drizzle ORM, postgres.js | `{BACKEND_STACK}` (in CLAUDE.md headers); inline: `{ORM}`, `{API_FRAMEWORK}` |
+| Expo SDK 52, React Native 0.76, Expo Router, Apollo, NativeWind | `{FRONTEND_STACK}`; inline `{UI_FRAMEWORK}` |
+| Python 3.12+, LangChain, LangGraph, SQLAlchemy | `{AI_STACK}`; inline `{AI_FRAMEWORK}` |
+| Next.js 15, Tailwind | `{WEB_STACK}` |
+| Docker Compose, LocalStack, PostgreSQL | `{INFRA_STACK}` |
+| package mgrs `pnpm` / `npm` / `uv` | `{BE_PKG_MGR}` / `{FE_PKG_MGR}` / `{AI_PKG_MGR}` |
+| test runners Vitest / Jest / pytest | `{BE_TEST_RUNNER}` / `{FE_TEST_RUNNER}` / `{AI_TEST_RUNNER}` |
+| `Postgres` / `postgres.mmd` | `{DATABASE}` / keep `postgres.mmd` filename (generic) |
+| cross-cutting `GraphQL`, `WebSocket`, `SQS` | `{API_PROTOCOL}`, `{REALTIME_PROTOCOL}`, `{QUEUE}` |
 
 ## External services (vendors)
 
-| Source value                                            | Placeholder                                             |
+| Source value | Placeholder |
 | ------------------------------------------------------- | ------------------------------------------------------- |
 | Gemini / Google / Vertex AI / `GEMINI_API_KEY` / `AIza` | `{LLM_PROVIDER}` / `{LLM_API_KEY}` / `{LLM_KEY_PREFIX}` |
-| AssemblyAI                                              | `{TRANSCRIPTION_SERVICE}`                               |
-| Resend                                                  | `{EMAIL_SERVICE}`                                       |
-| `europe-west4` / EU residency                           | `{DATA_REGION}`                                         |
+| AssemblyAI | `{TRANSCRIPTION_SERVICE}` |
+| Resend | `{EMAIL_SERVICE}` |
+| `europe-west4` / EU residency | `{DATA_REGION}` |
 
 ## Ports
 
-| Source value                                                                        | Placeholder                          |
+| Source value | Placeholder |
 | ----------------------------------------------------------------------------------- | ------------------------------------ |
-| 3000 (BE), 4000 (web)                                                               | `{BACKEND_PORT}`, `{WEB_PORT}`       |
-| 5432 / 5433 (db local/test)                                                         | `{DB_PORT}` / `{DB_PORT_TEST}`       |
-| 4566 / 4567 (localstack)                                                            | `{QUEUE_PORT}` / `{QUEUE_PORT_TEST}` |
-| {BACKEND_PORT} sibling — frontend dev port                                          | `{FRONTEND_PORT}`                    |
-| generic port-pair fallback (LLM-judgment territory, per placeholder-map.tsv header) | `{PORT_A}` / `{PORT_B}`              |
+| 3000 (BE), 4000 (web) | `{BACKEND_PORT}`, `{WEB_PORT}` |
+| 5432 / 5433 (db local/test) | `{DB_PORT}` / `{DB_PORT_TEST}` |
+| 4566 / 4567 (localstack) | `{QUEUE_PORT}` / `{QUEUE_PORT_TEST}` |
+| {BACKEND_PORT} sibling — frontend dev port | `{FRONTEND_PORT}` |
+| generic port-pair fallback (LLM-judgment territory, per placeholder-map.tsv header) | `{PORT_A}` / `{PORT_B}` |
 
 ## Domain nouns (the `{DOMAIN_NOUN}` family)
 
-| Source value                                                              | Placeholder                                                                                                                                                                                                                                            |
+| Source value | Placeholder |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| therapist                                                                 | `{USER_NOUN}`                                                                                                                                                                                                                                          |
-| patient / client                                                          | `{SUBJECT_NOUN}`                                                                                                                                                                                                                                       |
-| therapy session                                                           | `{SESSION_NOUN}`                                                                                                                                                                                                                                       |
-| clinical / therapeutic (adj)                                              | `{DOMAIN_ADJ}`                                                                                                                                                                                                                                         |
-| therapy / clinical practice (the field)                                   | `{DOMAIN_NOUN}`                                                                                                                                                                                                                                        |
-| the domain's "sacred ground" / do-no-harm frame                           | `{SACRED_GROUND}` — every domain has a hard "never do this" line; keep the frame, swap the specifics. Canonical spelling — `{DOMAIN_SAFETY}` was a duplicate spelling naming the same concept, collapsed into this one; never re-add `{DOMAIN_SAFETY}` |
-| DSM-5, diagnoses, treatment recommendations, diagnostic labels            | `{FORBIDDEN_DOMAIN_OUTPUTS}` — the `{SACRED_GROUND}` examples for this domain; keep the guard, swap the examples                                                                                                                                       |
-| CBT/DBT/psychodynamic, Jung/Rogers/Freudian, Gottman, CCRT, Rose of Leary | `{DOMAIN_FRAMEWORKS}` — keep one illustrative slot                                                                                                                                                                                                     |
-| clinic / SUPERVISOR / THERAPIST roles                                     | `{ORG_UNIT}` / `{ROLE_SUPER}` / `{ROLE_USER}` / `{ROLE_ADMIN}` (top-of-hierarchy admin, above SUPER)                                                                                                                                                   |
+| therapist | `{USER_NOUN}` |
+| patient / client | `{SUBJECT_NOUN}` |
+| therapy session | `{SESSION_NOUN}` |
+| clinical / therapeutic (adj) | `{DOMAIN_ADJ}` |
+| therapy / clinical practice (the field) | `{DOMAIN_NOUN}` |
+| the domain's "sacred ground" / do-no-harm frame | `{SACRED_GROUND}` — every domain has a hard "never do this" line; keep the frame, swap the specifics. Canonical spelling — `{DOMAIN_SAFETY}` was a duplicate spelling naming the same concept, collapsed into this one; never re-add `{DOMAIN_SAFETY}` |
+| DSM-5, diagnoses, treatment recommendations, diagnostic labels | `{FORBIDDEN_DOMAIN_OUTPUTS}` — the `{SACRED_GROUND}` examples for this domain; keep the guard, swap the examples |
+| CBT/DBT/psychodynamic, Jung/Rogers/Freudian, Gottman, CCRT, Rose of Leary | `{DOMAIN_FRAMEWORKS}` — keep one illustrative slot |
+| clinic / SUPERVISOR / THERAPIST roles | `{ORG_UNIT}` / `{ROLE_SUPER}` / `{ROLE_USER}` / `{ROLE_ADMIN}` (top-of-hierarchy admin, above SUPER) |
 
 ## The PhDs (persona qualification)
 
-The Professor's qualification is fixed prose — "15+ PhDs, one in whatever area the work
-touches" — shipped verbatim in the fleet prompt (`templates/prompts/professor.md`); no
-per-install discipline slots exist and SETUP collects none. `{PHD_DISCIPLINE_1..10}` (prose form
-`{PHD_DISCIPLINE_N}`) and `{PHD_DOMAIN_DISCIPLINE_1..5}` are dead tokens — retired, never
-re-add them; a refresh pass finding a discipline roster in a live persona genericizes it
-to the fixed line.
+The Professor's qualification is fixed prose — "15+ PhDs, one in whatever area the work touches" — shipped verbatim in the fleet prompt (`templates/prompts/professor.md`); no per-install discipline slots exist and SETUP collects none. `{PHD_DISCIPLINE_1..10}` (prose form `{PHD_DISCIPLINE_N}`) and `{PHD_DOMAIN_DISCIPLINE_1..5}` are dead tokens — retired, never re-add them; a refresh pass finding a discipline roster in a live persona genericizes it to the fixed line.
 
 ## Regulation / compliance
 
-| Source value                      | Placeholder                                    |
+| Source value | Placeholder |
 | --------------------------------- | ---------------------------------------------- |
-| GDPR                              | `{REGULATION}`                                 |
-| EU AI Act                         | `{AI_REGULATION}`                              |
-| GDPR articles (Art. 17 etc.)      | `{REGULATION}` Art. `{N}` — keep the structure |
-| PHI / PII                         | `{SENSITIVE_DATA}`                             |
-| MDR / SaMD / NEN 7510 / ISO 27001 | `{DOMAIN_STANDARDS}`                           |
-| Dutch / NL / BV / KVK             | `{JURISDICTION}` / `{LEGAL_ENTITY_TYPE}`       |
-| `europe-west4` / EU               | `{DATA_REGION}`                                |
+| GDPR | `{REGULATION}` |
+| EU AI Act | `{AI_REGULATION}` |
+| GDPR articles (Art. 17 etc.) | `{REGULATION}` Art. `{N}` — keep the structure |
+| PHI / PII | `{SENSITIVE_DATA}` |
+| MDR / SaMD / NEN 7510 / ISO 27001 | `{DOMAIN_STANDARDS}` |
+| Dutch / NL / BV / KVK | `{JURISDICTION}` / `{LEGAL_ENTITY_TYPE}` |
+| `europe-west4` / EU | `{DATA_REGION}` |
 
 ### Tier B archetype slots
 
 The opt-in Tier B commands ship as archetype skeletons whose domain content is one named slot each. SETUP fills these from the interview; a template must never carry the source instance's concrete answer.
 
-| Command     | Slots                                                                                                                                 |
+| Command | Slots |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `/officer`  | `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}` |
-| `/pm`       | `{USER_PERSONA}`, `{PRODUCT_DOMAIN}`, `{USER_DAILY_WORKFLOW}`, `{USER_PAIN_POINTS}`                                                   |
-| `/mentor`   | `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}`                             |
-| `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}`              |
-| `/km`       | `{KNOWLEDGE_DOMAIN}`, `{KNOWLEDGE_TAXONOMY}`, `{KNOWLEDGE_CONSUMERS}`, `{SOURCE_AUTHORITIES}`, `{SECONDARY_LANG}`                     |
+| `/officer` | `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}` |
+| `/pm` | `{USER_PERSONA}`, `{PRODUCT_DOMAIN}`, `{USER_DAILY_WORKFLOW}`, `{USER_PAIN_POINTS}` |
+| `/mentor` | `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}` |
+| `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}` |
+| `/km` | `{KNOWLEDGE_DOMAIN}`, `{KNOWLEDGE_TAXONOMY}`, `{KNOWLEDGE_CONSUMERS}`, `{SOURCE_AUTHORITIES}`, `{SECONDARY_LANG}` |
 
 A named regulator, competitor, conference, or association surviving in one of these templates is a leak, not a default — the archetype keeps the SHAPE of the answer, never the answer.
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,waves,backlog.md}`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`.
-Swap only the project-named leaves: the AI project's `knowledge/` dir → `{AI_PROJECT}/knowledge/`, its Python package `src/<pkg>/` → `{AI_PROJECT}/src/...`, machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,waves,backlog.md}`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: the AI project's `knowledge/` dir → `{AI_PROJECT}/knowledge/`, its Python package `src/<pkg>/` → `{AI_PROJECT}/src/...`, machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 
@@ -209,7 +202,7 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), the wave command dir `commands/wave/{builder,orchestrator}.md` (keep the dual-runtime paragraph), the codex mirror's own wave wrappers under `codex/` (`skills/wave/SKILL.md`, `skills/wave-build/SKILL.md`, `agents/{wave,wave-build}.toml` — keep the dual Skill/Agent runtime block, and keep their read-target pointers aimed at `commands/wave/orchestrator.md` and `commands/wave/builder.md`), `commands/documenter.md` (keep `.codex/` in ownership), `commands/pfm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), the wave command dir `commands/wave/{builder,orchestrator}.md` (keep the dual-runtime paragraph), the codex mirror's own wave wrappers under `codex/` (`skills/wave/SKILL.md`, `skills/wave-build/SKILL.md`, `agents/{wave,wave-build}.toml` — keep the dual Skill/Agent runtime block, and keep their read-target pointers aimed at `commands/wave/orchestrator.md` and `commands/wave/builder.md`), `commands/documenter.md` (keep `.codex/` in ownership), `commands/pfm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
@@ -219,24 +212,24 @@ Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" s
 
 These slot into the concept families above — registered here to close prior gaps. One canonical token per concept; never invent a synonym.
 
-| Source value                                                                                                                     | Placeholder                                                                 | Family       |
+| Source value | Placeholder | Family |
 | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------ |
-| the AI service's own name / codename (the source's internal AI-service brand)                                                    | `{AI_SERVICE_NAME}`                                                         | Identity     |
-| the test database name (e.g. `<project>_test`)                                                                                   | `{TEST_DB_NAME}`                                                            | Tech stack   |
-| transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`)                                                | `{RECORD_NOUN}`                                                             | Domain nouns |
-| illustrative persona examples — a tech artifact, a domain artifact, a domain risk (Professor opening + Model Selection examples) | `{TECH_EXAMPLE_A}` / `{DOMAIN_EXAMPLE_A}` / `{DOMAIN_RISK_EXAMPLE}`         | Persona      |
-| the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`)                                          | `{CODEX_MODEL}`                                                             | Model pins   |
-| the Codex model id named per tier in the token-ledger `PRICING` notes (frontier / spec-execution / collector)                    | `{CODEX_MODEL_FRONTIER}` / `{CODEX_MODEL_SPEC}` / `{CODEX_MODEL_COLLECTOR}` | Model pins   |
-| the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`)              | `{CODEX_REASONING_EFFORT}`                                                  | Model pins   |
-| the database CLI forbidden at the execpolicy layer (e.g. `psql`)                                                                 | `{DB_CLI}`                                                                  | Tech stack   |
-| the container runtime forbidden at the execpolicy layer (e.g. `docker`)                                                          | `{CONTAINER_RUNTIME}`                                                       | Tech stack   |
-| the cloud CLI forbidden at the execpolicy layer (e.g. `aws`)                                                                     | `{CLOUD_CLI}`                                                               | Tech stack   |
-| the CMO character's own name (parallel to Professor/JC identity slot)                                                            | `{MARKETER_NAME}`                                                           | Identity     |
-| the artifact an ATLAS/compliance finding gets routed to (e.g. the adopter's DPIA)                                                | `{PRIVACY_ASSESSMENT}`                                                      | Tier B       |
-| the persona's founding metaphor (e.g. "the couch meets the terminal")                                                            | `{DOMAIN_METAPHOR_A}`                                                       | Persona      |
-| the N+1-query-joke punchline concept, domain-side                                                                                | `{DOMAIN_UNCONSCIOUS}`                                                      | Persona      |
-| the N+1-query-joke setup concept, domain-side                                                                                    | `{DOMAIN_DEFENSE_MECHANISM}`                                                | Persona      |
-| generic tech-stack mention inside Tier-A prose (refresh.md's own documented catch-all)                                           | `{TECH_STACK_PLACEHOLDER}`                                                  | Persona      |
+| the AI service's own name / codename (the source's internal AI-service brand) | `{AI_SERVICE_NAME}` | Identity |
+| the test database name (e.g. `<project>_test`) | `{TEST_DB_NAME}` | Tech stack |
+| transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
+| illustrative persona examples — a tech artifact, a domain artifact, a domain risk (Professor opening + Model Selection examples) | `{TECH_EXAMPLE_A}` / `{DOMAIN_EXAMPLE_A}` / `{DOMAIN_RISK_EXAMPLE}` | Persona |
+| the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
+| the Codex model id named per tier in the token-ledger `PRICING` notes (frontier / spec-execution / collector) | `{CODEX_MODEL_FRONTIER}` / `{CODEX_MODEL_SPEC}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
+| the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
+| the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
+| the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |
+| the cloud CLI forbidden at the execpolicy layer (e.g. `aws`) | `{CLOUD_CLI}` | Tech stack |
+| the CMO character's own name (parallel to Professor/JC identity slot) | `{MARKETER_NAME}` | Identity |
+| the artifact an ATLAS/compliance finding gets routed to (e.g. the adopter's DPIA) | `{PRIVACY_ASSESSMENT}` | Tier B |
+| the persona's founding metaphor (e.g. "the couch meets the terminal") | `{DOMAIN_METAPHOR_A}` | Persona |
+| the N+1-query-joke punchline concept, domain-side | `{DOMAIN_UNCONSCIOUS}` | Persona |
+| the N+1-query-joke setup concept, domain-side | `{DOMAIN_DEFENSE_MECHANISM}` | Persona |
+| generic tech-stack mention inside Tier-A prose (refresh.md's own documented catch-all) | `{TECH_STACK_PLACEHOLDER}` | Persona |
 
 ## Runtime metavariables — registered here so they are NOT substituted
 
@@ -244,14 +237,15 @@ These ALL-CAPS brace tokens appear in shipped templates but are **not install pl
 
 They are listed because the template token gate (`dev.sh verify templates`) FAILS on any ALL-CAPS brace token absent from this file. Both classes must therefore be registered, and the two lists carry different instructions: everything above gets substituted, everything here is left exactly as written. A new token that belongs to neither list is an unruled token, and the gate is right to stop the release for it.
 
-| Token                                                                     | Owner template                                                                      | Filled at runtime with                                     |
+| Token | Owner template | Filled at runtime with |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `{FORMAT}`                                                                | `commands/km.md`                                                                    | the knowledge format's short code                          |
-| `{SHA}`                                                                   | `epics/TEMPLATE.md`, `commands/documenter.md`                                       | a commit sha                                               |
-| `{MB}`                                                                    | `docs-commands/git/references/gitter-history.md`                                    | a file size in megabytes                                   |
-| `{PID}`                                                                   | `commands/wave/live.md`                                                             | the lock holder's process id                               |
-| `{PIPELINE}`                                                              | `commands/documenter/archive.md`, `docs-commands/documenter/references/scopes/*.md` | the pipeline's name                                        |
-| `{SCOPE}`                                                                 | `commands/pfm.md`                                                                   | the audit scope being run                                  |
-| `{SESSION_ID}`                                                            | `codex/skills/wave-builder/SKILL.md`                                                | the Codex session id to resume                             |
-| `{STATUS_LITERAL}`                                                        | `commands/audit/code-hygiene.md`                                                    | an example status string literal in the code being audited |
-| `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md`                                                                   | the seed progress row's counts, state, and detail          |
+| `{FORMAT}` | `commands/km.md` | the knowledge format's short code |
+| `{SHA}` | `epics/TEMPLATE.md`, `commands/documenter.md` | a commit sha |
+| `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
+| `{PID}` | `commands/wave/live.md` | the lock holder's process id |
+| `{PIPELINE}` | `commands/documenter/archive.md`, `docs-commands/documenter/references/scopes/*.md` | the pipeline's name |
+| `{SCOPE}` | `commands/pfm.md` | the audit scope being run |
+| `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
+| `{SESSION_ID}` | `codex/skills/wave-builder/SKILL.md` | the Codex session id to resume |
+| `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
+| `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |

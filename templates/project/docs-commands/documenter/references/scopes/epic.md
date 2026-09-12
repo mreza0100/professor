@@ -2,8 +2,7 @@
 
 Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration scope table is the card index). Read `docs/commands/documenter/references/doc-approval.md` FIRST — write rules, sacred boundaries, Approval gate, finish steps.
 
-**Write set (yours alone):** `docs/epics/{name}/**`.
-**Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md` (legacy: `1-plan.md`/`3-architecture.md`). Read only what exists.
+**Write set (yours alone):** `docs/epics/{name}/**`. **Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md` (legacy: `1-plan.md`/`3-architecture.md`). Read only what exists.
 
 **Governing write contract:** `documenter.md` § Epic consolidation contract — read that section before writing (it stays canonical there; `wave.md` Step 3.5 and `wave/orchestrator.md` also cite it).
 

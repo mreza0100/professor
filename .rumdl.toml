@@ -1,0 +1,113 @@
+# Professor markdown policy — read by `rumdl` (see /quality:forlint).
+#
+# One config, one policy table: `[global]` is the union of rules that run
+# everywhere, `[per-file-ignores]` removes the ones a category must not obey.
+# The category map at the bottom IS the mapping — grep a path, read its row.
+#
+# What this file reports when IT is broken: an unknown rule option does NOT fail
+# the run. rumdl prints `Using default values for rule MDxxx` on stderr and
+# formats with that rule's DEFAULT — a typo in `style = "compact"` silently pads
+# every table it was told to compact. `/quality:forlint check` greps for that
+# warning and fails; a bare `rumdl fmt` exit 0 is not evidence this config loaded.
+
+[global]
+respect-gitignore = true
+
+# MD014 strips `$` from shell examples. MD036 rewrites bold labels into headings,
+# restructuring prompts that use them as inline labels. MD040 appends `text` to
+# bare fences — pure token cost, zero reader value. MD063 title-cases headings,
+# which breaks the grep-true `### symbol` law (`### tracer` -> `### Tracer`).
+# MD072 sorts frontmatter keys, dropping `name` below `description`. MD073 did
+# not fire on a stale ToC entry under test; MD051 catches that same staleness.
+# MD046 reads a fence indented under a numbered list item as an indented code
+# block, so it cannot tell a nested fence from an unfenced one.
+disable = ["MD014", "MD036", "MD040", "MD046", "MD063", "MD072", "MD073"]
+
+# Report, never rewrite. MD018/MD020 read a line-initial `#20` — a wave, issue or
+# PR number — as a heading missing its space and "fix" it into one, which also
+# re-levels every real heading below it (measured: a wave-train doc lost two
+# prose lines that way). MD056/MD075 rewrite a malformed table by DELETING
+# content (measured: an orphaned row lost a cell's word).
+unfixable = ["MD018", "MD020", "MD056", "MD075"]
+
+# Generated mirrors are rebuilt from their Claude sources, never hand-formatted:
+# format the source and recompile (`pfm codex build .`, build-opencode.mjs).
+# `releases/` and `CHANGELOG.md` history plus `.professor/` ledgers are records,
+# not prose — and `refresh-scope.sh` parses release.md bullets line-anchored.
+# A wave train under `docs/dev/trains/` is a per-run append-log whose prose cites
+# waves as `#20` — line-initial, which MD018 reads as a heading missing its space.
+# `testdata/` holds byte-exact conversion oracles. A staged or embedded prompt
+# asset is byte-pinned by the Go suite — `prompts_asset_test.go` asserts the
+# asset equals its `templates/prompts/` twin and `pfm/prompts/embed_test.go`
+# pins each file's SHA-256 — so a format pass turns the suite red, and a
+# `harness-*.md` is a verbatim capture of another system's prompt that a reformat
+# falsifies outright (measured: MD046 added 8 fences, reflow merged two
+# IMPORTANT lines). A file whose bytes another test asserts is not prose.
+exclude = [
+  "AGENTS.md",
+  "**/AGENTS.md",
+  ".codex",
+  ".opencode",
+  "releases",
+  "CHANGELOG.md",
+  ".professor",
+  "**/testdata/**",
+  "docs/dev/trains",
+  "templates/prompts",
+  "pfm/prompts",
+  "pfm/internal/installer/assets",
+  "**/*.prompt.md",
+  "tmp",
+  ".worktrees",
+  "node_modules",
+  "**/node_modules/**",
+  ".rumdl_cache",
+]
+
+# The reflow engine, not a length gate. line-length is set past any real line so
+# MD013 never warns; reflow-mode "normalize" collapses each wrapped paragraph
+# onto ONE line. Measured on this repo's 23 prompt files: collapse -242 bytes /
+# -161 lines; sentence-per-line +1,048 / +690; wrap at 100 cols +2,289 / +1,602.
+# Wrapping BUYS tokens, it never saves them.
+[MD013]
+reflow = true
+reflow-mode = "normalize"
+line-length = 100000
+
+# Strips the column padding a table accumulates, which is where the tokens are:
+# -42,346 bytes (-7.4%) across docs/ alone. "tight" saves 3 KB more and renders
+# `|x|short|` — unreadable and no longer greppable per column.
+[MD060]
+enabled = true
+style = "compact"
+
+# The byline/deferred-work gate: /quality:doc bans `Last updated:` bylines and
+# root CLAUDE.md bans deferred TODOs. The one legitimate user of these words is
+# the hygiene audit that hunts them, exempted at the bottom of this file.
+[MD061]
+terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
+
+# ---------------------------------------------------------------------------
+# Category map — every professor-owned markdown path, and what it is exempt from
+#
+#   prompt  .claude/**, CLAUDE.md, templates/**  — an LLM reads it at runtime
+#   doc     docs/**, pfm/**, engines/**          — an agent greps then reads it
+#   public  README.md, INSTALL.md               — a person reads it rendered
+#   generated / record                           — in `exclude` above
+#
+# A prompt is exempt from four reader-facing rules and two structural ones:
+# MD024 repeated headings (`### Example` recurs by design), MD033 inline HTML
+# (prompts quote harness tags such as `<system-reminder>`), MD041 leading H1
+# (frontmatter-first files), MD059 link text, and MD001/MD025 heading levels —
+# a prompt's heading levels are addressing (agents cite "§ Model Selection"),
+# and demoting `# Work rhythm` to `##` rewrites an injected system prompt.
+# ---------------------------------------------------------------------------
+[per-file-ignores]
+".claude/**/*.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
+"CLAUDE.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
+"**/CLAUDE.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
+# Templates additionally carry `{PLACEHOLDER}` tokens and point at paths that
+# exist only after an install, so link-existence checks report false hits.
+"templates/**/*.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD051", "MD057", "MD059"]
+# The hygiene audit hunts TODO/FIXME markers, so it must be able to name them.
+"templates/project/commands/audit/code-hygiene.md" = ["MD061"]

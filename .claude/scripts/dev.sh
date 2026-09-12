@@ -243,6 +243,22 @@ act_templates() { # the shipped product: mechanical gates, no build
         fi
       fi
 
+      head_ "templates — description registry"
+      # A `description:` is the routing registry (/quality:description). An
+      # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
+      # registers the entry, a stricter runtime silently drops it, and no prompt
+      # rule can see it. The script distinguishes its own broken state from a
+      # clean tree (exit 2 toolchain, 3 empty scan, 1 real failure).
+      if scripts/description-check.sh; then
+        ok "every tracked frontmatter parses; description budget reported above"
+      else
+        case $? in
+          2) fail_step "description-check could not run (python3/PyYAML absent) — NO frontmatter was parsed" ;;
+          3) fail_step "description-check scanned nothing — the SCAN is broken, not the tree" ;;
+          *) fail_step "a tracked frontmatter does not parse as YAML — quote the value or remove the bare ': ' (see the list above)" ;;
+        esac
+      fi
+
       head_ "templates — codex generated-marker claim"
       # The templates dir's shipped JS compiler and this repo's `pfm codex build`
       # write the same $HOME/.codex outputs on adopter hosts. A copy that stops

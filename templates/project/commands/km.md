@@ -1,7 +1,7 @@
 ---
 name: km
-description: Author, sharpen, and curate {PROJECT_NAME}'s {AI_SERVICE_NAME} prompt registry under `{AI_PROJECT}/knowledge/` — prompt templates (`prompts/**/*.prompt.md`, loaded verbatim by `load_prompt()` via `REGISTRY.json`) and full-injection {DOMAIN_ADJ} note formats (`note-formats/`). Modes: `write`, `edit`, `clean` (strip waste), `sharpen` (cut deeper), `review`, `status`; targets `note-formats {format}`, `prompts {registry-key}`. Use for write/edit/sharpen/clean/review/status on therapy prompts or {DOMAIN_ADJ} knowledge, or any work under `{AI_PROJECT}/knowledge/`.
-argument-hint: [write|edit|sharpen|clean|review|status] [target]
+description: "Curates {PROJECT_NAME}'s {AI_SERVICE_NAME} prompt registry under `{AI_PROJECT}/knowledge/` — prompt templates (`prompts/**/*.prompt.md`, `REGISTRY.json`) and full-injection {DOMAIN_ADJ} note formats (`note-formats/`). Modes `write`, `edit`, `clean`, `sharpen`, `review`, `status`; targets `note-formats {format}`, `prompts {registry-key}`. Route any work under `{AI_PROJECT}/knowledge/` here."
+argument-hint: "[write|edit|sharpen|clean|review|status] [target]"
 ---
 
 # KM (Knowledge-Manager) — {AI_SERVICE_NAME} prompt & {DOMAIN_ADJ}-knowledge curation
