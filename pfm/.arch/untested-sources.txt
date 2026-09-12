@@ -14,7 +14,6 @@ cmd/pfm/harvest_command.go
 cmd/pfm/headless_command.go
 cmd/pfm/heal_command.go
 cmd/pfm/init_command.go
-cmd/pfm/inject_name_resolver.go
 cmd/pfm/inject_resume.go
 cmd/pfm/launcher_repair_command.go
 cmd/pfm/mcp_serve_command.go

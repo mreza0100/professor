@@ -1,4 +1,4 @@
-cmd/pfm/chat_satellite_command.go 1087
+cmd/pfm/chat_satellite_command.go 944
 cmd/pfm/doctor.go 1450
 cmd/pfm/headless_command.go 824
 cmd/pfm/reload_command.go 1083

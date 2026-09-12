@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -33,7 +34,6 @@ type backend struct {
 	sharedState          *shared.Store
 	injector             injectionService
 	resolver             resolve.Resolver
-	operations           SharedOperations
 	chat                 ChatVerbs
 	dispatch             Dispatch
 	paths                paths.Values
@@ -73,11 +73,8 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		return nil, err
 	}
 	injector, err := inject.New(inject.Dependencies{
-		Resolver: resolver,
-		Names: mcpRosterNameResolver{
-			operations: runtime.Operations,
-			tmuxDir:    runtime.Paths.TmuxDir,
-		},
+		Resolver:       resolver,
+		Names:          runtime.Names,
 		Spawner:        inject.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
 		ClaudeBinary:   runtime.ClaudeBinary,
 		CodexBinary:    runtime.CodexBinary,
@@ -96,114 +93,12 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		sharedState:          sharedState,
 		injector:             injector,
 		resolver:             *resolver,
-		operations:           runtime.Operations,
 		chat:                 runtime.Chat,
 		dispatch:             runtime.Dispatch,
 		paths:                runtime.Paths,
 		warnings:             warnings,
 		allowAmbientIdentity: runtime.AllowAmbientIdentity,
 	}, nil
-}
-
-type mcpRosterNameResolver struct {
-	operations SharedOperations
-	tmuxDir    string
-}
-
-func (resolver mcpRosterNameResolver) ResolveName(
-	ctx context.Context,
-	name, requiredEngine string,
-) (inject.Target, int, string, error) {
-	if resolver.operations.List == nil {
-		return inject.Target{}, inject.CodeUnknown, "", nil
-	}
-	candidates, err := resolver.liveCandidates(ctx, requiredEngine)
-	if err != nil {
-		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf(
-			"resolve roster name %q: %w", name, err,
-		)
-	}
-	match, found, err := resolve.ResolveRosterName(candidates, name)
-	if err != nil {
-		var ambiguous *resolve.RosterAmbiguityError
-		if errors.As(err, &ambiguous) {
-			return inject.Target{}, inject.CodeAmbiguous, ambiguous.Error(), nil
-		}
-		return inject.Target{}, inject.CodeUndelivered, "", err
-	}
-	if !found {
-		return inject.Target{}, inject.CodeUnknown, "", nil
-	}
-	return inject.Target{
-		SocketPath: match.SocketPath,
-		Pane:       match.Pane,
-		Engine:     match.Engine,
-		Name:       match.Name,
-		ID:         match.ID,
-		Session:    match.Session,
-	}, 0, "", nil
-}
-
-// SenderName is the roster read backwards for the chat at identity's seat —
-// the name a peer's chat_inject resolves first. Absent List, the answer is
-// "not in the roster", never an error: the engine then reads the sender's own
-// screen, exactly as ResolveName leaves the raw pane fallbacks to it.
-func (resolver mcpRosterNameResolver) SenderName(
-	ctx context.Context,
-	identity resolve.Identity,
-) (string, bool, error) {
-	if resolver.operations.List == nil {
-		return "", false, nil
-	}
-	candidates, err := resolver.liveCandidates(ctx, "")
-	if err != nil {
-		return "", false, fmt.Errorf("name sender seat %s: %w", identity.Session, err)
-	}
-	name, found := resolve.ResolveRosterSeat(candidates, identity)
-	return name, found, nil
-}
-
-// liveCandidates projects the live roster onto the matching rule's input.
-// requiredEngine, when set, keeps only that engine's rows.
-func (resolver mcpRosterNameResolver) liveCandidates(
-	ctx context.Context,
-	requiredEngine string,
-) ([]resolve.RosterCandidate, error) {
-	listed, err := resolver.operations.List(ctx, LSInput{All: true})
-	if err != nil {
-		return nil, fmt.Errorf("list live chats: %w", err)
-	}
-	candidates := make([]resolve.RosterCandidate, 0, len(listed.Rows))
-	for _, row := range listed.Rows {
-		if row.Killed || !liveRosterKind(row.Kind) || row.Socket == "" ||
-			(requiredEngine != "" && string(row.Engine) != requiredEngine) {
-			continue
-		}
-		pane := row.Pane
-		if pane == "" {
-			pane = row.Session
-		}
-		if pane == "" {
-			continue
-		}
-		socketPath, pathErr := socketPathUnder(resolver.tmuxDir, row.Socket)
-		if pathErr != nil {
-			return nil, fmt.Errorf("row %q socket: %w", row.ID, pathErr)
-		}
-		candidates = append(candidates, resolve.RosterCandidate{
-			Name: row.Name, ID: row.ID, Socket: row.Socket, SocketPath: socketPath,
-			Session: row.Session, Pane: pane, Engine: string(row.Engine), Live: true,
-		})
-	}
-	return candidates, nil
-}
-
-func liveRosterKind(kind string) bool {
-	return kind == compose.LiveClaude.String() ||
-		kind == compose.LiveCodex.String() ||
-		kind == compose.LiveSplit.String() ||
-		kind == compose.Agent.String() ||
-		kind == compose.Booting.String()
 }
 
 func (current *backend) close() error {
@@ -220,11 +115,85 @@ func accountEmojis(accounts []pfmconfig.Account) []string {
 	return result
 }
 
+// defaultChatLSLimit keeps a full killed history (hundreds of rows) from
+// blowing the caller's tool-result budget in one answer; maxChatLSLimit is the
+// ceiling an explicit caller may raise it to.
+const (
+	defaultChatLSLimit = 200
+	maxChatLSLimit     = 1000
+)
+
+// list is chat_ls: chat.List under the tool's payload contract, projected
+// onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
-	if current.operations.List == nil {
-		return LSOutput{}, fmt.Errorf("chat_ls shared CLI operation is not configured")
+	if current.chat == nil {
+		return LSOutput{}, fmt.Errorf("chat_ls verb is not configured")
 	}
-	return current.operations.List(ctx, input)
+	if input.All && input.Killed {
+		return LSOutput{}, fmt.Errorf("all and killed are mutually exclusive")
+	}
+	limit := input.Limit
+	if limit == 0 {
+		limit = defaultChatLSLimit
+	}
+	if limit < 1 || limit > maxChatLSLimit {
+		return LSOutput{}, fmt.Errorf("limit must be between 1 and %d", maxChatLSLimit)
+	}
+	view := compose.DefaultView
+	if input.All {
+		view = compose.AllView
+	} else if input.Killed {
+		view = compose.KilledView
+	}
+	listed, err := current.chat.List(ctx, chat.ListRequest{View: view, Project: input.Project, Limit: limit})
+	if err != nil {
+		return LSOutput{}, err
+	}
+	rows := make([]ChatRow, 0, len(listed.Rows))
+	for _, row := range listed.Rows {
+		session := row.SessionName
+		if session == "" {
+			session = row.ID
+		}
+		account := row.Account
+		if account == 0 && len(row.Accounts) > 0 {
+			account = row.Accounts[0]
+		}
+		rows = append(rows, ChatRow{
+			Session: session, ID: row.ID, Engine: compose.EngineForKind(row.Kind),
+			State: chatRowState(row), Dir: row.CWD, Project: row.Project, Name: row.Name,
+			Account: account, Kind: row.Kind.String(), Killed: row.Killed,
+			Socket: row.Socket, Pane: row.PaneID,
+		})
+	}
+	return LSOutput{
+		Rows: rows, Count: len(rows), Matched: listed.Matched,
+		Truncated: listed.Truncated, KilledCount: listed.KilledCount,
+		Filter: input.Project,
+	}, nil
+}
+
+// chatRowState is the one place a chat_ls row's state is decided.
+//
+// The killed-but-live arm is the honesty half of the kill fix: a kill that
+// closed nothing still wrote its tombstone, so a row came back asserting BOTH
+// things at once — killed:true beside state "idle" and kind "live-claude" —
+// and no caller could tell a real kill from a de-listing. A contradiction is
+// reported as a contradiction, never smoothed into one of its two halves.
+func chatRowState(row compose.Row) string {
+	switch {
+	case row.Killed && chat.IsLive(row.Kind):
+		return "killed-but-live"
+	case row.Kind == compose.Booting:
+		// A booting chat HAS a socket and already answers chat_inject by
+		// name. Excluding it made chat_ls report a chat that exists as
+		// simply absent for its first minute.
+		return "booting"
+	case chat.IsLive(row.Kind):
+		return "idle"
+	default:
+		return "resumable"
+	}
 }
 
 type callerIdentity struct {
@@ -314,18 +283,4 @@ func socketPathUnder(root, socket string) (string, error) {
 		return "", fmt.Errorf("socket escapes tmux directory")
 	}
 	return path, nil
-}
-
-// excludedFromChatLS names the row kinds chat_ls never lists. NewClaude and
-// NewCodex are synthetic launch actions with no chat behind them yet.
-// Booting is a real live chat, but it carries no crumb or transcript yet —
-// only a crumbless socket — so it has no stable identity for the MCP tool
-// contract to hand a caller; whoami/find/resume all key on an id this row
-// does not have one of. It stays excluded here until that identity exists,
-// the same reason the picker's ⌃X kill guard (ui/model.go) and compose's
-// applyKill refuse it too.
-func excludedFromChatLS(kind compose.Kind) bool {
-	return kind == compose.NewClaude ||
-		kind == compose.NewCodex ||
-		kind == compose.Booting
 }

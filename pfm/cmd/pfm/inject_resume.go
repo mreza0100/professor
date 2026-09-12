@@ -20,6 +20,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/agentopen"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -50,19 +51,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		return resumeTarget{}, false, fmt.Errorf("stat transcript target %q: %w", target, err)
 	}
 
-	var resolved paths.Values
-	var err error
-	if len(runtimes) != 0 {
-		resolved = runtimes[0].Paths
-	} else {
-		resolved, err = paths.Resolve()
-		if err != nil {
-			return resumeTarget{}, false, err
-		}
-	}
-	includeLegacyPrimary := len(runtimes) == 0 ||
-		runtimes[0].Config.Source("accounts") != pfmconfig.SourceFile
-	files, err := claudeTranscriptFiles(resolved, includeLegacyPrimary)
+	files, err := pfmchat.ClaudeTranscripts(firstRuntime(runtimes))
 	if err != nil {
 		return resumeTarget{}, false, err
 	}
@@ -91,22 +80,22 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		}
 	}
 
-	if len(excerptNeedles(target)) == 0 {
+	if len(pfmchat.ExcerptNeedles(target)) == 0 {
 		return resumeTarget{}, false, nil
 	}
-	match, alternatives, err := findTranscriptContent([]byte(target), runtimes...)
+	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: target})
 	if err != nil {
-		if strings.Contains(err.Error(), "no session contains the excerpt") ||
-			strings.Contains(err.Error(), "no transcript registry is available") {
+		if errors.Is(err, pfmchat.ErrNoExcerptMatch) || errors.Is(err, pfmchat.ErrNoTranscriptRegistry) {
 			return resumeTarget{}, false, nil
 		}
 		return resumeTarget{}, false, err
 	}
-	if len(alternatives) > 0 && alternatives[0].Hits == match.Hits {
+	match := matches[0]
+	if len(matches) > 1 && matches[1].Hits == match.Hits {
 		return resumeTarget{}, false, fmt.Errorf(
 			"excerpt is ambiguous between %s and %s",
 			match.ID,
-			alternatives[0].ID,
+			matches[1].ID,
 		)
 	}
 	return resumeTarget{ID: match.ID, Path: match.Path}, true, nil

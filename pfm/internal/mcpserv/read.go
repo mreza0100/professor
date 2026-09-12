@@ -3,45 +3,63 @@ package mcpserv
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+
+	"hostops/pfm/internal/transcript"
 )
 
-func (current *backend) read(
-	ctx context.Context,
-	input ReadInput,
-) (ReadOutput, error) {
-	if current.operations.Read == nil {
-		return ReadOutput{}, fmt.Errorf("chat_read shared CLI operation is not configured")
+// read is chat_read: chat.ReadEntries under the tool's turn and byte bounds.
+func (current *backend) read(ctx context.Context, input ReadInput) (ReadOutput, error) {
+	if current.chat == nil {
+		return ReadOutput{}, fmt.Errorf("chat_read verb is not configured")
 	}
-	return current.operations.Read(ctx, input)
+	lastN := input.LastN
+	if lastN == 0 {
+		lastN = 20
+	}
+	if lastN < 1 || lastN > 200 {
+		return ReadOutput{}, fmt.Errorf("last_n must be between 1 and 200")
+	}
+	maxBytes := input.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = 64 << 10
+	}
+	if maxBytes < 1 || maxBytes > 1<<20 {
+		return ReadOutput{}, fmt.Errorf("max_bytes must be between 1 and 1048576")
+	}
+	found, entries, truncated, err := current.chat.Read(ctx, input.Source, lastN)
+	if err != nil {
+		return ReadOutput{}, fmt.Errorf("chat_read: %w", err)
+	}
+	turns, bytes, budgetTruncated := boundTurns(entries, maxBytes)
+	return ReadOutput{
+		ID: found.ID, Path: found.Path, Engine: string(found.Engine),
+		Turns: turns, Count: len(turns), Truncated: truncated || budgetTruncated, Bytes: bytes,
+	}, nil
 }
 
-func (current *backend) resolveReadSource(
-	ctx context.Context,
-	value string,
-) (searchable, error) {
-	rows, err := current.searchableRows(ctx)
-	if err != nil {
-		return searchable{}, err
-	}
-	clean := filepath.Clean(value)
-	for _, row := range rows {
-		if row.id == value || filepath.Clean(row.path) == clean {
-			return row, nil
+// boundTurns keeps the newest entries whose text fits maxBytes, newest last;
+// the oldest kept entry is cut to the remaining budget rather than dropped.
+func boundTurns(entries []transcript.Entry, maxBytes int) ([]Turn, int, bool) {
+	kept := make([]Turn, 0, len(entries))
+	used := 0
+	truncated := false
+	for index := len(entries) - 1; index >= 0; index-- {
+		available := maxBytes - used
+		if available <= 0 {
+			truncated = true
+			break
 		}
-	}
-	rollouts, err := current.database.Rollouts(ctx)
-	if err != nil {
-		return searchable{}, err
-	}
-	for _, rollout := range rollouts {
-		if rollout.SessionID == value {
-			for _, row := range rows {
-				if row.id == rollout.ID {
-					return row, nil
-				}
-			}
+		entry := entries[index]
+		text := entry.Text
+		if len(text) > available {
+			text = transcript.Truncate(text, available)
+			truncated = true
 		}
+		used += len(text)
+		kept = append(kept, Turn{Role: entry.Role, Text: text, Timestamp: entry.Timestamp})
 	}
-	return searchable{}, fmt.Errorf("source %q is not an indexed transcript", value)
+	for left, right := 0, len(kept)-1; left < right; left, right = left+1, right-1 {
+		kept[left], kept[right] = kept[right], kept[left]
+	}
+	return kept, used, truncated
 }

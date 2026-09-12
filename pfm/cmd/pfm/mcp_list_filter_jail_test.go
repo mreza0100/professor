@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/mcpserv"
-	"hostops/pfm/internal/paths"
 )
 
 // TestMCPListProjectFilterIsASubstringNotAQuery is the F4 regression:
@@ -25,16 +23,7 @@ func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 	indexResumableChat(t, root, "alpha-project", "11111111-1111-4111-8111-111111111112")
 	indexResumableChat(t, root, "beta-project", "22222222-2222-4222-8222-222222222223")
 
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ops := mcpSharedOperations(commandRuntime{Paths: resolved})
-
-	output, err := ops.List(context.Background(), mcpserv.LSInput{All: true, Project: "ALPHA"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Project: "ALPHA"})
 	if output.Matched != 1 || output.Count != 1 {
 		t.Fatalf("filtered list = %+v, want exactly the alpha row", output)
 	}
@@ -48,10 +37,7 @@ func TestMCPListProjectFilterIsASubstringNotAQuery(t *testing.T) {
 	// The unfiltered call is the control: both rows come back when no filter
 	// is given, proving the narrowing above came from the filter and not
 	// from some other difference between the two fixtures.
-	unfiltered, err := ops.List(context.Background(), mcpserv.LSInput{All: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	unfiltered := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true})
 	if unfiltered.Matched != 2 {
 		t.Fatalf("unfiltered matched = %d, want 2", unfiltered.Matched)
 	}
@@ -69,16 +55,7 @@ func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 	indexResumableChat(t, root, "two-project", "44444444-4444-4444-8444-444444444445")
 	indexResumableChat(t, root, "three-project", "55555555-5555-4555-8555-555555555556")
 
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ops := mcpSharedOperations(commandRuntime{Paths: resolved})
-
-	output, err := ops.List(context.Background(), mcpserv.LSInput{All: true, Limit: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
+	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Limit: 1})
 	if output.Matched != 3 {
 		t.Fatalf("output.Matched = %d, want 3 (the full match count regardless of Limit)", output.Matched)
 	}
@@ -89,16 +66,13 @@ func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 		t.Fatal("output.Truncated = false, want true when Count < Matched")
 	}
 
-	full, err := ops.List(context.Background(), mcpserv.LSInput{All: true, Limit: 3})
-	if err != nil {
-		t.Fatal(err)
-	}
+	full := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true, Limit: 3})
 	if full.Truncated {
 		t.Fatal("output.Truncated = true when Limit covers every matched row")
 	}
 }
 
-// TestMCPListAdmitsBootingRow is the F6 regression: excludedFromMCPList used
+// TestMCPListAdmitsBootingRow is the F6 regression: the chat_ls exclusion used
 // to drop compose.Booting alongside the picker's placeholder New* rows, so
 // chat_ls reported a chat that had already spawned its process and its tmux
 // pane — and already answers chat_inject by name — as flatly absent for its
@@ -137,15 +111,7 @@ func TestMCPListAdmitsBootingRow(t *testing.T) {
 		cmdline:   []string{"/opt/claude"},
 	})
 
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ops := mcpSharedOperations(commandRuntime{Paths: resolved})
-	output, err := ops.List(context.Background(), mcpserv.LSInput{All: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	output := callChatTool[mcpserv.LSOutput](t, "chat_ls", mcpserv.LSInput{All: true})
 	var found *mcpserv.ChatRow
 	for index := range output.Rows {
 		if output.Rows[index].Socket == socket {

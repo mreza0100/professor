@@ -11,6 +11,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	claudeengine "hostops/pfm/internal/engine/claude"
 	codexengine "hostops/pfm/internal/engine/codex"
+	opencodeengine "hostops/pfm/internal/engine/opencode"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/testjail"
@@ -18,10 +19,11 @@ import (
 
 func TestMain(m *testing.M) {
 	// The composition root (cmd/pfm/engines.go) wires the engines in
-	// production. A package test wires the ones its scans read, or every index
-	// is empty and every target reads as unknown.
+	// production. A package test wires every engine's index source — a scan
+	// refuses an engine it cannot index — and the matchers its gathers use.
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
+	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	os.Exit(testjail.Run(m))

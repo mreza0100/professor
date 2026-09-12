@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -35,11 +34,6 @@ import (
 	"hostops/pfm/internal/transcript"
 )
 
-type transcriptMatch struct {
-	ID, Path, First, Last string
-	Hits, Needles         int
-}
-
 func runChatFind(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet("chat find", "usage: pfm chat find <excerpt-file>", stderr)
 	if code, ok := parseFlags(flags, args); !ok {
@@ -68,161 +62,22 @@ func runChatFind(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	return 0
 }
 
-func findTranscript(excerptPath string, runtimes ...commandRuntime) (transcriptMatch, []transcriptMatch, error) {
+// findTranscript is chat.Find over an excerpt file, in the CLI's display
+// contract: the best match and at most four runners-up.
+func findTranscript(excerptPath string, runtimes ...commandRuntime) (pfmchat.TranscriptMatch, []pfmchat.TranscriptMatch, error) {
 	content, err := os.ReadFile(excerptPath)
 	if err != nil {
-		return transcriptMatch{}, nil, err
+		return pfmchat.TranscriptMatch{}, nil, err
 	}
-	return findTranscriptContent(content, runtimes...)
-}
-
-func findTranscriptContent(content []byte, runtimes ...commandRuntime) (transcriptMatch, []transcriptMatch, error) {
-	needles := excerptNeedles(string(content))
-	if len(needles) == 0 {
-		return transcriptMatch{}, nil, errors.New("excerpt has no line of 20+ characters to search for")
-	}
-	var resolved paths.Values
-	var err error
-	if len(runtimes) != 0 {
-		resolved = runtimes[0].Paths
-	} else {
-		resolved, err = paths.Resolve()
-		if err != nil {
-			return transcriptMatch{}, nil, err
-		}
-	}
-	includeLegacyPrimary := len(runtimes) == 0 ||
-		runtimes[0].Config.Source("accounts") != pfmconfig.SourceFile
-	files, err := claudeTranscriptFiles(resolved, includeLegacyPrimary)
+	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: string(content)})
 	if err != nil {
-		return transcriptMatch{}, nil, err
+		return pfmchat.TranscriptMatch{}, nil, err
 	}
-	if len(files) == 0 {
-		return transcriptMatch{}, nil, errors.New("no transcript registry is available")
-	}
-	current := os.Getenv("CLAUDE_CODE_SESSION_ID")
-	var matches []transcriptMatch
-	for _, path := range files {
-		id := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		if id == current {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return transcriptMatch{}, nil, fmt.Errorf("read transcript %s: %w", path, err)
-		}
-		hits := 0
-		for _, needle := range needles {
-			encoded, _ := json.Marshal(needle)
-			if len(encoded) >= 2 && bytes.Contains(raw, encoded[1:len(encoded)-1]) {
-				hits++
-			}
-		}
-		if hits == 0 {
-			continue
-		}
-		first, last := transcriptRange(raw)
-		matches = append(matches, transcriptMatch{ID: id, Path: path, First: first, Last: last, Hits: hits, Needles: len(needles)})
-	}
-	if len(matches) == 0 {
-		return transcriptMatch{}, nil, errors.New("no session contains the excerpt; try a longer or more distinctive chunk")
-	}
-	sort.Slice(matches, func(left, right int) bool {
-		if matches[left].Hits != matches[right].Hits {
-			return matches[left].Hits > matches[right].Hits
-		}
-		return matches[left].Path < matches[right].Path
-	})
 	alternatives := matches[1:]
 	if len(alternatives) > 4 {
 		alternatives = alternatives[:4]
 	}
 	return matches[0], alternatives, nil
-}
-
-func excerptNeedles(value string) []string {
-	var candidates []string
-	for _, line := range strings.Split(value, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		line = strings.TrimLeftFunc(line, func(r rune) bool {
-			return unicode.IsSpace(r) || strings.ContainsRune(">#*-", r)
-		})
-		line = strings.TrimRightFunc(line, unicode.IsSpace)
-		if len(line) >= 20 {
-			candidates = append(candidates, line)
-		}
-	}
-	sort.SliceStable(candidates, func(left, right int) bool {
-		return len(candidates[left]) > len(candidates[right])
-	})
-	if len(candidates) > 5 {
-		candidates = candidates[:5]
-	}
-	if len(candidates) == 0 {
-		if query := strings.TrimSpace(value); query != "" {
-			candidates = []string{query}
-		}
-	}
-	return candidates
-}
-
-func claudeTranscriptFiles(resolved paths.Values, includeLegacyPrimary bool) ([]string, error) {
-	roots := append([]string(nil), resolved.Roots[pfmengine.Claude]...)
-	if includeLegacyPrimary {
-		roots = append([]string{filepath.Join(resolved.Home, ".claude", "projects")}, roots...)
-	}
-	seen := make(map[string]struct{})
-	var files []string
-	for _, root := range roots {
-		projects, err := os.ReadDir(root)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read transcript registry %s: %w", root, err)
-		}
-		for _, project := range projects {
-			if !project.IsDir() {
-				continue
-			}
-			directory := filepath.Join(root, project.Name())
-			entries, err := os.ReadDir(directory)
-			if err != nil {
-				return nil, fmt.Errorf("read transcript project %s: %w", directory, err)
-			}
-			for _, entry := range entries {
-				if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
-					continue
-				}
-				path := filepath.Join(directory, entry.Name())
-				if _, exists := seen[path]; exists {
-					continue
-				}
-				seen[path] = struct{}{}
-				files = append(files, path)
-			}
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func transcriptRange(raw []byte) (string, string) {
-	var first, last string
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	for scanner.Scan() {
-		var record struct {
-			Timestamp string `json:"timestamp"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &record) == nil && record.Timestamp != "" {
-			if first == "" {
-				first = record.Timestamp
-			}
-			last = record.Timestamp
-		}
-	}
-	return first, last
 }
 
 func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {

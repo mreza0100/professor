@@ -129,7 +129,7 @@ func newInjectEngineAllowingUnsigned(
 			}
 		}
 	}
-	dependencies.Names = fleetNameResolver{runtimes: append([]commandRuntime(nil), runtimes...)}
+	dependencies.Names = pfmchat.NameResolver{Runtime: identifier.Runtime}
 	dependencies.CodexSeat = identifier
 	return inject.New(dependencies)
 }

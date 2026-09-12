@@ -1,39 +1,32 @@
 package main
 
 import (
+	"context"
+	"io"
+	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
+	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/paths"
 )
 
-// TestMCPListExcludesOnlyThePickerPlaceholderRows is the F6-reworked half of
-// the original TestMCPListExcludesEveryFreshAndBootingRow: excludedFromMCPList
-// still drops the picker's "start a new chat" placeholder rows (New*), but no
-// longer drops compose.Booting — a booting row is a real chat with a live
-// process and a live tmux pane, not a placeholder, and mcp_shared.go's List
-// closure now admits it with state "booting" instead (see
-// TestMCPListAdmitsBootingRow in mcp_list_filter_jail_test.go for the
-// end-to-end proof of that state string).
-func TestMCPListExcludesOnlyThePickerPlaceholderRows(t *testing.T) {
-	for _, kind := range []compose.Kind{
-		compose.NewClaude,
-		compose.NewCodex,
-		compose.NewOpencode,
-	} {
-		if !excludedFromMCPList(kind) {
-			t.Errorf("MCP list admitted placeholder row kind %s", kind)
-		}
+// TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime pins the one bridge into
+// MCP: the typed verbs and the roster rung both run on the command's own
+// runtime — the same one, never a second load — and the argv dispatcher left
+// for the stateful verbs refuses anything but chat argv.
+func TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime(t *testing.T) {
+	bridged := mcpRuntime(commandRuntime{Paths: paths.Values{TmuxDir: "/jail/tmux"}})
+	verbs, ok := bridged.Chat.(pfmchat.Verbs)
+	if !ok || verbs.Runtime == nil || verbs.Runtime.Paths.TmuxDir != "/jail/tmux" {
+		t.Fatalf("Chat = %#v, want chat.Verbs over the command's runtime", bridged.Chat)
 	}
-	for _, kind := range []compose.Kind{
-		compose.Booting,
-		compose.LiveClaude,
-		compose.LiveCodex,
-		compose.ResumeClaude,
-		compose.ResumeCodex,
-		compose.ResumeOpencode,
-	} {
-		if excludedFromMCPList(kind) {
-			t.Errorf("MCP list excluded real row kind %s", kind)
-		}
+	names, ok := bridged.Names.(pfmchat.NameResolver)
+	if !ok || names.Runtime != verbs.Runtime {
+		t.Fatalf("Names = %#v, want chat.NameResolver over the verbs' own runtime", bridged.Names)
+	}
+	var stderr strings.Builder
+	if code := bridged.Dispatch(context.Background(), []string{"ls"}, io.Discard, &stderr); code != 2 ||
+		!strings.Contains(stderr.String(), "requires chat argv") {
+		t.Fatalf("Dispatch(ls) = %d %q, want the non-chat argv refused", code, stderr.String())
 	}
 }

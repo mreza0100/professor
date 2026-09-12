@@ -16,6 +16,7 @@ import (
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
+	"hostops/pfm/internal/transcript"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -65,10 +66,12 @@ type Runtime struct {
 	// OpencodeBinary is the configured OpenCode launch command; empty means
 	// the registered OpenCode descriptor's default binary.
 	OpencodeBinary string
-	Operations     SharedOperations
 	// Chat is the typed verb layer (production: chat.Verbs over the command's
 	// runtime). Verbs not yet on it still reach package main through Dispatch.
-	Chat     ChatVerbs
+	Chat ChatVerbs
+	// Names is inject's fleet roster rung (production: chat.NameResolver over
+	// the command's runtime). Nil leaves inject to its raw pane fallbacks.
+	Names    inject.NameResolver
 	Dispatch Dispatch
 	// AllowAmbientIdentity is reserved for the stdio server, whose process is
 	// launched by the calling chat. A shared HTTP daemon must leave it false:
@@ -77,20 +80,16 @@ type Runtime struct {
 	AllowAmbientIdentity bool
 }
 
-// SharedOperations are the canonical chat operations supplied by the CLI
-// command package. MCP only adapts structured input to these functions; it
-// does not maintain a second implementation of list, find, or read.
-type SharedOperations struct {
-	List func(context.Context, LSInput) (LSOutput, error)
-	Find func(context.Context, FindInput) (FindOutput, error)
-	Read func(context.Context, ReadInput) (ReadOutput, error)
-}
-
 // ChatVerbs is the slice of the chat verb layer this server calls typed. Its
-// production value is chat.Verbs; tests substitute a recorder.
+// production value is chat.Verbs; tests substitute a recorder. MCP owns only
+// the adaptation — input validation, payload bounds, the wire shape — never a
+// second implementation of a verb.
 type ChatVerbs interface {
 	Last(context.Context, chat.LastRequest) (chat.LastResult, error)
 	Status(context.Context, chat.StatusRequest) (headless.Status, error)
+	List(context.Context, chat.ListRequest) (chat.ListResult, error)
+	Find(context.Context, chat.FindRequest) ([]chat.TranscriptMatch, error)
+	Read(ctx context.Context, target string, tail int) (headless.Chat, []transcript.Entry, bool, error)
 }
 
 // Dispatch is the in-process command dispatcher used by stateful chat tools.

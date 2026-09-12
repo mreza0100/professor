@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/chat"
+	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
@@ -93,25 +94,19 @@ func metadataIdentityService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := []ChatRow{
+	rows := []compose.Row{
 		{
-			Session: jail.session, ID: "thread-a", Engine: pfmengine.Codex,
-			State: "idle", Dir: "/work/alpha", Project: "alpha",
-			Name: "Codex A", Kind: "live-codex", Socket: jail.socket, Pane: jail.pane,
+			SessionName: jail.session, ID: "thread-a", CWD: "/work/alpha", Project: "alpha",
+			Name: "Codex A", Kind: compose.LiveCodex, Socket: jail.socket, PaneID: jail.pane,
 		},
 		{
-			Session: jail.busySession, ID: "thread-b", Engine: pfmengine.Codex,
-			State: "busy", Dir: "/work/beta", Project: "beta",
-			Name: "Codex B", Kind: "live-codex", Socket: jail.busySocket, Pane: "%0",
+			SessionName: jail.busySession, ID: "thread-b", CWD: "/work/beta", Project: "beta",
+			Name: "Codex B", Kind: compose.LiveCodex, Socket: jail.busySocket, PaneID: "%0",
 		},
 	}
 	service, err := NewConfigured("test", io.Discard, Runtime{
 		Paths: resolved,
-		Operations: SharedOperations{
-			List: func(context.Context, LSInput) (LSOutput, error) {
-				return LSOutput{Rows: rows, Count: len(rows)}, nil
-			},
-		},
+		Chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -144,13 +139,13 @@ func metadataIdentityService(t *testing.T) *Service {
 // metadata before the verb runs, so the verb only ever sees a concrete id.
 func TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs(t *testing.T) {
 	service := metadataIdentityService(t)
-	verbs := &fakeChatVerbs{
-		last: chat.LastResult{Text: "self answer\n"},
-		status: headless.Status{
-			Name: "Codex A", State: headless.StateIdle, Engine: pfmengine.Codex, SessionID: "thread-a",
-		},
+	// The service's verb fake already lists the jailed Codex seats the caller
+	// resolves against; the verbs under test answer beside them.
+	verbs := service.backend.chat.(*fakeChatVerbs)
+	verbs.last = chat.LastResult{Text: "self answer\n"}
+	verbs.status = headless.Status{
+		Name: "Codex A", State: headless.StateIdle, Engine: pfmengine.Codex, SessionID: "thread-a",
 	}
-	service.backend.chat = verbs
 	protocol := connectInMemory(t, service.Server())
 	meta := mcp.Meta{"threadId": "thread-a"}
 	last := callToolWithMeta[LastOutput](t, protocol.clientSession, "chat_last", meta, LastInput{Target: "self"})
@@ -425,15 +420,12 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := ChatRow{
-		Session: "cx-seat", ID: "thread-a", Engine: pfmengine.Codex,
-		Kind: "live-codex", Socket: "cx-seat", Pane: "%0",
+	live := compose.Row{
+		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%0",
 	}
 	duplicateBackend := &backend{
 		paths: resolved,
-		operations: SharedOperations{List: func(context.Context, LSInput) (LSOutput, error) {
-			return LSOutput{Rows: []ChatRow{live, live}}, nil
-		}},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{live, live}}},
 	}
 	caller, err := duplicateBackend.callerForRequest(
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
@@ -445,9 +437,7 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 
 	listBackend := &backend{
 		paths: resolved,
-		operations: SharedOperations{List: func(context.Context, LSInput) (LSOutput, error) {
-			return LSOutput{}, errors.New("fleet database busy")
-		}},
+		chat:  &fakeChatVerbs{err: errors.New("fleet database busy")},
 	}
 	_, err = listBackend.callerForRequest(
 		context.Background(), mcp.Meta{"threadId": "thread-a"},
@@ -456,15 +446,13 @@ func TestMCPMetadataIdentityRejectsAmbiguousRowsAndNamesListFailures(t *testing.
 		t.Fatalf("list failure collapsed into absence: %v", err)
 	}
 
-	for _, malformed := range []ChatRow{
-		{Session: "cx-seat", ID: "thread-a", Engine: pfmengine.Codex, Kind: "resume-codex", Socket: "cx-seat", Pane: "%0"},
-		{Session: "cx-seat", ID: "thread-a", Engine: pfmengine.Codex, Kind: "live-codex", Socket: "../cx-seat", Pane: "%0"},
+	for _, malformed := range []compose.Row{
+		{SessionName: "cx-seat", ID: "thread-a", Kind: compose.ResumeCodex, Socket: "cx-seat", PaneID: "%0"},
+		{SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "../cx-seat", PaneID: "%0"},
 	} {
 		malformedBackend := &backend{
 			paths: resolved,
-			operations: SharedOperations{List: func(context.Context, LSInput) (LSOutput, error) {
-				return LSOutput{Rows: []ChatRow{malformed}}, nil
-			}},
+			chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{malformed}}},
 		}
 		caller, err := malformedBackend.callerForRequest(
 			context.Background(), mcp.Meta{"threadId": "thread-a"},

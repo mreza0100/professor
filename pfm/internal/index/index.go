@@ -46,7 +46,6 @@ type Counters struct {
 	// OcSessions counts the OpenCode sessions mirrored this pass. The mirror
 	// is a full replace, so this is the population, not a delta.
 	OcSessions            int
-	Skipped               map[pfmengine.ID]string
 	options               Options
 	legacySingleCodexRoot bool
 }
@@ -105,21 +104,27 @@ func newWithRoots(database *store.Store, roots map[pfmengine.ID][]string) (*Inde
 	return &Indexer{database: database, roots: cleanRoots}, nil
 }
 
-// Run asks every registered engine source to perform its indexing pass.
+// Run asks every registered engine's index source to perform its indexing
+// pass. An engine with no source is a wiring failure, refused before any source
+// syncs: skipping it would leave its chats out of the index, and every lookup
+// would report a failure to look as "no chat named X".
 func (indexer *Indexer) Run(ctx context.Context, options Options) (Counters, error) {
 	counters := Counters{
-		Skipped:               make(map[pfmengine.ID]string),
 		options:               options,
 		legacySingleCodexRoot: indexer.legacySingleCodexRoot,
 	}
-	for _, id := range pfmengine.All() {
+	ids := pfmengine.All()
+	engineSources := make([]Source, 0, len(ids))
+	for _, id := range ids {
 		source, err := SourceFor(id)
 		if err != nil {
-			counters.Skipped[id] = err.Error()
-			continue
+			return counters, fmt.Errorf("index: %w", err)
 		}
-		if err := source.Sync(ctx, indexer.database, indexer.roots[id], &counters); err != nil {
-			return counters, fmt.Errorf("index engine %s: %w", id, err)
+		engineSources = append(engineSources, source)
+	}
+	for position, source := range engineSources {
+		if err := source.Sync(ctx, indexer.database, indexer.roots[ids[position]], &counters); err != nil {
+			return counters, fmt.Errorf("index engine %s: %w", ids[position], err)
 		}
 	}
 	return counters, nil

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -200,35 +199,6 @@ func TestChatInjectCarriesTheThenArgument(t *testing.T) {
 		unresolved.Typed ||
 		!strings.Contains(unresolved.Message, "matched no live chat") {
 		t.Fatalf("legal steer chain = %+v", unresolved)
-	}
-}
-
-// TestExtractNeedlesMirrorsTheShellAwkPass pins the needle rules themselves:
-// decoration stripped, 20+ characters only, five longest, longest first.
-func TestExtractNeedlesMirrorsTheShellAwkPass(t *testing.T) {
-	excerpt := strings.Join([]string{
-		"# short",
-		"> aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r",
-		"- bbbbbbbbbbbbbbbbbbbbbbbbb",
-		"* cccccccccccccccccccccc   ",
-		"ddddddddddddddddddddd",
-		"eeeeeeeeeeeeeeeeeeeee",
-		"fffffffffffffffffffff",
-		"nineteen characters",
-	}, "\n")
-	needles := extractNeedles(excerpt)
-	want := []string{
-		strings.Repeat("a", 30),
-		strings.Repeat("b", 25),
-		strings.Repeat("c", 22),
-		strings.Repeat("d", 21),
-		strings.Repeat("e", 21),
-	}
-	if !reflect.DeepEqual(needles, want) {
-		t.Fatalf("extractNeedles() = %q, want %q", needles, want)
-	}
-	if got := extractNeedles("all lines are short\nhere"); len(got) != 0 {
-		t.Fatalf("short excerpt produced needles: %q", got)
 	}
 }
 
