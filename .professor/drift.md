@@ -435,3 +435,10 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   The Claude harness's attribution reminder asks for a session URL trailer; this repo publishes
   every branch, so gitter keeps the `Co-Authored-By` line and drops the URL. An adopter's private
   repo may keep the harness default — the template twin stays silent on it.
+
+- **KEEP-LOCAL: `dev.sh verify pfm` runs pfm's architecture ratchet; `pfm/CLAUDE.md` points at what exists.**
+  `verify pfm` runs `pfm/scripts/arch-check.sh` (C1–C16 against `pfm/.arch/`) after `go vet`, and the
+  ratchet reads the fence's mounted git dir, so the gate holds inside `dev.sh iso`. `pfm/CLAUDE.md`
+  drops its dangling `PLAN.md`/`CUTOVER.md`/`check/`/`legacy/`/`PFM_DB_SCRIPT` pointers, replaces the
+  package table with the `go list` doc map, and names the façades and the ratchet. pfm is this repo's
+  own engine, so the `templates/project/scripts/dev.sh` twin carries no ratchet.

@@ -306,7 +306,12 @@ act_pfm() {
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
     build)   run "pfm: go build" -- go -C "$d" build ./... ;;
-    typecheck|verify) run "pfm: go vet" -- go -C "$d" vet ./... ;;
+    typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
+    verify)
+      run "pfm: go vet" -- go -C "$d" vet ./...
+      # The architecture ratchet (C1–C16 vs pfm/.arch/). Its own broken state
+      # is rc 2 (an enumerator or grep that could not run), never a PASS.
+      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh" ;;
     # -count=1 is not optional: without it a package whose inputs are unchanged
     # reports `ok  (cached)`, and this gate would call a run it never watched a
     # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
@@ -424,7 +429,7 @@ commands:
   install                fetch dependencies
   build                  compile
   typecheck              vet / tsc --noEmit
-  verify                 pre-test gates (go vet, walker's verify, templates's leak + token gates)
+  verify                 pre-test gates (go vet + pfm's architecture ratchet, walker's verify, templates's leak + token gates)
   test                   run the test suite
   all                    verify + build + test for the project
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
