@@ -22,7 +22,6 @@ import (
 
 const (
 	testFreshSocketEnv = "PFM_TEST_FRESH_SOCKET"
-	testNowNSEnv       = "PFM_TEST_NOW_NS"
 	codexAvailableEnv  = "PFM_CODEX_AVAILABLE"
 	// fleetRefreshInterval is the cadence while somebody is driving the picker.
 	// One pass is expensive on a real fleet — a tmux fork+exec PER LIVE

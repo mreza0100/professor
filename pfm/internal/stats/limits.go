@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
@@ -1134,7 +1135,7 @@ func writeCodexCacheRecord(path string, record codexCacheRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode codex usage cache %s: %w", path, err)
 	}
-	return usagehook.AtomicWrite(path, body, 0o600)
+	return atomicfile.Write(path, body, 0o600)
 }
 
 func (sampler *LimitsSampler) fetchCodexForAccount(

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/paths"
 )
 
@@ -247,7 +248,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		}
 		return "", nil
 	}
-	if err := AtomicWrite(flagPath, []byte(options.ConfigDir), 0o600); err != nil {
+	if err := atomicfile.Write(flagPath, []byte(options.ConfigDir), 0o600); err != nil {
 		return "", err
 	}
 	line := windowPhrase("5h", cached.FiveHour, five, now, "15:04") +
@@ -507,7 +508,7 @@ func WriteCacheRecord(path string, record CacheRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode usage cache %s: %w", path, err)
 	}
-	return AtomicWrite(path, body, 0o600)
+	return atomicfile.Write(path, body, 0o600)
 }
 
 // RateLimitError reports an HTTP 429 from a usage endpoint. RetryAfter is
@@ -659,35 +660,6 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 	}
 	sort.Strings(unknown)
 	fmt.Fprintf(logger, "pfm usage-hook: debug: ignored usage keys: %s\n", strings.Join(unknown, ","))
-}
-
-// AtomicWrite writes body to path via a same-directory temp file plus
-// rename, so a reader never observes a partially written cache file. Shared
-// by this hook's own refresh() and WriteCacheRecord — the one writer every
-// shared-cache caller uses.
-func AtomicWrite(path string, body []byte, mode os.FileMode) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".usage-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(body); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
 }
 
 func utilization(window usageWindow, fallback int) int {

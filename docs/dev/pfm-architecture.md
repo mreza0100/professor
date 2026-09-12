@@ -309,6 +309,8 @@ Hops are reported as the pair source-only · orientation.
 - step 1's ratchet half (`pfm/scripts/arch-check.sh`, the `pfm/.arch/` baselines, `make arch` in `gate`); the guarded `pfm/CLAUDE.md` half waits for `/pfm`;
 - step 6's scan half, as `internal/fleet`. Codex pane reconciliation moved with it, because `fleet.Scan` runs it. `config.Runtime` became the one runtime shape (`commandRuntime` is an alias), and the account projections became `config` methods;
 - step 4(a)'s first verbs: target resolution, `last`, `status` and `read` in `internal/chat`. MCP `chat_last` and `chat_status` call `chat.Verbs` typed (C10 10 → 8).
+- step 4(a)'s rest and 4(d)'s `mcpSharedOperations`: `chat.List`, `chat.Find` and `chat.NameResolver`. MCP `chat_ls`, `chat_find` and `chat_read` call `ChatVerbs`, and inject's roster rung is one resolver for the CLI and MCP. `capture`, `whoami` and `resolve` already called `inject` and `resolve` typed, so they needed no move. An index pass refuses an engine with no index source instead of skipping it.
+- step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers, plus the harvester's `config.writeAtomic` and `harvest/cache.go`, which are held out of this wave.
 
 The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 

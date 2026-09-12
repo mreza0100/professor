@@ -105,9 +105,14 @@ grep -v '^internal/tmux/' "$T/src.list" > "$T/notmux.list"
 if g "$T/raw" "$T/notmux.list" -lE '^type (CommandTmux|RealTmux|CommandHost|reloadCommandTmux) struct'; then cp "$T/raw" "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
 else say C5-tmux-runner ERROR "grep could not read sources"; fi
 
-# C6 one atomic writer: named atomic-write helpers outside internal/atomicfile/.
+# C6 one atomic writer: outside internal/atomicfile/, a file naming an atomic-write
+# helper or hand-rolling the scratch-file-plus-rename pattern (os.CreateTemp + os.Rename).
 grep -v '^internal/atomicfile/' "$T/src.list" > "$T/noatomic.list"
-if g "$T/raw" "$T/noatomic.list" -lE '^func (writeAtomic|WriteAtomic|atomicWrite|AtomicWrite|writeFileAtomic|WriteFileAtomic)\('; then cp "$T/raw" "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
+if g "$T/c6" "$T/noatomic.list" -lE '^func (writeAtomic|WriteAtomic|atomicWrite|AtomicWrite|writeFileAtomic|WriteFileAtomic)\(' &&
+   g "$T/temps" "$T/noatomic.list" -l 'os\.CreateTemp('; then
+  if [ ! -s "$T/temps" ] || g "$T/renames" "$T/temps" -l 'os\.Rename('; then
+    [ -s "$T/temps" ] && cat "$T/renames" >> "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
+  else say C6-atomic-write ERROR "grep could not read the scratch-file writers"; fi
 else say C6-atomic-write ERROR "grep could not read sources"; fi
 
 # C7 one SQLite opener: sql.Open outside internal/sqlitedb/.

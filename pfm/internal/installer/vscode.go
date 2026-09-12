@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
@@ -531,7 +533,7 @@ func (installer *engine) writeVSCodeSettings(path string, content []byte) error 
 	case !errors.Is(err, fs.ErrNotExist):
 		return err
 	}
-	return atomicWrite(physical, content, mode)
+	return atomicfile.Write(physical, content, mode)
 }
 
 func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
@@ -559,7 +561,7 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 		installer.ok(path)
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicWrite(path, encoded, 0o600) })
+	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
 }
 
 func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []string, []byte, error) {

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
 )
@@ -462,7 +463,7 @@ func restoreUpdateHookFiles(snapshots []updateHookSnapshot, stderr io.Writer) er
 			continue
 		}
 		if snapshot.beforeExisted {
-			err = writeUpdateHookFile(snapshot.path, snapshot.before, snapshot.beforeMode)
+			err = atomicfile.Write(snapshot.path, snapshot.before, snapshot.beforeMode)
 		} else {
 			err = os.Remove(snapshot.path)
 		}
@@ -491,28 +492,6 @@ func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
 		return nil, 0, false, fmt.Errorf("read hook file %s: %w", path, err)
 	}
 	return content, info.Mode().Perm(), true, nil
-}
-
-// writeUpdateHookFile replaces path atomically: a temp file beside it, then a
-// rename, so a concurrent reader never sees a half-written settings file.
-func writeUpdateHookFile(path string, content []byte, mode fs.FileMode) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".restore-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporary.Name())
-	if _, err := temporary.Write(content); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
 }
 
 func preferredUpdateSourceRepo(home, repo string) string {
@@ -616,7 +595,7 @@ func copyUpdateFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return writeUpdateFile(target, raw, info.Mode().Perm())
+	return atomicfile.Write(target, raw, info.Mode().Perm())
 }
 
 func replaceUpdateFile(source, target string) error {
@@ -628,31 +607,7 @@ func replaceUpdateFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return writeUpdateFile(target, raw, info.Mode().Perm())
-}
-
-func writeUpdateFile(path string, raw []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".pfm-update-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode.Perm()); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(raw); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
+	return atomicfile.Write(target, raw, info.Mode().Perm())
 }
 
 func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) error {

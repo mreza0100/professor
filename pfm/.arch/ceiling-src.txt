@@ -4,7 +4,7 @@ cmd/pfm/headless_command.go 824
 cmd/pfm/reload_command.go 1083
 cmd/pfm/update_project.go 889
 internal/compose/compose.go 1312
-internal/config/config.go 1733
+internal/config/config.go 1720
 internal/dream/apply/apply.go 1016
 internal/dream/dream.go 1088
 internal/dream/seat/runner.go 857
@@ -17,7 +17,7 @@ internal/installer/installer.go 2484
 internal/installer/vscode.go 962
 internal/reload/reload.go 963
 internal/stats/limits.go 1309
-internal/statusline/render.go 1148
+internal/statusline/render.go 1121
 internal/ui/cosmos.go 1482
 internal/ui/model.go 1617
 internal/ui/render.go 1178

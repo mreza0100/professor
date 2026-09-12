@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/professor"
 )
@@ -118,7 +119,7 @@ func initScaffold(source, target string, force bool, stdout io.Writer) (int, err
 			return 0, fmt.Errorf("read template %s: %w", entry.template, err)
 		}
 		raw = addScaffoldMarker(entry.local, entry.template, store.SHA, raw)
-		if err := writeInitFile(targetPath, raw, entry.mode); err != nil {
+		if err := atomicfile.Write(targetPath, raw, entry.mode); err != nil {
 			return 0, fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err)
 		}
 		hash, err := professor.HashTemplate(entry.source)
@@ -213,32 +214,6 @@ func addScaffoldMarker(local, template, sha string, raw []byte) []byte {
 		}
 	}
 	return raw
-}
-
-func writeInitFile(target string, raw []byte, mode os.FileMode) (resultErr error) {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".pfm-init-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer func() {
-		if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove temporary scaffold file %s: %w", temporaryPath, removeErr))
-		}
-	}()
-	if err := temporary.Chmod(mode.Perm()); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if _, err := temporary.Write(raw); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, target)
 }
 
 // discoverSourceRepo finds the clone when install is launched from it. It is

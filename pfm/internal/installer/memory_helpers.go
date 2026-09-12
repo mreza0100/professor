@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
@@ -87,7 +89,7 @@ func (installer *engine) migrateMemoryHelpers() error {
 		}
 		migration := migration
 		if err := installer.change("migrate memory helper "+migration.oldPath+" -> "+migration.newPath, func() error {
-			if err := atomicWrite(migration.newPath, migration.content, migration.mode); err != nil {
+			if err := atomicfile.Write(migration.newPath, migration.content, migration.mode); err != nil {
 				return fmt.Errorf("copy owned memory helper %s to %s: %w", migration.oldPath, migration.newPath, err)
 			}
 			return nil
@@ -102,7 +104,7 @@ func (installer *engine) migrateMemoryHelpers() error {
 			if err := copyBackup(rewrite.path, backup); err != nil {
 				return fmt.Errorf("backup settings before memory helper hook migration %s to %s: %w", rewrite.path, backup, err)
 			}
-			if err := atomicWrite(rewrite.path, rewrite.content, rewrite.mode); err != nil {
+			if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
 				return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)
 			}
 			return nil

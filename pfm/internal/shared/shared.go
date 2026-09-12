@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/paths"
 
 	_ "modernc.org/sqlite"
@@ -583,24 +584,7 @@ func SetPrimaryAccount(
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create primary mirror directory: %w", err)
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".claude-primary.tmp-*")
-	if err != nil {
-		return fmt.Errorf("create primary mirror scratch: %w", err)
-	}
-	tempPath := file.Name()
-	defer os.Remove(tempPath)
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("secure primary mirror scratch: %w", err)
-	}
-	if _, err := fmt.Fprintf(file, "%d\n", account); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write primary mirror: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close primary mirror: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := atomicfile.Write(path, []byte(strconv.Itoa(account)+"\n"), 0o600); err != nil {
 		return fmt.Errorf("install primary mirror: %w", err)
 	}
 	return nil

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -80,7 +82,7 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 					return err
 				}
 			}
-			return atomicWrite(path, wanted, 0o644)
+			return atomicfile.Write(path, wanted, 0o644)
 		}); err != nil {
 			return err
 		}
@@ -120,7 +122,7 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 					return err
 				}
 			}
-			return atomicWrite(path, wanted, 0o644)
+			return atomicfile.Write(path, wanted, 0o644)
 		}); err != nil {
 			return err
 		}

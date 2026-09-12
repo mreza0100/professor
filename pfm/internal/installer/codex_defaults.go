@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
@@ -71,7 +72,7 @@ func (installer *engine) wireCodexDefaults() error {
 					return err
 				}
 			}
-			return atomicWrite(path, []byte(wanted), 0o600)
+			return atomicfile.Write(path, []byte(wanted), 0o600)
 		}); err != nil {
 			return err
 		}

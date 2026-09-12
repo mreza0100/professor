@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
@@ -447,7 +448,7 @@ func gitSegment(ctx context.Context, runtime Runtime, directory string) string {
 			modified := gitDiffCount(ctx, runtime, directory, false)
 			content = fmt.Sprintf("%s|%d|%d", strings.TrimSpace(string(branch)), staged, modified)
 		}
-		_ = atomicWrite(cachePath, []byte(content), 0o600)
+		_ = atomicfile.Write(cachePath, []byte(content), 0o600)
 	}
 	body, err := os.ReadFile(cachePath)
 	if err != nil || len(body) == 0 {
@@ -654,7 +655,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 	}
 	// Written only after the window provably carries the label, so a failed
 	// rename is retried on the next render instead of being cached as done.
-	_ = atomicWrite(cachePath, []byte(label), 0o600)
+	_ = atomicfile.Write(cachePath, []byte(label), 0o600)
 }
 
 // pfmSocket resolves the fleet socket this render is running inside, or
@@ -695,9 +696,9 @@ func writeBreadcrumb(runtime Runtime, transcriptPath string) {
 		return
 	}
 	_ = os.Chmod(runtime.SIDDir, 0o700)
-	_ = atomicWrite(filepath.Join(runtime.SIDDir, socket), []byte(transcriptPath), 0o600)
+	_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket), []byte(transcriptPath), 0o600)
 	if pane := runtime.getenv("TMUX_PANE"); pane != "" {
-		_ = atomicWrite(filepath.Join(runtime.SIDDir, socket+"."+pane), []byte(transcriptPath), 0o600)
+		_ = atomicfile.Write(filepath.Join(runtime.SIDDir, socket+"."+pane), []byte(transcriptPath), 0o600)
 	}
 }
 
@@ -742,7 +743,7 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	body, err := json.Marshal(payload)
 	if err == nil {
 		body = append(body, '\n')
-		_ = atomicWrite(
+		_ = atomicfile.Write(
 			filepath.Join(runtime.RateLimitDir, fmt.Sprintf("acct-%d.%s.json", account, sessionID)),
 			body,
 			0o600,
@@ -797,7 +798,7 @@ func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string) s
 		if !anchor.IsZero() {
 			encoded = strconv.FormatInt(anchor.Unix(), 10)
 		}
-		_ = atomicWrite(cachePath, []byte(key+" "+encoded), 0o600)
+		_ = atomicfile.Write(cachePath, []byte(key+" "+encoded), 0o600)
 	}
 	if anchor.IsZero() {
 		return sep + yellow + "💾" + label + "?" + reset
@@ -924,34 +925,6 @@ func formatCacheTime(duration time.Duration, expired bool) string {
 		return fmt.Sprintf("%dm:%ds", seconds/60, seconds%60)
 	}
 	return fmt.Sprintf("%ds", seconds)
-}
-
-func atomicWrite(path string, body []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".pfm-statusline-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(body); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
 }
 
 func fileAge(path string, now time.Time) time.Duration {
@@ -1093,7 +1066,7 @@ func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
 			for _, status := range last {
 				reject = reject && (status == 401 || status == 403)
 			}
-			_ = atomicWrite(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolInt(reject))), 0o600)
+			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolInt(reject))), 0o600)
 		}
 	}
 	body, err := os.ReadFile(cachePath)

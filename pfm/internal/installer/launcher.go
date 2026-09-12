@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
@@ -93,7 +94,7 @@ func RepairClaudeLauncher(home string) (bool, error) {
 		if current.Mode()&os.ModeSymlink == 0 {
 			return false, fmt.Errorf("refuse to replace non-symlink Claude binary: %s", canonical)
 		}
-		if err := atomicWrite(claudeLauncherStatePath(home), []byte(status.Target+"\n"), 0o600); err != nil {
+		if err := atomicfile.Write(claudeLauncherStatePath(home), []byte(status.Target+"\n"), 0o600); err != nil {
 			return false, fmt.Errorf("record displaced Claude target: %w", err)
 		}
 	}
