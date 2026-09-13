@@ -139,4 +139,12 @@ func TestReviewExhaustedDOIReceiptNamesOnlyQueriedSources(t *testing.T) {
 	if !strings.Contains(configured.Error, "checked Unpaywall") {
 		t.Fatalf("a configured run DOES check Unpaywall and must say so: %q", configured.Error)
 	}
+
+	// Crossref is queried on every DOI (no key, no email gate), so the receipt
+	// must name it in both runs; omitting it under-reports what was checked.
+	for name, run := range map[string]Result{"keyless": keyless, "configured": configured} {
+		if !strings.Contains(run.Error, "Crossref") {
+			t.Fatalf("the %s receipt omits Crossref, which every DOI resolution queries: %q", name, run.Error)
+		}
+	}
 }
