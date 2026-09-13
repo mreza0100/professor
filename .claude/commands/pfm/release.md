@@ -1,6 +1,6 @@
 ---
 name: pfm:release
-description: Versions, tags and publishes this repo — `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}] [--ledger {root}]…`, "blueprint release", "publish the blueprint"; only on the user's explicit in-turn publish request. Sweeps every linked .professor/release.md into CHANGELOG.md + releases/vX.Y.Z.md, re-derives templates/** from that source under --from, lands develop → main via gitter's release PR.
+description: Versions, tags and publishes this repo — `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}] [--ledger {root}]…`, "blueprint release", "cut a release"; only on the user's explicit in-turn publish request. Reviews and fixes develop, rehearses the adopter update in the fence, lands develop → main by release PR.
 argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--ledger {root}]…'
 ---
 
@@ -8,57 +8,56 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--
 
 ## Constants
 
-- Public repo: `mreza0100/professor` — **this repo IS the upstream.** There is no separate clone to sync into; the working copy you are in is the one that publishes.
-- Blueprint tree: `templates/` · Public README: `README.md` · Release notes: `releases/vX.Y.Z.md` · Version file: `VERSION`
-- The **live source project** — the private repo whose `.claude/` the templates are derived from — is NOT this repo. It is named with `--from {path}` and is optional; without it, the refresh pass is skipped (§ Step 3).
+- Public repo: `mreza0100/professor` — **this repo IS the upstream.** The working copy you are in is the one that publishes.
+- Blueprint tree: `templates/` · Public README: `README.md` · Release notes: `releases/vX.Y.Z.md` · Index: `CHANGELOG.md` · Version file: `VERSION`
+- Release worktrees: `.worktrees/release/main` (detached, byte-identical to `origin/main` — the STABLE side) and `.worktrees/release/develop` (branch `release/v{NEW}` from `develop` — the CANDIDATE side). Every release edit, fix, and commit lands in the candidate worktree; the live checkout holds other sessions' WIP and is never swept.
+- Rehearsal: `infra/release-rehearsal.sh` (the fenced adopter machine) + `$CDOCS/pfm/$REFS/release-rehearsal.md` (the Codex driver and its briefs).
+- The **live source project** — the private repo whose `.claude/` the templates are derived from — is NOT this repo. It is named with `--from {path}` and is optional; without it, the refresh pass is skipped (Step 4).
 
 ## Pre-flight
 
 1. **Publication authority.** This command pushes. It runs only on an explicit in-turn request to release/publish. No authority → stop here and say so.
-2. `gh auth status` — must be the repo owner.
-3. `git status` — on branch `develop`, working tree clean or holding only this release's edits. Bail on another branch or unrelated dirty state; never sweep it in.
-4. `git fetch --tags origin` — the version Step 4 computes must be greater than every published tag, or the tag push collides. Report the current newest tag.
+2. `gh auth status` — must be the repo owner. `gh api repos/mreza0100/professor/rules/branches/main` must list `pull_request`, `non_fast_forward`, `deletion`, and `required_status_checks`; a missing rule is a STOP — restore the `main-release-only` ruleset before anything publishes.
+3. `git fetch --tags origin`; `git pull --ff-only origin develop` in the live checkout (STOP if it fails); `git merge-base --is-ancestor origin/main develop` — a commit on `main` that `develop` lacks means the last release never fast-forwarded `develop` back; STOP and report it. Report the newest tag.
 
 ## Steps
 
-1. **Validate args** — bump type + summary required, bail if missing. `patch` = bug fixes / doc tweaks · `minor` = new archetype, command, or step · `major` = breaking change or migration.
+1. **Validate args** — bump type + summary required, bail if missing. `patch` = bug fixes / doc tweaks · `minor` = new archetype, command, or step · `major` = breaking change or migration. Read `VERSION`, compute `{NEW}`; it must exceed every tag from Pre-flight 3.
 
-2. `git pull --ff-only origin develop` — STOP if it fails. Then `git fetch origin main` and confirm `git merge-base --is-ancestor origin/main develop` — a commit on `main` that `develop` lacks means the last release never fast-forwarded `develop` back; STOP and report it.
+2. **Worktrees** — `/git` Phase SETUP twice: `.worktrees/release/main` as `git worktree add --detach … origin/main`, then verify `HEAD == origin/main` and `status --porcelain` empty; `.worktrees/release/develop` on branch `release/v{NEW}` from `develop`'s SHA. A resumed release reuses both only after the same verification; `main` drifted from `origin/main` → recreate it.
 
-2b. **Ledger sweep — always runs.** `scripts/refresh-scope.sh ledgers . {--from root, if given} {each --ledger root}` enumerates every reachable `.professor/release.md`: each named root plus the sub-projects its own manifest names by role. Report the `swept=… pending=… bullets=… empty=… absent=… unreadable=…` line verbatim — it is the proof of how many ledgers were OPENED, and a sweep of zero must never read like a sweep that found nothing. `LEDGER-UNREADABLE` exits 4 and STOPS the release: a ledger that could not be read is a failed look, not an empty one. Every `LEDGER-PENDING` bullet joins this release; the union is what Step 5 consumes and Step 9 clears.
+3. **Ledger sweep — always runs.** `scripts/refresh-scope.sh ledgers . {--from root, if given} {each --ledger root}` enumerates every reachable `.professor/release.md`. Report its `swept=… pending=… bullets=… empty=… absent=… unreadable=…` line verbatim — it is the proof of how many ledgers were OPENED. `LEDGER-UNREADABLE` exits 4 and STOPS the release: a ledger that could not be read is a failed look, not an empty one. Every `LEDGER-PENDING` bullet joins this release.
 
-3. **Refresh pass — only when `--from {live-project-root}` is given.** Without it, say `refresh skipped — no live source named` and go to Step 4; a release of hand-authored blueprint edits is legitimate, a SILENT skip is not.
+4. **Refresh pass — only when `--from {live-project-root}` is given.** Without it, say `refresh skipped — no live source named`; a SILENT skip is not legitimate. Run the pass per `$CDOCS/pfm/$REFS/refresh.md` § The pass inside the candidate worktree, fed every template a Step 3 bullet names. STOP if it stops; a FAILED scan is never an empty one.
 
-   Run the pass per `$CDOCS/pfm/$REFS/refresh.md` § The pass — `scripts/refresh-scope.sh scan` for the scope and the MISSING-SOURCE rulings, then hunk-by-hunk SYNC/LOCAL/TOKEN classification in reviewed sonnet batches, then its closing `regen` to re-baseline the map. Feed it every template named by a bullet the Step 2b sweep collected, from ANY ledger. STOP if it stops; a FAILED scan is never an empty one. Update the public README from its report.
+5. **Review the candidate** — dispatch reviewers (`subagent_type: general-purpose`, `model: sonnet`, effort High) over `git -C .worktrees/release/develop diff origin/main...HEAD`, one per area in ONE message when the diff spans areas (`pfm/`; `templates/` + `.claude/` + prompts; `engines/` + `infra/` + `scripts/` + docs). Each returns (a) defects — file:line, the failing input, severity — and (b) one changelog bullet per shipped change no Step 3 bullet already covers, in the ledger shape `- {Tier}: {scope} — {semantic change}` (+ `#### → For:` when adopters must act, `(cost)` on env/hook/permission/model deltas). Reports received must equal reviewers dispatched. Verify every defect against the code yourself; relay none on a reviewer's word.
 
-4. **Read `VERSION`, compute the new version.** It must exceed every tag from Pre-flight 4.
+6. **Fix on the candidate** — each verified defect is fixed in `.worktrees/release/develop` per root `CLAUDE.md` § Process (code through `dev.sh iso`, a regression test watched failing first; markdown directly), committed through `/git` on `release/v{NEW}`.
 
-5. **Build CHANGELOG bullets from the Step 2b union** — every `LEDGER-PENDING` bullet from every swept ledger, this repo's included. Entries are already final bullets (`- {Tier}: {scope} — {semantic change}` + optional `#### → For:` migration line): copy verbatim, never re-author. Bullets carrying env-var / hook / permission / model-config changes are tagged `(cost)`. Two ledgers describing one change merge into a single bullet. `bullets=0` across the whole sweep → prompt the user rather than inventing any.
+7. **Write the release notes** — NEW file `releases/v{NEW}.md` (title `# v{NEW} — {YYYY-MM-DD}`, bullets grouped under `## Added/Changed/Fixed/Removed/Breaking/Migration`): every Step 3 bullet verbatim (two ledgers describing one change merge into one bullet), plus the Step 5 bullets. A `#### → For:` line is the adopter's action for that version — it rides with its bullet, never paraphrased. Prepend `- [v{NEW}](releases/v{NEW}.md) — {summary}` to the `## Releases` index in `CHANGELOG.md`. Zero bullets from both sources → ask the user rather than inventing any.
 
-5b. **Source-fetched skill release** — for each pending bullet naming a `sources.json` skill, ship the substance to the skill's OWN public repo first (the blueprint never vendors it): clone/pull the canonical repo → rebase-first against its current state (both-changed is the A→B→C conflict — keep the richer, never blast-overwrite) → genericize project identifiers in the public copy → sync the live `.claude/skills/{name}/` to byte-identical (zero standing drift) → bump the skill's `version:` frontmatter + README version refs → leak-grep the staged diff → commit + annotated tag + push to the skill repo. Then rewrite the professor bullet as a version pointer marked **`update`: skip — informational only** with a `#### → For:` re-pull note.
+7b. **Source-fetched skill release** — for each bullet naming a `sources.json` skill, ship the substance to the skill's OWN public repo first: clone/pull it → rebase-first against its current state (both-changed = keep the richer, never blast-overwrite) → genericize project identifiers → sync the live `.claude/skills/{name}/` byte-identical → bump its `version:` frontmatter + README refs → leak-grep the staged diff → commit + annotated tag + push. Then rewrite the professor bullet as a version pointer marked **`update`: skip — informational only** with a `#### → For:` re-pull note.
 
-6. **Write release notes** as a NEW file `releases/v{NEW_VERSION}.md` (title `# v{NEW_VERSION} — {YYYY-MM-DD}` + bullets grouped under `## Added/Changed/Fixed/Removed/Breaking/Migration`). Then prepend one line to the `## Releases` index in `CHANGELOG.md`: `- [v{NEW_VERSION}](releases/v{NEW_VERSION}.md) — {summary}`. `CHANGELOG.md` stays a slim index; full notes live in `releases/`, one file per version.
+8. **Reconcile the candidate** — `README.md` + `docs/BLUEPRINT.md` cast / command / skill lists match `templates/`, version references stay current (prefer version-neutral phrasing); the README's universal "any repo / any stack" promise is the CONTRACT — fix drifted templates up to it, never downgrade the README. `echo "{NEW}" > VERSION`. Stamp the self-hosted install ledger: `.professor/VERSION` and `manifest.json`'s `installed_from.version` to `{NEW}`, re-stamp `file_hashes` for the roster `infra/check-self-hosted-manifest.sh` enumerates, then `bash infra/check-self-hosted-manifest.sh . templates pfm engines/wave-walker/engine` — STOP on failure. Empty this repo's `.professor/release.md` pending list (header kept) — its bullets now live in `releases/v{NEW}.md`. `/git` commit: `release: v{NEW} — {summary}` (+ `Source: {sha}` trailer when Step 4 ran).
 
-6b. **Reconcile hand-curated docs against the shipped templates:** `README.md` + `docs/BLUEPRINT.md` cast / command / skill lists must match `templates/`, and version references stay current (prefer version-neutral phrasing). The README's universal "any repo / any stack" promise is the CONTRACT — keep it; fix drifted templates up to it, never downgrade the README to match drift.
+9. **Gate both sides in the fence** — from each worktree, `.claude/scripts/dev.sh iso all {templates|pfm|walker}` and `.claude/scripts/dev.sh iso e2e`. Stable red → report it as inherited, never a candidate verdict; candidate red → Step 6, then re-gate. Quote every verdict line.
 
-7. `echo "{NEW_VERSION}" > VERSION`
+10. **Rehearse the update** — per `$CDOCS/pfm/$REFS/release-rehearsal.md`: Codex installs the stable release on the fenced adopter machine and adopts it on a project, the machine is snapshotted, the candidate is published inside the fence, and Codex updates as an adopter would. Every FRICTION finding → Step 6 fix, commit, `revert`, re-publish, re-run the update; the loop ends at a CLEAN verdict. Five attempts without CLEAN → STOP and report the standing findings.
 
-7b. **Stamp the self-hosted install ledger before Step 8 commits — this repo only.** Sync `.professor/VERSION` and `manifest.json`'s `installed_from.version` to `{NEW_VERSION}`, re-stamp `file_hashes` for the tracked roster `infra/check-self-hosted-manifest.sh` enumerates (`.claude/** .codex/** .opencode/** .gitignore AGENTS.md CLAUDE.md pfm/AGENTS.md pfm/CLAUDE.md docs/commands/pfm/references/**`, each `sha256sum`'d), then `bash infra/check-self-hosted-manifest.sh . templates pfm engines/wave-walker/engine` — STOP on any failure; per `08b78b3`, a ledger left stale is a gate nobody reads.
+11. **Land on develop** — in the live checkout, `git merge --ff-only release/v{NEW}` through `/git`. `develop` advanced meanwhile → merge `develop` into `release/v{NEW}` in the candidate worktree and re-run Steps 9–10 before landing.
 
-8. **Gate, then use the authorized Git writer** — route each phase through `/git`; it uses gitter when available and the active main Codex fallback only after explicit current-turn authorization:
+12. **Publish** — through `/git`, which uses gitter (or the active main Codex fallback only after explicit current-turn authorization):
 
-   a. `scripts/leak-check.sh --files <every changed file>` — brand current+former, user PII, machine home paths, zero secrets. Report its exit status. A single leftover is a refresh bug, not an exception. The committed `.githooks/pre-push` hook enforces the same gate at push time; do not treat that as a reason to skip this one.
+    a. `scripts/leak-check.sh --files <every file changed since origin/main>` — brand current+former, user PII, machine home paths, zero secrets. Report its exit status. A single leftover is a refresh bug, not an exception.
 
-   b. `/git commit` — name the exact paths and message `release: v{NEW_VERSION} — {summary}` with a `Source: {sha}` trailer (the live source SHA when Step 3 ran; omit the trailer when it did not) and `Co-Authored-By: Professor <noreply@anthropic.com>`.
+    b. `/git push origin develop`, carrying the user's explicit publish request as its authority. Relay the pre-push hook's output verbatim; STOP if it fails; NEVER force-push. `main` is never a push target.
 
-   c. `/git push origin develop`, carrying the user's explicit publish request as its authority. Relay the pre-push hook's output verbatim. STOP if it fails; NEVER force-push. `main` is never a push target — the hook and GitHub's ruleset both refuse it.
+    c. `/git release v{NEW}` — gitter Phase RELEASE: the `develop → main` PR, green required checks, merge, annotated tag, `develop` fast-forwarded onto `main`. STOP at the first failed step and report which.
 
-   d. `/git release v{NEW_VERSION}` — gitter Phase RELEASE: opens the `develop → main` PR (`gh pr create`, body = `releases/v{NEW_VERSION}.md`), waits for the required checks (`gh pr checks --watch`; red = STOP, never an override), merges it (`gh pr merge --merge`), creates the annotated tag on the resulting `main` commit after re-checking that `VERSION`, `CHANGELOG.md`, and `releases/v{NEW_VERSION}.md` agree, pushes the tag, then fast-forwards `develop` onto `main` and pushes it so the branches end identical. STOP at the first failed step and report which.
+13. **Close** — clear every OTHER ledger Step 3 reported PENDING (exactly the paths it printed; header kept); `infra/release-rehearsal.sh down`; `/git` removes both release worktrees and the merged `release/v{NEW}` branch.
 
-9. **Clear EVERY ledger Step 2b reported as PENDING** — each one's entries shipped in this release; empty each pending list, keep each header. A ledger left unclear re-ships its bullets in the next release; clearing one this release never opened would delete work that never shipped, so clear exactly the paths the sweep printed.
-
-10. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), and the changelog bullets, ending with: `Blueprint released: v{NEW_VERSION}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW_VERSION}`
+14. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), reviewer and rehearsal verdicts with the attempt count, and the release-note bullets, ending with: `Blueprint released: v{NEW}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW}`
 
 ## Hard rules
 
-**NEVER:** push secrets; commit project-specific identifiers (a private project's brand name — current AND former — user PII, internal URLs, machine-absolute home paths such as `/home/…` and `/Users/…`); force-push; bypass the pre-push hook; ship Tier A characters with empty placeholders; strip an archetype's identity down to abstraction; auto-bump the README version without re-checking the templates; stage anything from `tmp/`. **The repo is PUBLIC — every push is world-visible, and a leak cannot be unpublished.**
+**NEVER:** push secrets; commit project-specific identifiers (a private project's brand name — current AND former — user PII, internal URLs, machine-absolute home paths such as `/home/…` and `/Users/…`); force-push; bypass the pre-push hook; ship Tier A characters with empty placeholders; strip an archetype's identity down to abstraction; auto-bump the README version without re-checking the templates; stage anything from `tmp/`; publish a candidate whose rehearsal did not end CLEAN. **The repo is PUBLIC — every push is world-visible, and a leak cannot be unpublished.**
