@@ -8,7 +8,7 @@ hidden by Patchright.
 
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
-  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","timeout_ms":45000}
+  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,"timeout_ms":45000}
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -102,13 +102,14 @@ def serialized_ask(raw_ask):
     return guarded_ask
 
 
-async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000):
+async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
 
-    Opt-in rung — the caller gates it behind HARVESTER_BROWSER=1 because a browser launch is
-    ~100ms+ and needs Chrome installed. patchright is an OPTIONAL dependency; when absent
-    this returns ("", None, "patchright not installed") and the ladder falls through,
-    never raises.
+    Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
+    needs Chrome installed. It renders in exactly the mode Go asks for: headless unless Go
+    is spending the one headed (visible-window) retry on a wall the headless render met.
+    patchright is an OPTIONAL dependency; when absent this returns
+    ("", None, False, "patchright not installed") and the ladder falls through, never raises.
 
     SSRF: the fetchable decision runs on the initial URL AND on EVERY request the page
     makes — a context.route() interceptor re-checks each request/redirect/subresource and
@@ -155,21 +156,12 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000):
             finally:
                 await browser.close()
 
-    # Headed Chrome passes passive checks far more reliably than headless (research bench);
-    # on a display-less host the headed launch fails → retry once headless before giving up.
     try:
-        html, status, headless = await _render(headless=False)
-        if html:
-            return html, status, headless, None
-    except Exception as e:  # noqa: BLE001 — fall through to the headless retry
-        print(f"browser headed launch failed for {redact(url)} ({type(e).__name__}) — retrying headless",
-              file=sys.stderr)
-    try:
-        html, status, headless = await _render(headless=True)
-        return html, status, headless, None
+        html, status, rendered_headless = await _render(headless=headless)
+        return html, status, rendered_headless, None
     except Exception as e:  # noqa: BLE001 — the rung never raises past this boundary
-        print(f"browser rung failed for {redact(url)}: {e}", file=sys.stderr)
-        return "", None, False, str(e)
+        print(f"browser rung failed for {redact(url)} (headless={headless}): {e}", file=sys.stderr)
+        return "", None, headless, str(e)
 
 
 def smoke():
@@ -197,6 +189,7 @@ async def handle_fetch(request):
         lambda target: _blocking_ask(target),
         proxy_url=request.get("proxy"),
         timeout_ms=int(request.get("timeout_ms") or 45_000),
+        headless=bool(request.get("headless", True)),
     )
     if error is not None and not html:
         return {"ok": False, "error": error}

@@ -6,12 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	goRuntime "runtime"
 	"strings"
 	"testing"
 
 	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/harvestpy"
 	"hostops/pfm/internal/paths"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -183,23 +181,4 @@ func mustWorkingDir(t *testing.T) string {
 
 func contains(value, needle string) bool {
 	return strings.Contains(value, needle)
-}
-
-// TestBrowserPathsResolveTheNormalizedPlatform pins the HIGH review finding:
-// production must probe env-browser/<GOOS>-<GOARCH>/ — never the "-" sentinel
-// an empty Platform{} stringifies to, which provisioning never writes.
-func TestBrowserPathsResolveTheNormalizedPlatform(t *testing.T) {
-	root := t.TempDir()
-	converter := pythonConverter{browserRoot: root}
-	interpreter, script := converter.browserPaths()
-	normalized := harvestpy.Platform{GOOS: goRuntime.GOOS, GOARCH: goRuntime.GOARCH}
-	wantRoot := harvestpy.BrowserRuntimeRoot(root, normalized)
-	wantInterpreter := filepath.Join(wantRoot, "project", ".venv", "bin", "python")
-	wantScript := filepath.Join(wantRoot, "project", "browser.py")
-	if interpreter != wantInterpreter || script != wantScript {
-		t.Fatalf("browser paths=%q/%q, want the normalized-platform root %q", interpreter, script, wantRoot)
-	}
-	if strings.Contains(interpreter, `"-/`) || strings.HasSuffix(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(interpreter)))), "-") {
-		t.Fatalf("browser path uses the empty-Platform %q sentinel: %q", harvestpy.Platform{}.String(), interpreter)
-	}
 }

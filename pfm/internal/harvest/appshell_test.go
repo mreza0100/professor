@@ -167,6 +167,10 @@ func TestAppShellBrowserRenderOfShellIsRejected(t *testing.T) {
 	if result.ErrorKind != "app_shell" || !strings.Contains(result.Error, "rendered only the shell") {
 		t.Fatalf("shell-only render not named: kind=%q err=%q", result.ErrorKind, result.Error)
 	}
+	// A shell is not a wall: it never earns the visible headed retry.
+	if len(spy.modes) != 1 || !spy.modes[0] {
+		t.Fatalf("browser modes=%v, want one headless render and no headed retry", spy.modes)
+	}
 }
 
 // TestServerRenderedPageWithBundleIsNotAShell guards the false positive: an

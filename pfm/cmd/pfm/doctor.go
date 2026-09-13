@@ -1080,18 +1080,18 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	for _, candidate := range []string{strings.TrimSpace(liveChrome), strings.TrimSpace(chromePath)} {
 		if candidate == "" || strings.ContainsRune(candidate, filepath.Separator) {
 			if info, statErr := os.Stat(candidate); candidate != "" && statErr == nil && info.Mode().IsRegular() {
-				fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, candidate)
+				fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
 				return warnings
 			}
 			continue
 		}
 		if _, lookErr := exec.LookPath(candidate); lookErr == nil {
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, candidate)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
 			return warnings
 		}
 	}
 	if fallback := doctorChromeResolver(); fallback != "" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, fallback)
+		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, fallback, harvestpy.BrowserSourceState(digest))
 		return warnings
 	}
 	fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=MISSING error=environment provisioned but no system Chrome binary resolves\n", fingerprint)

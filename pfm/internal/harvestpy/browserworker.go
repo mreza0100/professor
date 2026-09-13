@@ -33,6 +33,7 @@ type browserAsk struct {
 type BrowserFetchRequest struct {
 	URL       string `json:"url"`
 	Proxy     string `json:"proxy,omitempty"`
+	Headless  bool   `json:"headless"`
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
@@ -67,11 +68,11 @@ func (worker *BrowserWorker) Close() error {
 // protocol. Every URL Chrome touches arrives as an ask; onAsk is the SSRF
 // authority (harvest.AssertFetchable at the adapter layer). A nil onAsk
 // refuses every ask fail-closed.
-func (worker *BrowserWorker) Fetch(ctx context.Context, source, proxy string, timeoutMS int, onAsk func(url string) error) (string, int, error) {
+func (worker *BrowserWorker) Fetch(ctx context.Context, source, proxy string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
 	if strings.TrimSpace(source) == "" {
 		return "", 0, errors.New("browser fetch url is empty")
 	}
-	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, TimeoutMS: timeoutMS}})
+	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, Headless: headless, TimeoutMS: timeoutMS}})
 	if err != nil {
 		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
 	}

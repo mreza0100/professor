@@ -414,7 +414,19 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
 		} else {
-			html, status, err := browserFetcher.FetchBrowser(ctx, source)
+			// Headless first: it never opens a window on the user's desktop.
+			// Headed Chrome passes passive bot checks more reliably, so a
+			// wall — and only a wall — earns ONE visible retry. A headed
+			// launch that fails (a display-less host) leaves the completed
+			// headless verdict standing.
+			html, status, err := browserFetcher.FetchBrowser(ctx, source, true)
+			if err == nil && html != "" && isChallenge([]byte(html), status) {
+				if headedHTML, headedStatus, headedErr := browserFetcher.FetchBrowser(ctx, source, false); headedErr != nil {
+					log.Printf("harvest: headed browser retry for %s could not run after a headless wall: %v", source, headedErr)
+				} else {
+					html, status = headedHTML, headedStatus
+				}
+			}
 			switch {
 			case errors.Is(err, ErrBrowserPolicyDenied):
 				// The SSRF guard refused — a PERMANENT policy answer about

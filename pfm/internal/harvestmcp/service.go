@@ -300,7 +300,7 @@ const browserHardDeadline = 3 * time.Minute
 // tell POLICY from OUTAGE. Provisioning is lazy and only ever happens after
 // fetch.browser gated this method; a missing environment is an outage,
 // never a silent skip.
-func (converter pythonConverter) FetchBrowser(ctx context.Context, source string) (string, int, error) {
+func (converter pythonConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
 	runtime, err := converter.browserRuntime(ctx)
 	if err != nil {
 		return "", 0, err
@@ -324,37 +324,17 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 
 	fetchCtx, cancel := context.WithTimeout(ctx, browserHardDeadline)
 	defer cancel()
-	html, status, fetchErr := browser.Fetch(fetchCtx, source, converter.proxyURL, 45000, onAsk)
+	html, status, fetchErr := browser.Fetch(fetchCtx, source, converter.proxyURL, headless, 45000, onAsk)
 	if fetchErr != nil && policyDenied {
 		return "", 0, fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
 	}
 	return html, status, fetchErr
 }
 
-// browserPaths resolves the interpreter/worker script under the REAL host
-// platform root. An empty Platform{} stringifies to "-" — a path
-// provisioning never writes — so the platform is always normalized here.
-func (converter pythonConverter) browserPaths() (interpreter string, script string) {
-	platform := harvestpy.Platform{GOOS: goRuntime.GOOS, GOARCH: goRuntime.GOARCH}
-	root := harvestpy.BrowserRuntimeRoot(converter.browserRoot, platform)
-	return filepath.Join(root, "project", ".venv", "bin", "python"),
-		filepath.Join(root, "project", "browser.py")
-}
-
-// browserRuntime resolves the provisioned interpreter/worker paths, lazily
-// provisioning the opt-in environment on first use. Paths are resolved AFTER
-// provisioning so a first-use provision is picked up on the same call. It
-// NEVER downloads Chromium: patchright drives system Chrome.
+// browserRuntime resolves the browser worker's runtime, provisioning it first
+// when it is missing or was provisioned by an older pfm (harvestpy.EnsureBrowser).
 func (converter pythonConverter) browserRuntime(ctx context.Context) (harvestpy.Runtime, error) {
-	interpreter, script := converter.browserPaths()
-	if _, statErr := os.Stat(interpreter); errors.Is(statErr, os.ErrNotExist) {
-		if _, provisionErr := harvestpy.ProvisionBrowser(ctx, harvestpy.ProvisionOptions{Root: converter.browserRoot}); provisionErr != nil {
-			return harvestpy.Runtime{}, fmt.Errorf("browser environment is NOT provisioned and lazy provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry", provisionErr)
-		}
-	} else if statErr != nil {
-		return harvestpy.Runtime{}, fmt.Errorf("probe browser environment interpreter %s: %w", interpreter, statErr)
-	}
-	return harvestpy.Runtime{Python: interpreter, Script: script}, nil
+	return harvestpy.EnsureBrowser(ctx, harvestpy.ProvisionOptions{Root: converter.browserRoot})
 }
 
 func (converter pythonConverter) Convert(ctx context.Context, kind, source string, body []byte) (markdown string, returnErr error) {

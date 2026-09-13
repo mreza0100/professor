@@ -35,7 +35,7 @@ func TestAskProtocolRoundTrip(t *testing.T) {
 
 	worker := NewBrowserWorker(Runtime{Python: "unused", Script: "unused"})
 	var consulted []string
-	html, status, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", 45000, func(url string) error {
+	html, status, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", true, 45000, func(url string) error {
 		consulted = append(consulted, url)
 		return harvest.AssertFetchable(url)
 	})
@@ -47,6 +47,9 @@ func TestAskProtocolRoundTrip(t *testing.T) {
 	}
 	if len(consulted) != 2 {
 		t.Fatalf("AssertFetchable consulted %d time(s), want 2: %q", len(consulted), consulted)
+	}
+	if !strings.Contains(html, "headless=true") {
+		t.Fatalf("the requested headless mode did not reach the worker: %q", html)
 	}
 	if !strings.Contains(html, `allow=true reason=""`) {
 		t.Fatalf("public ask was not allowed: %q", html)
@@ -68,8 +71,9 @@ func fakeBrowserWorker() {
 		os.Exit(1)
 	}
 	var request struct {
-		Op  string `json:"op"`
-		URL string `json:"url"`
+		Op       string `json:"op"`
+		URL      string `json:"url"`
+		Headless *bool  `json:"headless"`
 	}
 	if err := json.Unmarshal([]byte(line), &request); err != nil || request.Op != "fetch" {
 		fmt.Fprintf(os.Stderr, "fake worker bad request %q (err=%v)\n", line, err)
@@ -79,11 +83,20 @@ func fakeBrowserWorker() {
 	reply2 := askAndRead(reader, "http://169.254.169.254/latest/meta-data/")
 	final := map[string]any{
 		"ok":     true,
-		"html":   fmt.Sprintf("<html>rendered %s %s</html>", reply1, reply2),
+		"html":   fmt.Sprintf("<html>rendered %s %s headless=%s</html>", reply1, reply2, headlessField(request.Headless)),
 		"status": 200,
 	}
 	body, _ := json.Marshal(final)
 	fmt.Println(string(body))
+}
+
+// headlessField renders the request's headless flag, "absent" when the Go
+// side omitted it — the worker would then fall back to its own default.
+func headlessField(value *bool) string {
+	if value == nil {
+		return "absent"
+	}
+	return fmt.Sprint(*value)
 }
 
 func askAndRead(reader *bufio.Reader, url string) string {
@@ -118,7 +131,7 @@ func TestNilAskHandlerFailsClosed(t *testing.T) {
 	defer func() { browserWorkerCommand = previous }()
 
 	worker := NewBrowserWorker(Runtime{Python: "unused", Script: "unused"})
-	html, _, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", 45000, nil)
+	html, _, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", true, 45000, nil)
 	if err == nil {
 		t.Fatal("nil onAsk must fail closed, got success")
 	}

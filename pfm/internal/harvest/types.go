@@ -37,9 +37,10 @@ type OCRConverter interface {
 
 // BrowserFetcher is implemented by adapters that can render one URL in a real
 // browser (the ladder's last wall-bypass rung). Optional: a plain Converter
-// never escalates to it.
+// never escalates to it. headless false asks for a VISIBLE window — the
+// ladder spends that only on a wall the headless render could not pass.
 type BrowserFetcher interface {
-	FetchBrowser(ctx context.Context, source string) (html string, status int, err error)
+	FetchBrowser(ctx context.Context, source string, headless bool) (html string, status int, err error)
 }
 
 // Options configures a Harvester. Nil HTTP clients use safe defaults.
