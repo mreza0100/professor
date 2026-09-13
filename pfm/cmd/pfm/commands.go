@@ -344,7 +344,7 @@ func openID(
 			return openRow(
 				ctx,
 				row,
-				primary,
+				runtime.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
 				initialCache1H(runtime.Config, primary),
 				stdout,
 				stderr,

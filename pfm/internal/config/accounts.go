@@ -1,5 +1,7 @@
 package config
 
+import pfmengine "hostops/pfm/internal/engine"
+
 // Account projections: the per-engine views of the roster that the fleet scan,
 // the picker and the runtime loader each need. They live here, beside the
 // roster itself, so no caller re-derives them.
@@ -49,6 +51,21 @@ func (config Config) PrimaryCodexAccount() int {
 		return 0
 	}
 	return config.CodexAccounts[0].ID
+}
+
+// PrimaryAccountFor is the account a row of engine opens on: Codex and
+// OpenCode rows take their own roster's primary, and only a Claude row takes
+// claudePrimary — the account pfm's primary-set picked, which names a Claude
+// account and means nothing to another engine's roster.
+func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) int {
+	switch engine {
+	case pfmengine.Codex:
+		return config.PrimaryCodexAccount()
+	case pfmengine.Opencode:
+		return config.PrimaryOpencodeAccount()
+	default:
+		return claudePrimary
+	}
 }
 
 // OpencodeAccountIDs lists every OpenCode account id, in roster order.

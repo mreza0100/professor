@@ -3,6 +3,8 @@ package config
 import (
 	"reflect"
 	"testing"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // TestAccountProjectionsFollowTheRoster pins every per-engine projection of the
@@ -40,5 +42,26 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 	var empty Config
 	if empty.PrimaryCodexAccount() != 0 || empty.PrimaryOpencodeAccount() != 0 || len(empty.CodexHomes()) != 0 {
 		t.Error("an engine with no accounts must project to zero values")
+	}
+}
+
+// A row opens on ITS engine's primary account. The Claude primary is only
+// Claude's: `pfm chat open` handed it to a Codex resume, and a host with
+// Claude accounts 1 and 2 but one Codex account refused every Codex resume
+// as "Codex account 2 is not in the configured roster".
+func TestPrimaryAccountForPicksTheRowsOwnEngine(t *testing.T) {
+	machine := Config{
+		Accounts:         []Account{{ID: 1}, {ID: 2}},
+		CodexAccounts:    []CodexAccount{{ID: 1, Home: "/c/codex"}},
+		OpencodeAccounts: []OpenCodeAccount{{ID: 7}},
+	}
+	for engine, want := range map[pfmengine.ID]int{
+		pfmengine.Claude:   2,
+		pfmengine.Codex:    1,
+		pfmengine.Opencode: 7,
+	} {
+		if got := machine.PrimaryAccountFor(engine, 2); got != want {
+			t.Fatalf("PrimaryAccountFor(%s, claude primary 2) = %d, want %d", engine, got, want)
+		}
 	}
 }
