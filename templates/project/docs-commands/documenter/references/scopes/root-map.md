@@ -10,4 +10,4 @@ Merge into the matching topic file (`components.md`, `workflows.md`, `database-s
 
 ## FIX-UPDATE
 
-Same merge logic over only the docs the fix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir. Always check this cluster on a hotfix (documenter.md § Orchestration JC-UPDATE note).
+Same merge logic over only the docs the fix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir. Always check this cluster after a fix lands (documenter.md § Orchestration FIX-UPDATE note).

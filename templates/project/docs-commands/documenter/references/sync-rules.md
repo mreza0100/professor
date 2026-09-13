@@ -154,7 +154,7 @@ Rules that `/documenter audit` uses to verify cross-reference consistency. Each 
 - Refactor/Cleanup rows at the bottom → same rule (if refactor landed, row is removed)
 - Archived pipeline references (`tmp/dev/archive/builds/{pipeline}/`) → must still resolve; broken references flagged
 
-**Severity:** `STALE-ROADMAP` — not critical (nothing breaks), but file rot causes future pipelines to re-research solved problems. Clean up during ARCHIVE/JC-UPDATE every time; audit flags accumulated rot.
+**Severity:** `STALE-ROADMAP` — not critical (nothing breaks), but file rot causes future pipelines to re-research solved problems. Clean up during ARCHIVE/FIX-UPDATE every time; audit flags accumulated rot.
 
 **Who enforces:** the `root-features` scope card's Clean-backlog section, during ARCHIVE and FIX-UPDATE. Audit detects rot; cleanup happens in pipeline/hotfix modes.
 

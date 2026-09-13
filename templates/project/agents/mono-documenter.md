@@ -1,6 +1,6 @@
 ---
 name: mono-documenter
-description: Scouts a doc-consolidation blast radius — ARCHIVE after a pipeline ships, FIX-UPDATE after a fix lands on main — into DISJOINT scopes; read-only, never writes docs. Spawn at the start of every /documenter ARCHIVE or JC-UPDATE. Returns the scope manifest.
+description: Scouts a doc-consolidation blast radius — ARCHIVE after a pipeline ships, FIX-UPDATE after a fix lands on main — into DISJOINT scopes; read-only, never writes docs. Spawn at the start of every /documenter ARCHIVE or FIX-UPDATE. Returns the scope manifest.
 model: sonnet # {MODEL_TIER} — ships as the default pin; retune to your model tier
 effort: medium
 tools: Read, Glob, Grep, Bash

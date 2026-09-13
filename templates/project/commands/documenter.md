@@ -33,7 +33,7 @@ ARCHIVE and FIX-UPDATE parallelize along **disjoint write-sets**. **Canonical en
 
 <!-- Install-time: the `{project}` row is a PATTERN — SETUP expands one such row (and one `scopes/{project}.md` card) per roster entry (single-project install = one row); the root-* rows are fixed cross-project scopes. Each card's merge steps are canonical — documenter.md defers to the card, it does not carry its own step menu. -->
 
-Several scopes read the same pipeline doc, but each writes only its own slice — every worker owns one target. The `epic` scope is emitted only for a standalone build with a resolving epic — never a wave-owned build (the wave consolidates the epic) and never in JC-UPDATE.
+Several scopes read the same pipeline doc, but each writes only its own slice — every worker owns one target. The `epic` scope is emitted only for a standalone build with a resolving epic — never a wave-owned build (the wave consolidates the epic) and never in FIX-UPDATE.
 
 **Where it runs:**
 

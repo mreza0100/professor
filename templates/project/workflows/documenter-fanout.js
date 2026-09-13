@@ -1,6 +1,6 @@
 export const meta = {
   name: 'documenter-fanout',
-  description: 'Documentation consolidation engine — CANONICAL here (documenter.md § Orchestration is the pointer + scope table). Scouts a pipeline or landed-fix blast radius into DISJOINT doc scopes (one Sonnet pass), a collector-tier no-op check drops zero-hit scopes pre-spawn, then fans out one spec-execution documenter per scope in parallel, each merging only its own write-set from its scope card. The parallel replacement for the single serial mono-documenter. Invoked for ARCHIVE (a completed pipeline; args.pipelineName + args.docsPath) and JC-UPDATE (a /jc hotfix; args.changeSummary); a small blast radius yields one or two workers, a wide one yields many.',
+  description: 'Documentation consolidation engine — CANONICAL here (documenter.md § Orchestration is the pointer + scope table). Scouts a pipeline or landed-fix blast radius into DISJOINT doc scopes (one Sonnet pass), a collector-tier no-op check drops zero-hit scopes pre-spawn, then fans out one spec-execution documenter per scope in parallel, each merging only its own write-set from its scope card. The parallel replacement for the single serial mono-documenter. Invoked for ARCHIVE (a completed pipeline; args.pipelineName + args.docsPath) and FIX-UPDATE (a fix landed on main; args.changeSummary); a small blast radius yields one or two workers, a wide one yields many.',
   phases: [{ title: 'Scout' }, { title: 'Consolidate' }],
 }
 
@@ -58,7 +58,7 @@ async function resilient(prompt, opts) {
 const sourceBrief = args.mode === 'ARCHIVE'
   ? 'Mode ARCHIVE. Pipeline ' + args.pipelineName + ' just shipped; its decisions live in ' + args.docsPath + '/ (0-task.md, 4-*.md, 5-dev-report-*.md, 6-*.md, 7-post-merge-qa.md; legacy trails: 1-plan.md, 3-architecture*.md — read only what exists). ' +
     'Epic scope: ' + (args.waveOwned ? 'EXCLUDE it — this is a wave-owned build and the wave consolidates the epic.' : 'include an `epic` scope only when epicName is set (' + (args.epicName || 'none') + ') and resolves to an IN_PROGRESS manifest.')
-  : 'Mode FIX-UPDATE. A fix landed on main: ' + args.changeSummary + '. Touched projects: ' + ((args.projects || []).join(', ') || 'derive from `git diff` of the last commit') + '. There is no pipeline $DOCS dir — verify the blast radius against the changed source itself (read-only git diff is fine). No epic scope in JC-UPDATE.'
+  : 'Mode FIX-UPDATE. A fix landed on main: ' + args.changeSummary + '. Touched projects: ' + ((args.projects || []).join(', ') || 'derive from `git diff` of the last commit') + '. There is no pipeline $DOCS dir — verify the blast radius against the changed source itself (read-only git diff is fine). No epic scope in FIX-UPDATE.'
 
 function scoutAgent() {
   return resilient(
