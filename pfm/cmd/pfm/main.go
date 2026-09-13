@@ -17,6 +17,7 @@ import (
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/spawn"
+	"hostops/pfm/internal/stale"
 	"hostops/pfm/internal/store"
 )
 
@@ -435,6 +436,9 @@ func runInternal(
 	if len(args) != 0 && args[0] == "chat-server" {
 		return runInternalChatServer(args[1:], stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "stale" {
+		return stale.Run(args[1:], stdout, stderr)
+	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := newFlagSet(
 			"internal primary-set",
@@ -460,7 +464,7 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|then|update-check [options]")
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
 		return 2
 	}
 	if args[0] != "kill-exit" {

@@ -17,5 +17,5 @@ internal/reload/reload.go 963
 internal/stats/limits.go 1309
 internal/statusline/render.go 1121
 internal/ui/cosmos.go 1482
-internal/ui/model.go 1617
+internal/ui/model.go 1610
 internal/ui/render.go 1178

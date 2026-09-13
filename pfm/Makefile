@@ -9,7 +9,8 @@
 #
 # THE STALE-PROCESS PROBLEM, stated once because every target below exists
 # because of it: replacing ~/.local/bin/pfm does not touch a process already
-# running the old image. Linux keeps the deleted inode alive for it, so a
+# running the old image. The kernel keeps the replaced inode alive for it
+# (Linux and macOS alike), so a
 # long-lived `pfm mcp serve` keeps serving yesterday's tool descriptions and a
 # days-old `pfm ls` picker keeps writing yesterday's decisions over today's
 # fixes. Both fail SILENTLY — the binary on disk is new, the behaviour is old,
@@ -27,6 +28,8 @@ DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 LOCAL   := pfm.dev
 UNIT    := pfm-mcp.service
+# The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
+AGENT   := com.professor.pfm.mcp
 # Stamped into every build below so `pfm --version` names the release it came
 # from instead of the bare "dev" a plain `go build` leaves behind (issue #14
 # F6). $(REPO)/VERSION, not a bare "VERSION" — this file runs from pfm/.
@@ -34,7 +37,7 @@ VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: help build fmt fmt-check vet arch test iso gate install host-install rollback \
-        mcp-restart mcp-status stale kill-stale sweep-stale clean
+        mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
 	@echo "pfm targets — run as: make <target>"
@@ -120,7 +123,7 @@ rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the d
 	  || { rm -f "$$tmp"; echo "rollback: FAILED to restore $(BIN) from $(BIN).prev" >&2; exit 1; }; \
 	echo "rollback: restored $(BIN) from $(BIN).prev"
 	@$(MAKE) --no-print-directory mcp-restart \
-	  || echo "rollback: the daemon did not come back on the restored binary either — systemctl --user status $(UNIT)" >&2
+	  || echo "rollback: the daemon did not come back on the restored binary either — make mcp-status" >&2
 
 # ---------------------------------------------------------------- mcp ------
 
@@ -136,113 +139,58 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
 	  echo "mcp: $(UNIT) restarted, pid $$pid"; \
+	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	  agent_pid() { launchctl print "gui/$$(id -u)/$(AGENT)" | awk '$$1 == "pid" && $$2 == "=" { print $$3; exit }'; }; \
+	  old="$$(agent_pid)"; \
+	  launchctl kickstart -k "gui/$$(id -u)/$(AGENT)"; \
+	  pid=""; \
+	  for _ in 1 2 3 4 5 6 7 8 9 10; do \
+	    pid="$$(agent_pid)"; \
+	    [ -n "$$pid" ] && [ "$$pid" != "$$old" ] && break; pid=""; sleep 0.5; \
+	  done; \
+	  if [ -z "$$pid" ]; then \
+	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh chat MCP server" >&2; \
+	    exit 1; \
+	  fi; \
+	  echo "mcp: $(AGENT) restarted, pid $$pid"; \
 	elif pgrep -f 'pfm mcp serve' >/dev/null 2>&1; then \
-	  echo "mcp: no $(UNIT) unit; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
+	  echo "mcp: no $(UNIT) unit or $(AGENT) agent; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
 	  pkill -f 'pfm mcp serve'; \
 	else \
-	  echo "mcp: no daemon running and no $(UNIT) unit — nothing to restart"; \
+	  echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
 	fi
 	@# Restarting unconditionally is deliberate. Deciding whether the daemon is
 	@# stale needs process introspection that not every platform offers, and a
 	@# restart is cheap, supervised, and idempotent — so the guarantee does not
 	@# depend on a probe that might not be able to run.
 
-mcp-status: ## Report the daemon and whether it is running a replaced binary
+mcp-status: ## Report the daemon, then every pfm process still running a replaced binary
 	@if command -v systemctl >/dev/null 2>&1 && \
 	    systemctl --user cat $(UNIT) >/dev/null 2>&1; then \
 	  echo "unit:  $$(systemctl --user is-active $(UNIT))"; \
-	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
-	  echo "pid:   $$pid"; \
-	  if [ -r "/proc/$$pid/exe" ]; then \
-	    echo "image: $$(readlink /proc/$$pid/exe)"; \
-	  else \
-	    echo "image: UNKNOWN — cannot read /proc/$$pid/exe on this platform"; \
-	  fi; \
+	  echo "pid:   $$(systemctl --user show -p MainPID --value $(UNIT))"; \
+	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	  launchctl print "gui/$$(id -u)/$(AGENT)" | awk '($$1 == "state" || $$1 == "pid") && $$2 == "=" && !seen[$$1]++ { printf "%-6s %s\n", $$1 ":", $$3 }'; \
 	else \
 	  echo "unit:  not installed"; \
 	  pgrep -af 'pfm mcp serve' || echo "no 'pfm mcp serve' process running"; \
 	fi
+	@"$(BIN)" internal stale --binary "$(BIN)"
 
 # --------------------------------------------------------------- stale -----
 
-stale: ## List pfm processes still running a replaced binary
-	@if [ ! -d /proc ]; then \
-	  echo "STALE-UNKNOWN: this platform has no /proc, so stale pfm processes could NOT be enumerated." >&2; \
-	  echo "  This is not a clean result. The MCP daemon was restarted regardless, so it is fresh;" >&2; \
-	  echo "  any other long-lived pfm process (a 'pfm ls' picker) may still hold the old binary." >&2; \
-	  exit 0; \
-	fi; \
-	found=0; \
-	for pid in $$(pgrep -x pfm 2>/dev/null || true); do \
-	  link="$$(readlink /proc/$$pid/exe 2>/dev/null || true)"; \
-	  case "$$link" in \
-	    *"(deleted)"*) \
-	      found=$$((found + 1)); \
-	      cmd="$$(tr '\0' ' ' < /proc/$$pid/cmdline 2>/dev/null | cut -c1-70)"; \
-	      echo "STALE pid=$$pid  $$cmd";; \
-	  esac; \
-	done; \
-	if [ "$$found" -eq 0 ]; then \
-	  echo "stale: none — every running pfm process uses the binary now on disk"; \
-	else \
-	  echo "stale: $$found process(es) above are running a REPLACED binary."; \
-	  echo "       They will keep behaving like the old build and can write stale"; \
-	  echo "       state over new fixes. Close them, or run: make kill-stale"; \
-	fi
-	@# "none" and "could not look" are printed differently on purpose. A sweep
-	@# that reports nothing found when it never managed to look is the exact
-	@# shape this repo treats as a defect.
-
-kill-stale: ## Kill pfm processes running a replaced binary (interactive pickers included)
-	@if [ ! -d /proc ]; then \
-	  echo "REFUSING: no /proc, so stale processes cannot be identified — killing pfm processes blind would take down live ones" >&2; \
-	  exit 1; \
-	fi; \
-	killed=0; \
-	for pid in $$(pgrep -x pfm 2>/dev/null || true); do \
-	  link="$$(readlink /proc/$$pid/exe 2>/dev/null || true)"; \
-	  case "$$link" in \
-	    *"(deleted)"*) \
-	      cmd="$$(tr '\0' ' ' < /proc/$$pid/cmdline 2>/dev/null | cut -c1-70)"; \
-	      echo "killing pid=$$pid  $$cmd"; \
-	      kill "$$pid" 2>/dev/null || echo "  could not signal pid=$$pid (already gone, or not ours)"; \
-	      killed=$$((killed + 1));; \
-	  esac; \
-	done; \
-	echo "kill-stale: signalled $$killed process(es)"
-	@# The manual, unverified form. `install` runs sweep-stale instead — and
-	@# only after the new binary is in place and the daemon serves it.
+stale: ## List pfm processes still running a replaced binary (Linux and macOS)
+	@"$(BIN)" internal stale --binary "$(BIN)"
+	@# One implementation, in Go (internal/stale): a process is stale when the
+	@# file it executes — /proc/<pid>/exe on Linux, lsof's program entry on
+	@# macOS — is not the file now at $(BIN), by device and inode. "none" and
+	@# "could not look" print differently and the latter exits non-zero.
 
 sweep-stale: ## Kill every pfm process still running a replaced binary, then prove none is left
-	@if [ ! -d /proc ]; then \
-	  echo "STALE-UNKNOWN: this platform has no /proc, so stale pfm processes could NOT be enumerated or swept." >&2; \
-	  echo "  This is not a clean result: the daemon was restarted, but a long-lived 'pfm' picker may still hold the old binary — close it by hand." >&2; \
-	  exit 0; \
-	fi; \
-	stale_pids() { \
-	  for pid in $$(pgrep -x pfm 2>/dev/null || true); do \
-	    case "$$(readlink /proc/$$pid/exe 2>/dev/null || true)" in *"(deleted)"*) echo "$$pid";; esac; \
-	  done; \
-	}; \
-	pids="$$(stale_pids)"; \
-	if [ -z "$$pids" ]; then echo "sweep: none — every running pfm process uses the binary now on disk"; exit 0; fi; \
-	mcp=0; \
-	for pid in $$pids; do \
-	  cmd="$$(tr '\0' ' ' < /proc/$$pid/cmdline 2>/dev/null | cut -c1-70)"; \
-	  case "$$cmd" in *" mcp "*) mcp=1;; esac; \
-	  echo "sweep: TERM pid=$$pid  $$cmd"; \
-	  kill "$$pid" 2>/dev/null || true; \
-	done; \
-	for _ in 1 2 3 4 5 6; do [ -z "$$(stale_pids)" ] && break; sleep 0.5; done; \
-	for pid in $$(stale_pids); do echo "sweep: KILL pid=$$pid (ignored TERM for 3s)"; kill -9 "$$pid" 2>/dev/null || true; done; \
-	sleep 0.2; \
-	left="$$(stale_pids)"; \
-	if [ -n "$$left" ]; then echo "SWEEP-INCOMPLETE: still running a replaced binary: $$left" >&2; exit 1; fi; \
-	[ "$$mcp" -eq 0 ] || echo "sweep: a session whose chat MCP server was swept reconnects it with /mcp"; \
-	echo "sweep: done — no pfm process runs a replaced binary"
-	@# Readback, not trust: the sweep re-scans after signalling and fails
-	@# loudly on a survivor. It matches only images the kernel marks
-	@# "(deleted)", so the binary just installed is never touched.
+	@"$(BIN)" internal stale --sweep --binary "$(BIN)"
+	@# TERM, KILL after 3s, then a re-scan that fails loudly on a survivor. It
+	@# signals only images that are not $(BIN), so the binary just installed —
+	@# and the daemon restarted on it — are never touched.
 
 clean: ## Remove local build artifacts
 	rm -f $(LOCAL)

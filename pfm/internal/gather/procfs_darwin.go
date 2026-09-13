@@ -187,6 +187,51 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 	return links, nil
 }
 
+// Image is the file a process executes, read from lsof's program-text entry:
+// macOS keeps the executable's vnode behind libproc (cgo), and lsof lists the
+// executable as the FIRST txt file. Its device prints in hex; its inode is
+// the one the process still holds after an install renamed a new file over
+// the path. A missing entry is an error, never a zero identity.
+func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
+	output, err := exec.Command(
+		deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di",
+	).Output()
+	if err != nil && len(output) == 0 {
+		return FileID{}, fmt.Errorf("read the executable of pid %d via lsof: %w", pid, err)
+	}
+	var id FileID
+	var sawDevice, sawInode bool
+	for _, line := range strings.Split(string(output), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		switch line[0] {
+		case 'D':
+			if sawDevice {
+				continue
+			}
+			device, parseErr := strconv.ParseUint(strings.TrimPrefix(line[1:], "0x"), 16, 64)
+			if parseErr != nil {
+				return FileID{}, fmt.Errorf("parse lsof device %q for pid %d: %w", line[1:], pid, parseErr)
+			}
+			id.Device, sawDevice = device, true
+		case 'i':
+			if sawInode {
+				continue
+			}
+			inode, parseErr := strconv.ParseUint(line[1:], 10, 64)
+			if parseErr != nil {
+				return FileID{}, fmt.Errorf("parse lsof inode %q for pid %d: %w", line[1:], pid, parseErr)
+			}
+			id.Inode, sawInode = inode, true
+		}
+		if sawDevice && sawInode {
+			return id, nil
+		}
+	}
+	return FileID{}, fmt.Errorf("lsof listed no executable for pid %d", pid)
+}
+
 // procArgs decodes one process's argv and environment from kern.procargs2.
 //
 // The buffer layout is Apple's, and the order matters:

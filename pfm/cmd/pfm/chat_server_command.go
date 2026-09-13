@@ -11,17 +11,11 @@ import (
 	"hostops/pfm/internal/spawn"
 )
 
-// runInternalChatServer is the shell shim's door to the one chat-server
-// creator:
-//
-//	pfm internal chat-server <socket> <absolute-cwd> <run>
-//
-// `cx` calls it, so a chat opened from the shell is born through
-// spawn.CommandTmux.NewSession like every other door's — the machine's
-// tmux.titles policy, automatic-rename off, and a window named for the
-// socket's engine — rather than through a zsh copy of that sequence. An
-// unreadable config fails CLOSED on the title only: the chat still opens, the
-// host keeps its terminal title, and stderr says why.
+// runInternalChatServer is `pfm internal chat-server <socket> <cwd> <run>`,
+// the shim's door to the one chat-server creator (spawn.CommandTmux.NewSession):
+// `cx` gets every door's options and a window named for the socket's engine.
+// An unreadable config fails CLOSED on the title only — the chat still opens,
+// the host keeps its title, and stderr says why.
 func runInternalChatServer(args []string, stderr io.Writer, runtime commandRuntime) int {
 	if len(args) != 3 || !filepath.IsAbs(args[1]) || args[2] == "" {
 		fmt.Fprintln(stderr, "usage: pfm internal chat-server <socket> <absolute-cwd> <run>")
