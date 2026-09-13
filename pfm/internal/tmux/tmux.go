@@ -6,11 +6,30 @@ package tmux
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
+	"strings"
 
 	"hostops/pfm/internal/deps"
 )
+
+// CouldNotRun reports whether err means tmux itself never started — the
+// binary is absent from PATH, a configured path does not exist, or it is not
+// executable — as opposed to a tmux that ran and failed against one server.
+// A probe sweeping every socket must fail whole on this class: no socket
+// could be read, so an empty result would claim "no chats" when the truth is
+// "could not look". A service manager's bare PATH (launchd's
+// /usr/bin:/bin:/usr/sbin:/sbin) is the live way to get here.
+func CouldNotRun(err error) bool {
+	var lookup *exec.Error
+	if errors.As(err, &lookup) {
+		return true
+	}
+	var start *fs.PathError
+	return errors.As(err, &start) && strings.HasPrefix(start.Op, "fork/exec")
+}
 
 // Command is one tmux invocation on the server at socketPath (tmux -S).
 // binary "" means the registered tmux (deps.Executable); a configured binary

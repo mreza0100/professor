@@ -85,7 +85,6 @@ internal/gather/procfs_darwin.go
 internal/gather/procfs_native_darwin.go
 internal/gather/procfs_native_linux.go
 internal/gather/procscan.go
-internal/gather/tmuxprobe.go
 internal/gather/types.go
 internal/harvest/archive.go
 internal/harvest/cache.go
@@ -123,7 +122,6 @@ internal/installer/account_migrations.go
 internal/installer/assets.go
 internal/installer/codex_hooks.go
 internal/installer/files.go
-internal/installer/launchd.go
 internal/installer/mcp.go
 internal/installer/mcp_files.go
 internal/installer/scheduler_darwin.go

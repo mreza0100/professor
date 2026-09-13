@@ -3,6 +3,9 @@ package spawn
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +40,17 @@ type fakeCodex struct {
 	// keystroke was sent, the engine never took it, and nothing checked.
 	dropsEnters  int
 	deafComposer bool
+	// silentRename is Codex 0.154: a rename lands without a word on screen —
+	// no "Session renamed to", no name in a status line the user's config
+	// leaves out. hintOnlyWhenEmpty is its modal: the placeholder hint shows
+	// only while the field is empty, so a PRE-FILLED field (any thread that
+	// already has a name) shows the dialog title and the old name alone.
+	silentRename      bool
+	hintOnlyWhenEmpty bool
+	// ledger is a Codex home: a rename the modal takes is appended to its
+	// session_index.jsonl exactly as Codex's thread/name/set does, so the
+	// tests drive the real proof reader.
+	ledger string
 
 	sessions []SessionSpec
 	keys     []string
@@ -95,13 +109,18 @@ func (fake *fakeCodex) Capture(_ context.Context, _, _ string) (string, error) {
 	case "prompt":
 		// The rename modal paints over the composer, exactly as the real one
 		// does — no composer glyph on screen while it is up.
+		if fake.hintOnlyWhenEmpty && fake.composer != "" {
+			// Codex 0.154's pre-filled dialog, as captured live.
+			return "codex\n▌ Rename thread\n▌ Generating a title suggestion…\n▌\n▌ " + fake.composer +
+				"\n\nPress enter to confirm or esc to go back\n", nil
+		}
 		return "codex\n▌ Name thread\n▌\n▌ Type a name and press Enter\n", nil
 	case "empty":
 		return "codex\n▌ Name thread\n▌ Type a name and press Enter\n" +
 			"Thread name cannot be empty.\n", nil
 	default:
 		header := "codex"
-		if fake.name != "" {
+		if fake.name != "" && !fake.silentRename {
 			header = "• Session renamed to " + fake.name + ".\ncodex · " + fake.name
 		}
 		return header + "\n› " + fake.composer + "\n" + fakeStatusLine, nil
@@ -163,6 +182,7 @@ func (fake *fakeCodex) SendKey(_ context.Context, _, _, key string) error {
 				return nil
 			}
 			fake.name = fake.composer
+			fake.recordRename()
 			fake.composer = ""
 			fake.stage = "composer"
 		default:
@@ -531,5 +551,140 @@ func TestCodexPromptThatNeverSubmitsIsReportedUndelivered(t *testing.T) {
 	if len(result.Warnings) != 1 ||
 		!strings.Contains(result.Warnings[0], "not delivered") {
 		t.Fatalf("warnings = %q, want one naming the undelivered prompt", result.Warnings)
+	}
+}
+
+// recordRename appends the rename to the fake's Codex ledger, the way Codex
+// 0.154 records one it never announces on screen. Called with the mutex held.
+func (fake *fakeCodex) recordRename() {
+	if fake.ledger == "" {
+		return
+	}
+	file, err := os.OpenFile(filepath.Join(fake.ledger, "session_index.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	fmt.Fprintf(file, "{\"id\":\"fake-thread\",\"thread_name\":%q,\"updated_at\":%q}\n",
+		fake.name, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// useCodexHomes points this process's rename proof at homes for one test.
+func useCodexHomes(t *testing.T, homes ...string) {
+	t.Helper()
+	UseCodexHomes(homes)
+	t.Cleanup(func() { codexHomes.Store(nil) })
+}
+
+func countKey(keys []string, want string) int {
+	count := 0
+	for _, key := range keys {
+		if key == want {
+			count++
+		}
+	}
+	return count
+}
+
+// TestCodexSilentRenameIsProvenFromTheIndex is the regression for the live
+// PING_PROBE launch on Codex 0.154: the rename landed on the first try
+// (session_index.jsonl recorded it three seconds in), but 0.154 no longer
+// prints "Session renamed to", so pfm called it unconfirmed, retried /rename
+// into a pre-filled modal whose hint never showed, and reported "Codex never
+// asked for a thread name" about a chat that was named all along. Codex's own
+// ledger is the proof; the screen is only a second witness.
+func TestCodexSilentRenameIsProvenFromTheIndex(t *testing.T) {
+	fake := newFakeCodex()
+	fake.silentRename = true
+	fake.hintOnlyWhenEmpty = true
+	fake.ledger = t.TempDir()
+	useCodexHomes(t, fake.ledger)
+	request := codexRequest()
+	result, err := Run(context.Background(), fake, request)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !result.Named || !result.Prompted || len(result.Warnings) != 0 {
+		t.Fatalf("result = %#v, keys = %v", result, fake.keys)
+	}
+	if fake.name != request.Name {
+		t.Fatalf("thread name = %q, want %q", fake.name, request.Name)
+	}
+	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {
+		t.Fatalf("%s typed %d times, want once — a proven rename is never retried: %v", codexRenameCommand, got, fake.keys)
+	}
+}
+
+// TestCodexRenameOfANamedThreadFindsItsRetitledModal: renaming a thread that
+// already has a name (the post-/clear re-apply, any retry) opens the modal
+// PRE-FILLED, and on 0.154 a filled field shows its title, not the hint. The
+// modal is found by its title, so the rename goes through.
+func TestCodexRenameOfANamedThreadFindsItsRetitledModal(t *testing.T) {
+	fake := newFakeCodex()
+	fake.name = "old name"
+	fake.silentRename = true
+	fake.hintOnlyWhenEmpty = true
+	fake.ledger = t.TempDir()
+	useCodexHomes(t, fake.ledger)
+	warning, err := RenameCodex(context.Background(), fake, "cx-1-2-3", "cx-1-2-3", "new name", testTimings(), Trace{})
+	if err != nil {
+		t.Fatalf("RenameCodex() error = %v", err)
+	}
+	if warning != "" || fake.name != "new name" {
+		t.Fatalf("warning = %q, thread name = %q, keys = %v", warning, fake.name, fake.keys)
+	}
+}
+
+// TestCodexRenameThatCannotBeVerifiedSaysSo: when the ledger cannot be read
+// and the screen shows nothing, the verdict is "could not verify" — never
+// "unnamed" about a chat that may well be named — and the rename is not
+// typed again into a modal that would only repeat the same blind step.
+func TestCodexRenameThatCannotBeVerifiedSaysSo(t *testing.T) {
+	fake := newFakeCodex()
+	fake.silentRename = true
+	// A ledger path that exists but cannot be read as a file.
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, "session_index.jsonl"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useCodexHomes(t, home)
+	request := codexRequest()
+	result, err := Run(context.Background(), fake, request)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Named {
+		t.Fatalf("an unverifiable rename was reported as proven: %#v", result)
+	}
+	joined := strings.Join(result.Warnings, " | ")
+	if !strings.Contains(joined, "could not verify") || !strings.Contains(joined, "session_index.jsonl") || strings.Contains(joined, "unnamed") {
+		t.Fatalf("warnings = %q, want the unverifiable rename named with its cause", result.Warnings)
+	}
+	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {
+		t.Fatalf("%s typed %d times, want once: %v", codexRenameCommand, got, fake.keys)
+	}
+}
+
+// TestRenameModalOpenReadsOnlyTheDialog pins the dialog detector against the
+// live 0.154 capture, and against its dangerous false positive: the title as
+// transcript text under a live composer. Taking that for the dialog would
+// clear and type the name into the composer — a prompt sent to the model.
+func TestRenameModalOpenReadsOnlyTheDialog(t *testing.T) {
+	livePrefilled := "────────────────\n\n▌ Rename thread\n▌ Generating a title suggestion…\n▌\n▌ PING_PROBE\n\n" +
+		"Press enter to confirm or esc to go back\n"
+	for _, test := range []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{name: "0.154 pre-filled dialog", capture: livePrefilled, want: true},
+		{name: "empty-field dialog", capture: "codex\n▌ Name thread\n▌\n▌ Type a name and press Enter\n", want: true},
+		{name: "title quoted in transcript under a live composer", capture: "• the dialog says\n▌ Rename thread\n› \n" + fakeStatusLine, want: false},
+		{name: "title inside prose, no dialog", capture: "Rename thread is the dialog title\n", want: false},
+		{name: "the /rename offer", capture: "codex\n› /rename\n  /rename  rename the current thread\n" + fakeStatusLine, want: false},
+	} {
+		if got := renameModalOpen(test.capture); got != test.want {
+			t.Errorf("%s: renameModalOpen = %v, want %v", test.name, got, test.want)
+		}
 	}
 }

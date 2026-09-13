@@ -66,6 +66,9 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 	wanted, err := renderNameSyncLaunchAgent([]byte(strings.ReplaceAll(
 		string(template), "__PFM_HOME__", installer.options.Home,
 	)), installer.options)
+	if err == nil {
+		wanted, err = renderServicePath(wanted, installer.options.Home)
+	}
 	if err != nil {
 		return fmt.Errorf("render launch agent: %w", err)
 	}
@@ -113,7 +116,10 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read embedded MCP launch agent: %w", err)
 	}
-	wanted := []byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home))
+	wanted, err := renderServicePath([]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)), installer.options.Home)
+	if err != nil {
+		return fmt.Errorf("render MCP launch agent: %w", err)
+	}
 	plistChanged := false
 	if !sameFile(path, wanted, 0o644) {
 		if err := installer.change("write "+path, func() error {

@@ -6,19 +6,29 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // The Codex rename markers below are read from the codex binary's own strings
-// (codex-cli 0.147): the slash command is "rename", described as "rename the
-// current thread", and its modal asks you to "Type a name and press Enter".
-// Codex has no launch flag for a thread name, so this UI is the only way to
-// set one — and if a Codex release changes the wording, every wait below times
-// out, the chat is reported UNNAMED with a warning, and nothing is typed
-// blindly into a composer that would have sent it to the model as a prompt.
+// (codex-cli 0.147, re-read against 0.154): the slash command is "rename",
+// described as "rename the current thread", and its modal is titled "Name
+// thread" or "Rename thread" — its "Type a name and press Enter" hint shows
+// only while the field is empty, and a thread that already has a name opens
+// the field PRE-FILLED. Codex has no launch flag for a thread name, so this UI
+// is the only way to set one — and if a Codex release changes the wording,
+// every wait below times out, the chat is reported with a warning, and nothing
+// is typed blindly into a composer that would have sent it to the model.
+//
+// 0.154 also stopped announcing a finished rename ("Session renamed to" is
+// gone from the binary), so the screen can no longer prove one. The proof is
+// Codex's own session_index.jsonl (UseCodexHomes); the announcement and
+// a status line carrying the name stay as the second witness.
 const (
 	codexRenameCommand = "/rename"
 	codexRenameOffered = "rename the current thread"
 	codexRenamePrompt  = "Type a name and press Enter"
+	codexNameTitle     = "Name thread"
+	codexRenameTitle   = "Rename thread"
 	codexRenameEmpty   = "Thread name cannot be empty."
 	codexRenameDone    = "Session renamed to"
 	codexTrustQuestion = "Do you trust the contents of this directory?"
@@ -67,6 +77,10 @@ const (
 	// the keystroke: dismiss it and try the whole rename again rather than
 	// declaring a Codex that plainly has /rename incapable of it.
 	renameAttempts = 3
+
+	// renameClockSlack widens the proof window below the rename's start, so a
+	// ledger timestamp truncated or stamped a hair early still counts.
+	renameClockSlack = time.Second
 
 	// promptSubmitTries is how many times the launch prompt's Enter is re-sent
 	// before delivery is called unproven — the same lesson confirmPresses
@@ -342,41 +356,81 @@ func startupOverlayKey(capture string) string {
 // The blocked return says the composer was never reachable, which is a
 // different verdict from "renamed nothing": nothing was typed at all, so the
 // caller must not try the prompt either.
+//
+// A retry is a second /rename into a modal that is now PRE-FILLED with the
+// name the first attempt may already have set, so the ledger is asked first:
+// a rename it has recorded is done, and one it cannot be asked about is not
+// retried blind.
 func nameCodexThread(
 	ctx context.Context,
 	tmux Tmux,
 	socket, target, name string,
 	timings Timings,
 	trace tracer,
+	proof renameProof,
 ) (named bool, warning string, blocked bool) {
+	since := time.Now().Add(-renameClockSlack)
 	for attempt := 0; attempt < renameAttempts; attempt++ {
+		if attempt > 0 && proof != nil {
+			landed, err := proof(name, since)
+			if err != nil {
+				return false, unverifiedRename(err), false
+			}
+			if landed {
+				trace.step("rename proven by Codex's session index before retry %d", attempt+1)
+				return true, "", false
+			}
+		}
 		trace.step("rename attempt %d/%d", attempt+1, renameAttempts)
 		if !waitForCodexComposer(ctx, tmux, socket, target, timings, trace) {
 			return false, "Codex is still holding a startup screen — nothing " +
 				"was typed into it, so the chat is unnamed and unprompted; " +
 				"attach it and clear the screen by hand", true
 		}
-		renamed, why := renameCodexThread(ctx, tmux, socket, target, name, timings, trace)
+		renamed, why, unverifiable := renameCodexThread(ctx, tmux, socket, target, name, timings, trace, proof, since)
 		if renamed {
 			return true, "", false
 		}
 		warning = why
+		if unverifiable {
+			return false, warning, false
+		}
+	}
+	// The ledger write can trail the last screen poll; ask it once more before
+	// calling a chat unnamed.
+	if proof != nil {
+		if landed, err := proof(name, since); err == nil && landed {
+			trace.step("rename proven by Codex's session index after the last attempt")
+			return true, "", false
+		}
 	}
 	return false, warning, false
+}
+
+// unverifiedRename is the verdict when neither witness can speak: Codex shows
+// nothing on screen and its ledger could not be read. That is "could not
+// verify", never "unnamed" — the rename may well have landed.
+func unverifiedRename(err error) string {
+	return fmt.Sprintf("could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls", err)
 }
 
 // renameCodexThread drives Codex's own rename UI and verifies each step before
 // taking the next one. It reports the warning rather than an error: an unnamed
 // chat is still a working chat.
+//
+// unverifiable reports that the rename's outcome could not be established
+// either way, which a retry cannot fix.
 func renameCodexThread(
 	ctx context.Context,
 	tmux Tmux,
 	socket, target, name string,
 	timings Timings,
 	trace tracer,
-) (bool, string) {
+	proof renameProof,
+	since time.Time,
+) (renamed bool, warning string, unverifiable bool) {
 	if err := tmux.SendLiteral(ctx, socket, target, codexRenameCommand); err != nil {
-		return false, fmt.Sprintf("could not type the rename command: %v", err)
+		return false, fmt.Sprintf("could not type the rename command: %v", err), false
 	}
 	trace.step("typed %s", codexRenameCommand)
 	if !waitFor(ctx, tmux, socket, target, codexRenameOffered, timings) {
@@ -393,40 +447,54 @@ func renameCodexThread(
 		if leftover {
 			warning += "; its composer may still hold " + codexRenameCommand
 		}
-		return false, warning
+		return false, warning, false
 	}
 	if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
-		return false, fmt.Sprintf("could not open the rename prompt: %v", err)
+		return false, fmt.Sprintf("could not open the rename prompt: %v", err), false
 	}
-	if !waitFor(ctx, tmux, socket, target, codexRenamePrompt, timings) {
+	if !pollCapture(ctx, tmux, socket, target, timings, renameModalOpen) {
 		capture, _ := tmux.Capture(ctx, socket, target)
 		trace.step("no name prompt | %s", screen(capture))
 		_ = tmux.SendKey(ctx, socket, target, "Escape")
-		return false, "Codex never asked for a thread name — the chat is running unnamed"
+		return false, "Codex never asked for a thread name — the chat is running unnamed", false
 	}
 	for index := 0; index < modalClearKeys; index++ {
 		if err := tmux.SendKey(ctx, socket, target, "BSpace"); err != nil {
-			return false, fmt.Sprintf("could not clear the name field: %v", err)
+			return false, fmt.Sprintf("could not clear the name field: %v", err), false
 		}
 	}
 	if err := tmux.SendLiteral(ctx, socket, target, name); err != nil {
-		return false, fmt.Sprintf("could not type the thread name: %v", err)
+		return false, fmt.Sprintf("could not type the thread name: %v", err), false
 	}
-	// Codex announces the rename in the transcript ("• Session renamed to X."),
-	// so success is PROVEN, never inferred from a modal that merely closed.
+	// Success is PROVEN, never inferred from a modal that merely closed: by
+	// Codex's own ledger (0.154 renames silently), or by the transcript's
+	// "• Session renamed to X." an older Codex prints.
 	//
 	// The Enter is re-sent while the modal stands: a TUI reading its input in
 	// bursts can drop a confirmation that arrives glued to the text, and one
 	// extra Enter on a modal that already closed lands on an empty composer,
 	// where it does nothing.
 	trace.step("typed the name")
+	var proofErr error
+	landed := renameLanded(name)
+	witnessed := func(capture string) bool {
+		if landed(capture) {
+			return true
+		}
+		if proof == nil {
+			return false
+		}
+		recorded, err := proof(name, since)
+		proofErr = err
+		return recorded
+	}
 	confirmed := false
 	for press := 0; press < confirmPresses && !confirmed; press++ {
 		if err := sleep(ctx, timings.Typed); err != nil {
 			break
 		}
 		if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
-			return false, fmt.Sprintf("could not confirm the thread name: %v", err)
+			return false, fmt.Sprintf("could not confirm the thread name: %v", err), false
 		}
 		confirmed = pollCapture(
 			ctx,
@@ -434,7 +502,7 @@ func renameCodexThread(
 			socket,
 			target,
 			Timings{Poll: timings.Poll, Step: confirmWait(timings)},
-			renameLanded(name),
+			witnessed,
 		)
 		if !confirmed {
 			trace.step("confirmation press %d did not take", press+1)
@@ -444,16 +512,20 @@ func renameCodexThread(
 		// Read the reason BEFORE dismissing the prompt: Escape takes the
 		// modal — and the refusal printed inside it — off the screen.
 		warning := "Codex never confirmed the rename — the chat may be unnamed"
+		unverifiable := false
 		capture, _ := tmux.Capture(ctx, socket, target)
-		if strings.Contains(capture, codexRenameEmpty) {
+		switch {
+		case strings.Contains(capture, codexRenameEmpty):
 			warning = "Codex refused the name as empty — the chat is running unnamed"
+		case proofErr != nil:
+			warning, unverifiable = unverifiedRename(proofErr), true
 		}
 		trace.step("rename unconfirmed: %s | %s", warning, screen(capture))
 		_ = tmux.SendKey(ctx, socket, target, "Escape")
-		return false, warning
+		return false, warning, unverifiable
 	}
 	trace.step("rename confirmed")
-	return true, ""
+	return true, "", false
 }
 
 // renameLanded is the proof a rename took: Codex's own announcement, or the
@@ -464,6 +536,38 @@ func renameLanded(name string) func(string) bool {
 		return strings.Contains(capture, codexRenameDone) ||
 			(composerReady(capture) && strings.Contains(capture, name+" · "))
 	}
+}
+
+// renameModalOpen recognizes Codex's rename dialog by its empty-field hint or
+// by its title. The hint alone missed every dialog opened on a thread that
+// already had a name: 0.154 pre-fills the field and hides the hint, leaving
+//
+//	▌ Rename thread
+//	▌ Generating a title suggestion…
+//	▌
+//	▌ PING_PROBE
+//	Press enter to confirm or esc to go back
+//
+// A title counts only as a whole line — whatever gutter glyph Codex draws
+// before it — AND only while no composer is on screen: the dialog paints over
+// the composer. Title text anywhere else is transcript, and mistaking it for
+// the dialog would clear and type the name into a live composer, which sends it
+// to the model as a prompt.
+func renameModalOpen(capture string) bool {
+	if strings.Contains(capture, codexRenamePrompt) {
+		return true
+	}
+	if composerReady(capture) {
+		return false
+	}
+	for _, line := range strings.Split(capture, "\n") {
+		title := strings.TrimLeftFunc(line, func(r rune) bool { return !unicode.IsLetter(r) })
+		title = strings.TrimSpace(title)
+		if title == codexNameTitle || title == codexRenameTitle {
+			return true
+		}
+	}
+	return false
 }
 
 // confirmWait bounds one confirmation press, so a dropped Enter costs a

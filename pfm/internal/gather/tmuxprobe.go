@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/tmuxfmt"
 )
 
@@ -508,6 +509,14 @@ func probeTmux(
 			}
 			if groupCtx.Err() != nil {
 				return groupCtx.Err()
+			}
+			// tmux itself never started, so no socket in this pass can be
+			// read: the whole probe fails, naming why. Filing it per socket
+			// returned zero panes and no error — "no chats" when the truth is
+			// "could not look" — and the MCP daemon on a service manager's bare
+			// PATH answered every chat tool that way.
+			if pfmtmux.CouldNotRun(err) {
+				return fmt.Errorf("tmux could not run to probe socket %s: %w", socket.name, err)
 			}
 
 			// A socket with no server behind it is a chat that ended, not a

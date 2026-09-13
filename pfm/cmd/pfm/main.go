@@ -16,6 +16,7 @@ import (
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 )
 
@@ -44,6 +45,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	// The one place the machine config reaches a Codex rename's proof.
+	spawn.UseCodexHomes(runtime.Config.CodexHomes())
 	if len(args) == 0 {
 		return runLS(nil, stdout, stderr, runtime)
 	}

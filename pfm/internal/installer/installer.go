@@ -1169,6 +1169,8 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			content, err = renderReloadCommandAsset(content)
 		} else if asset.path == "systemd/"+nameSyncTimerUnit {
 			content, err = renderNameSyncTimerAsset(content, installer.options)
+		} else if strings.HasPrefix(asset.path, "systemd/") {
+			content, err = renderServicePath(content, installer.options.Home)
 		}
 		if err != nil {
 			return false, fmt.Errorf("render embedded asset %s: %w", asset.path, err)

@@ -15,6 +15,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
+	pfmtmux "hostops/pfm/internal/tmux"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -147,6 +148,12 @@ func (resolver *Resolver) allPanes(ctx context.Context) ([]Pane, error) {
 		group.Go(func() error {
 			rows, err := resolver.tmux.ListPanes(groupContext, socketPath)
 			if err != nil {
+				// One unreadable server is one ended chat; a tmux that never
+				// started read no server at all, and a miss built on it would
+				// refuse a live chat as "matched no live chat".
+				if pfmtmux.CouldNotRun(err) {
+					return fmt.Errorf("tmux could not run to list panes on %s: %w", socketPath, err)
+				}
 				return nil
 			}
 			for index := range rows {
