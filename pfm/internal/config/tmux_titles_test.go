@@ -95,3 +95,33 @@ func TestTmuxRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("a misspelled tmux key was accepted")
 	}
 }
+
+// ChatServerOptions is the ONE list a chat server carries: every creation
+// door applies it at birth and name-sync converges live servers onto it. The
+// title half follows the policy; automatic-rename off is never gated — the
+// window name is the fleet's DNS record and pfm is its only writer.
+func TestChatServerOptionsAreTheTitlePolicyPlusAFrozenWindowName(t *testing.T) {
+	frozen := "set-window-option -g automatic-rename off"
+	disabled := TmuxTitles{Enabled: false}
+	for _, test := range []struct {
+		name   string
+		titles *TmuxTitles
+		want   []string
+	}{
+		{"nil policy is pfm-owned", nil, []string{
+			"set-option -g set-titles on",
+			"set-option -g set-titles-string " + TmuxTitlesString,
+			frozen,
+		}},
+		{"host-owned policy keeps only the frozen name", &disabled, []string{frozen}},
+	} {
+		options := ChatServerOptions(test.titles)
+		got := make([]string, 0, len(options))
+		for _, option := range options {
+			got = append(got, strings.Join(option, " "))
+		}
+		if strings.Join(got, "\n") != strings.Join(test.want, "\n") {
+			t.Fatalf("%s: ChatServerOptions = %q, want %q", test.name, got, test.want)
+		}
+	}
+}

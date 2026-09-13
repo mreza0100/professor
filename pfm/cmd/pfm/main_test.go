@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime/debug"
@@ -449,16 +450,23 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
+	readServer := holdClaudeOpen(t, root, "cc-1700000000-1-1")
 	if code := run([]string{"chat", "open", id}, &stdout, &stderr); code != 0 {
 		t.Fatalf("open code=%d stderr=%q", code, stderr.String())
 	}
 	if lines := strings.Count(stdout.String(), "\n"); lines != 1 {
 		t.Fatalf("open emitted %d lines: %q", lines, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "--resume") ||
-		!strings.Contains(stdout.String(), id) ||
-		!strings.Contains(stdout.String(), "cc-1700000000-1-1") {
+	if !strings.Contains(stdout.String(), "attach -t 'cc-1700000000-1-1'") {
 		t.Fatalf("open stdout=%q", stdout.String())
+	}
+	// The resume is born through the one chat-server creator: its window
+	// carries the engine's name, never one its pane command chose.
+	if run := readServer("#{pane_start_command}"); !strings.Contains(run, "--resume") || !strings.Contains(run, id) {
+		t.Fatalf("opened server runs %q, want the resume of %s", run, id)
+	}
+	if window := readServer("#{window_name}"); window != "Claude" {
+		t.Fatalf("opened window = %q, want Claude", window)
 	}
 
 	stdout.Reset()
@@ -854,5 +862,33 @@ func writeJailedCodexAuth(t *testing.T, root string) {
 		0o600,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// holdClaudeOpen readies the jail for a `chat open` that creates its resume's
+// server through the one chat-server creator BEFORE it prints the attach: the
+// stock jail claude exits at once and would take that fresh server with it,
+// so it becomes a pane that stays up, and the server ends with the test. It
+// returns a reader for the created server's pane.
+func holdClaudeOpen(t *testing.T, root, socket string) func(format string) string {
+	t.Helper()
+	managed := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
+	if err := os.WriteFile(managed, []byte("#!/bin/sh\nexec sleep 120\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(root, "tmux", socket)
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
+		kill.Env = append(os.Environ(), "TMUX=")
+		_ = kill.Run()
+	})
+	return func(format string) string {
+		read := exec.Command("tmux", "-S", socketPath, "display-message", "-p", "-t", socket, format)
+		read.Env = append(os.Environ(), "TMUX=")
+		output, err := read.Output()
+		if err != nil {
+			t.Fatalf("read the opened server %s: %v", socket, err)
+		}
+		return strings.TrimSpace(string(output))
 	}
 }

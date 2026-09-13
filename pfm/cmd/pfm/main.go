@@ -432,8 +432,8 @@ func runInternal(
 		fmt.Fprintln(stdout, fleet.PrimaryAccount(runtime.Paths, runtime.Config))
 		return 0
 	}
-	if len(args) != 0 && args[0] == "tmux-titles" {
-		return runInternalTmuxTitles(args[1:], stdout, stderr, runtime)
+	if len(args) != 0 && args[0] == "chat-server" {
+		return runInternalChatServer(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := newFlagSet(
@@ -460,7 +460,7 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm internal agent-open|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|then|tmux-titles|update-check [options]")
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|then|update-check [options]")
 		return 2
 	}
 	if args[0] != "kill-exit" {

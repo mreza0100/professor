@@ -9,10 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/spawn"
 	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/tmuxfmt"
 )
@@ -125,48 +123,21 @@ func (tmux CommandTmux) SelectWindow(
 	).Run()
 }
 
-func (tmux CommandTmux) CreateCodexServer(
+// CreateChatServer creates the plan's server through spawn.CommandTmux.NewSession,
+// the one chat-server creator, so a picker-born chat carries the options,
+// window name and failure wording of every other door's.
+func (tmux CommandTmux) CreateChatServer(
 	ctx context.Context,
-	server CodexServer,
+	server ChatServer,
 ) error {
-	if err := paths.EnsureTmuxDir(tmux.TmuxDir); err != nil {
-		return err
-	}
-	arguments := append(paths.TmuxConfigArguments(),
-		"new-session",
-		"-d",
-		"-s",
-		server.Socket,
-		"-c",
-		server.CWD,
-		"-n",
-		pfmengine.MustLookup(pfmengine.Codex).Short,
-		server.Run,
-	)
-	if output, err := tmux.command(
-		ctx,
-		server.Socket,
-		arguments...,
-	).CombinedOutput(); err != nil {
-		return fmt.Errorf("create Codex server: %w: %s", err, output)
-	}
-	// The title options are applied only when tmux.titles is enabled — a host
-	// that emits its own OSC title before tmux starts keeps it. automatic-rename
-	// is always off: the window name is the fleet's DNS record.
-	serverOptions := append(
-		pfmconfig.TmuxTitlesOrDefault(server.Titles).Options(),
-		[]string{"set-window-option", "-g", "automatic-rename", "off"},
-	)
-	for _, arguments := range serverOptions {
-		if output, err := tmux.command(
-			ctx,
-			server.Socket,
-			arguments...,
-		).CombinedOutput(); err != nil {
-			return fmt.Errorf("configure Codex server: %w: %s", err, output)
-		}
-	}
-	return nil
+	creator := spawn.CommandTmux{Binary: tmux.Binary, TmuxDir: tmux.TmuxDir, Titles: server.Titles}
+	return creator.NewSession(ctx, spawn.SessionSpec{
+		Socket:  server.Socket,
+		Session: server.Socket,
+		Window:  server.Window,
+		CWD:     server.CWD,
+		Run:     server.Run,
+	})
 }
 
 func (tmux CommandTmux) command(

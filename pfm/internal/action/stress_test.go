@@ -171,9 +171,17 @@ func stressHostileProjectDirectories(t *testing.T) {
 		if !strings.HasPrefix(plan.Line, "TMUX= tmux -L ") {
 			t.Fatalf("native fresh plan %q did not call tmux directly", plan.Line)
 		}
+		// The directory travels to the creator as argv, never through the
+		// eval line: the line is only the attach, and must still eval clean.
+		if plan.ChatServer == nil || plan.ChatServer.CWD != projectDir {
+			t.Fatalf("hostile case %d server = %#v, want the directory verbatim", index, plan.ChatServer)
+		}
+		if strings.Contains(plan.Line, hostile) {
+			t.Fatalf("hostile case %d leaked the directory into the eval line: %q", index, plan.Line)
+		}
 		script := `tmux() {
   while [ "$#" -gt 0 ]; do
-    if [ "$1" = -c ]; then printf %s "$2" > "$ACTION_ROUNDTRIP"; return; fi
+    if [ "$1" = -t ]; then printf %s "$2" > "$ACTION_ROUNDTRIP"; return; fi
     shift
   done
   return 9
@@ -195,12 +203,12 @@ func stressHostileProjectDirectories(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(content) != projectDir {
+		if string(content) != "cc-stress-1" {
 			t.Fatalf(
-				"hostile path %d round trip=%q, want=%q",
+				"hostile path %d attach target round trip=%q, want=%q",
 				index,
 				content,
-				projectDir,
+				"cc-stress-1",
 			)
 		}
 		if _, err := os.Stat(marker); !os.IsNotExist(err) {

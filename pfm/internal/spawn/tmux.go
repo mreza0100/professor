@@ -59,14 +59,15 @@ func preflightBinary(binary string) error {
 	return nil
 }
 
-// NewSession creates the detached session and gives it the options a fleet
-// chat is expected to carry.
+// NewSession is the ONE chat-server creator: spawn.Run, the Claude launcher,
+// the picker (action.CommandTmux.CreateChatServer) and the shell shim
+// (`pfm internal chat-server`) all create a chat's server here, detached, and
+// give it pfmconfig.ChatServerOptions — the list name-sync converges live
+// servers onto. A second creator is a server born without that list: no title
+// policy, and a window its pane command renames out from under the fleet.
 //
-// The title options are applied only when tmux.titles is enabled, so a headless
-// pane's terminal title reads like an attached one WITHOUT seizing the title
-// from a host that set its own before tmux started; automatic-rename is always
-// off, because the window name is the fleet's DNS record and pfm is its only
-// writer.
+// A zero Width or Height states no size, so the first client to attach sizes
+// the window; tmux refuses `-x 0`.
 func (tmux CommandTmux) NewSession(
 	ctx context.Context,
 	spec SessionSpec,
@@ -82,10 +83,11 @@ func (tmux CommandTmux) NewSession(
 		"-s", spec.Session,
 		"-n", spec.Window,
 		"-c", spec.CWD,
-		"-x", strconv.Itoa(spec.Width),
-		"-y", strconv.Itoa(spec.Height),
-		spec.Run,
 	)
+	if spec.Width > 0 && spec.Height > 0 {
+		arguments = append(arguments, "-x", strconv.Itoa(spec.Width), "-y", strconv.Itoa(spec.Height))
+	}
+	arguments = append(arguments, spec.Run)
 	command, err := tmux.newSessionCommand(
 		ctx,
 		spec.Socket,
@@ -97,11 +99,7 @@ func (tmux CommandTmux) NewSession(
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("create chat server: %w: %s", err, output)
 	}
-	serverOptions := append(
-		pfmconfig.TmuxTitlesOrDefault(tmux.Titles).Options(),
-		[]string{"set-window-option", "-g", "automatic-rename", "off"},
-	)
-	for _, options := range serverOptions {
+	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles) {
 		if output, err := tmux.command(
 			ctx,
 			spec.Socket,

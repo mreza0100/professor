@@ -55,11 +55,15 @@ func TestChatOpenScansReadOnly(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
+	readServer := holdClaudeOpen(t, root, "cc-1700000000-1-1")
 	if code := run([]string{"chat", "open", id}, &stdout, &stderr); code != 0 {
 		t.Fatalf("open code=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "--resume") || !strings.Contains(stdout.String(), id) {
+	if !strings.Contains(stdout.String(), "attach -t 'cc-1700000000-1-1'") {
 		t.Fatalf("open stdout=%q", stdout.String())
+	}
+	if run := readServer("#{pane_start_command}"); !strings.Contains(run, "--resume") || !strings.Contains(run, id) {
+		t.Fatalf("opened server runs %q, want the resume of %s", run, id)
 	}
 
 	if _, err := os.Stat(corpse); err != nil {

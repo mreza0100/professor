@@ -132,8 +132,9 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	if err != nil {
 		t.Fatalf("Synthesize(NewClaude) error = %v", err)
 	}
-	if claudePlan.Line != newSessionLine("cc-configured-new-42", "/work/project", claudePlan.Run, false) {
-		t.Fatalf("new Claude picker line = %q, run = %q", claudePlan.Line, claudePlan.Run)
+	if claudePlan.Line != attachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
+		claudePlan.ChatServer == nil || claudePlan.ChatServer.Run != claudePlan.Run || claudePlan.ChatServer.CWD != "/work/project" {
+		t.Fatalf("new Claude picker line = %q, server = %#v, run = %q", claudePlan.Line, claudePlan.ChatServer, claudePlan.Run)
 	}
 	if !strings.Contains(claudePlan.Run, Quote(machine.Claude.Binary)) || strings.Contains(claudePlan.Run, "skip-permissions") {
 		t.Fatalf("new Claude picker run ignored configured prompt policy: %q", claudePlan.Run)

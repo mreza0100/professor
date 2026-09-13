@@ -6,7 +6,6 @@ cmd/pfm/chat_keys_command.go
 cmd/pfm/clear_kill_command.go
 cmd/pfm/codex_appendix_command.go
 cmd/pfm/commands.go
-cmd/pfm/config_command.go
 cmd/pfm/engines.go
 cmd/pfm/harness_prompt_baselines.go
 cmd/pfm/harvest_command.go

@@ -3,6 +3,7 @@ package gather
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,5 +69,51 @@ func TestProbeTmuxKeepsAFailingServerAsAWarning(t *testing.T) {
 	}
 	if len(result.ProbeWarnings) != 1 {
 		t.Fatalf("warnings = %q, want the one failing server named", result.ProbeWarnings)
+	}
+}
+
+// ConvergeGlobalOptions applies only what diverges and names each change as
+// it read it, so a second pass over a converged server changes nothing and
+// says nothing; a server that cannot be read is an error naming the option,
+// never an empty "nothing to converge".
+func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root, err := os.MkdirTemp("/tmp", "pfmcv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	socket := "cc-1800000041-1-1"
+	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "sleep", "120")
+	start.Env = environment
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start tmux fixture: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-L", socket, "kill-server")
+		kill.Env = environment
+		_ = kill.Run()
+	})
+	client := CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+	options := [][]string{
+		{"set-option", "-g", "set-titles", "off"},
+		{"set-window-option", "-g", "automatic-rename", "off"},
+	}
+	transitions, err := client.ConvergeGlobalOptions(context.Background(), socket, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(transitions, "; ") != `automatic-rename "on" -> "off"` {
+		t.Fatalf("first pass transitions = %q, want only automatic-rename changed", transitions)
+	}
+	if again, err := client.ConvergeGlobalOptions(context.Background(), socket, options); err != nil || len(again) != 0 {
+		t.Fatalf("second pass = %q (%v), want a converged server left alone", again, err)
+	}
+	_, err = client.ConvergeGlobalOptions(context.Background(), "cc-missing", options)
+	if err == nil || !strings.Contains(err.Error(), "set-titles") {
+		t.Fatalf("unreadable server error = %v, want one naming the option it could not read", err)
 	}
 }

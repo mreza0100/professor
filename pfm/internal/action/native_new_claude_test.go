@@ -62,8 +62,11 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	if strings.Contains(plan.Run, "skip-permissions") {
 		t.Fatalf("prompted account received autonomy bypass: %q", plan.Run)
 	}
-	if got, want := plan.Line, newSessionLine(request.FreshSocket, request.Row.CWD, plan.Run, true); got != want {
-		t.Fatalf("native fresh line = %q, want bunker tmux line %q", got, want)
+	if got, want := plan.Line, attachLine(request.FreshSocket, request.FreshSocket, true); got != want {
+		t.Fatalf("native fresh line = %q, want bunker attach line %q", got, want)
+	}
+	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
+		t.Fatalf("native fresh server = %#v, want the plan's run in the row's cwd", plan.ChatServer)
 	}
 	for _, retired := range []string{" cc42", "_cc_run", "CC_ARM_1H"} {
 		if strings.Contains(plan.Line, retired) || strings.Contains(plan.Run, retired) {

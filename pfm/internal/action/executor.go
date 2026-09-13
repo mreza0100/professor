@@ -140,10 +140,10 @@ func (executor *Executor) Open(
 	if err != nil {
 		return "", err
 	}
-	if plan.CodexServer != nil {
-		if err := executor.tmux.CreateCodexServer(
+	if plan.ChatServer != nil {
+		if err := executor.tmux.CreateChatServer(
 			ctx,
-			*plan.CodexServer,
+			*plan.ChatServer,
 		); err != nil {
 			return "", err
 		}

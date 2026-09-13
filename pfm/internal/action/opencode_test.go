@@ -30,8 +30,9 @@ func TestSynthesizeNewOpencodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	if !strings.Contains(plan.Run, Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
 		t.Fatalf("fresh OpenCode run = %q", plan.Run)
 	}
-	if !strings.Contains(plan.Line, "'ox-1-2-4'") || !strings.Contains(plan.Line, "'/work/nuts'") {
-		t.Fatalf("fresh OpenCode line = %q", plan.Line)
+	if plan.Line != "TMUX= tmux -L 'ox-1-2-4' attach -t 'ox-1-2-4'" ||
+		plan.ChatServer == nil || plan.ChatServer.CWD != "/work/nuts" || plan.ChatServer.Window != "OpenCode" {
+		t.Fatalf("fresh OpenCode line = %q server = %#v", plan.Line, plan.ChatServer)
 	}
 }
 
@@ -105,11 +106,11 @@ func TestSynthesizeResumeOpencodeLaunchesTheSession(t *testing.T) {
 	if !strings.Contains(plan.Run, "--session") || !strings.Contains(plan.Run, "/work/nuts") {
 		t.Errorf("run misses the session resume: %q", plan.Run)
 	}
-	if !strings.HasPrefix(plan.Line, "TMUX= exec tmux -L ") {
-		t.Errorf("line is not a bunker session line: %q", plan.Line)
+	if plan.Line != "TMUX= exec tmux -L 'ox-1-2-3' attach -t 'ox-1-2-3'" {
+		t.Errorf("line is not the bunker attach to the fresh server: %q", plan.Line)
 	}
-	if !strings.Contains(plan.Line, "'ox-1-2-3'") || !strings.Contains(plan.Line, "'/work/nuts'") {
-		t.Errorf("line misses socket or cwd: %q", plan.Line)
+	if plan.ChatServer == nil || plan.ChatServer.Socket != "ox-1-2-3" || plan.ChatServer.CWD != "/work/nuts" {
+		t.Errorf("server misses socket or cwd: %#v", plan.ChatServer)
 	}
 	if strings.Contains(plan.Run, "--dangerously") {
 		t.Errorf("OpenCode launch must not carry Claude/Codex autonomy flags: %q", plan.Run)
