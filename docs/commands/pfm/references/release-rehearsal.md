@@ -15,7 +15,7 @@ Stage B's hardest case is the adopter several versions behind: `seed` an older t
 
 ## The driver
 
-Model: the Codex model `pfm/internal/codexgen/config.go` maps `sonnet` to (`grep -o '"sonnet": *"[^"]*"' pfm/internal/codexgen/config.go`), effort `medium`. One run per stage attempt, its files under `tmp/release-rehearsal/{NEW}/{stage}-{attempt}/`:
+Model: the Codex model `pfm/internal/codexgen/config.go` maps `sonnet` to (`grep -o '"sonnet": *"[^"]*"' pfm/internal/codexgen/config.go`), effort `medium`. One run per stage attempt, its files in `$RUN` — a directory OUTSIDE every git repository (`$TMPDIR/pfm-release-rehearsal/{NEW}/{stage}-{attempt}/`): Codex loads each ancestor repo's `AGENTS.md`, and this repo's contract would turn the adopter into a Professor maintainer:
 
 ```bash
 pfm headless exec --engine codex --model "$MODEL" --effort medium --no-session-persistence \

@@ -422,14 +422,20 @@ cmd_iso() { # cmd_iso <action> [project]
   export PFM_DEV_WORKTREE="$REPO_ROOT"
   export PFM_DEV_GIT_COMMON="$git_common"
   export PFM_DEV_GIT_DIR_REL="$git_dir_relative"
+  # The leak denylist is untracked and lives only in the main checkout, so a
+  # linked worktree's mount never carries it; hand it in read-only (LEAK_TERMS
+  # wins). Without one the in-fence leak gate fails loudly — never a fake pass.
+  local terms="${LEAK_TERMS:-$(dirname "$git_common")/scripts/leak-terms.txt}"
+  local extra=()
+  [[ -f "$terms" ]] && extra=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)
-      docker compose -f "$compose" run --rm --build pfm-dev zsh -c "$proof; exec zsh -i" ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     e2e)
-      docker compose -f "$compose" run --rm --build pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
     install|build|typecheck|verify|test|all|status)
-      docker compose -f "$compose" run --rm --build pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     *)
       echo "usage: dev.sh iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]" >&2; exit 2 ;;
   esac

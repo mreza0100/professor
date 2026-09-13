@@ -45,7 +45,9 @@ STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]'
 #                    — the Go suites' synthetic HOMEs; no machine on earth is any of these
 #   ~/work/alpha, ~/work/Foo — invented project names in a fixture statusline and a doc example
 #   ~/work/professor — this repo's own public name, quoted in a historical release note
-BENIGN_TOKENS='(/home/account-42|~/work/professor|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
+#   mreza0100       — this repo's published GitHub owner (LICENSE, README, INSTALL); a
+#                     private term that is a substring of it must not fail the public URL
+BENIGN_TOKENS='(/home/account-42|~/work/professor|mreza0100|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
 
 # True when the line still matches PATTERN after benign tokens are removed.
 line_is_real_hit() {

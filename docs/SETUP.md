@@ -565,6 +565,8 @@ New Professor versions ship as semver git tags. Each tier stays current from its
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, including `pfm codex build` and `pfm codex check`, after changing its local sources. |
 
+Before either tier moves, read every release note between the installed and the target version and merge their `#### → For:` actions — the rule lives in `INSTALL.md` § Updating.
+
 ### Review and adopt upstream project changes
 
 0. An install that predates `pfm init` has no `.professor/baseline.json`: run `pfm update adopt` once inside it. It pins every mapped template whose local file exists, writes nothing else, and reports `adopted / kept / absent` counts. `--at <ref>` pins at the blueprint ref the install was last synced from, so the first `check` reports every template change since then instead of a false `clean`.

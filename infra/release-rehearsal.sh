@@ -6,17 +6,20 @@ set -euo pipefail
 # image. Its only Professor source is a rehearsal-local upstream
 # (/root/upstream.git) built from this repo's git objects, so a candidate
 # release is "published" inside the fence and never touches GitHub. `snapshot`
-# freezes the stable-installed machine as an image; `revert` rebuilds the
-# container from it, so every update attempt starts from the identical stable
+# archives the stable-installed HOME (pfm installs touch nothing outside it) into
+# the snapshot volume; `revert` starts a fresh container from the base image and
+# restores that HOME, so every update attempt starts from the identical stable
 # install. A real adopter machine carries no PFM_DEV_FENCE, so neither does this.
 #
 # BROKEN STATE: an unreachable docker daemon reports TOOLCHAIN-MISSING and exits
 # 1; every other failure exits non-zero naming the step that failed (a missing
-# container, a tag absent from upstream, a snapshot that did not commit). No
+# container, a tag absent from upstream, a snapshot archive that is absent or
+# empty). No
 # path prints success for a step whose in-container check did not pass.
 
 NAME=pfm-release-rehearsal
-SNAPSHOT=pfm-release-rehearsal:stable
+SNAPSHOT_VOLUME=pfm-release-rehearsal-snapshot
+SNAPSHOT=/snapshot/home.tar
 IMAGE=professor-pfm-dev
 UPSTREAM=/root/upstream.git
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -29,11 +32,11 @@ usage: infra/release-rehearsal.sh <command>
   up                             build the pfm-dev image, start the rehearsal container
   seed <stable-tag>              upstream = main at <stable-tag>, no newer tag or branch
   publish <tag> <commit>         fast-forward upstream main to <commit>, tag it <tag>
-  snapshot                       freeze the container as the stable install image
-  revert                         replace the container with a fresh one from the snapshot
+  snapshot                       archive the stable-installed HOME into the snapshot volume
+  revert                         replace the container with a fresh one holding the snapshot HOME
   exec <command-string>          run a command in the container (bash -lc)
   status                         container, snapshot, upstream main + tags
-  down                           remove the container and the snapshot image
+  down                           remove the container and the snapshot volume
 EOF
   exit 2
 }
@@ -57,12 +60,13 @@ git_common() {
   (cd "$dir" && pwd -P)
 }
 
-start_from() { # start_from <image>
+start_from() {
   docker run -d --name "$NAME" --init \
     -v "$(git_common):/pfm-git-common:ro" \
     -v pfm-dev-gomod:/root/go/pkg/mod \
     -v pfm-dev-gocache:/root/.cache/go-build \
-    "$1" sleep infinity >/dev/null || die "start container from $1 failed"
+    -v "$SNAPSHOT_VOLUME:/snapshot" \
+    "$IMAGE" sleep infinity >/dev/null || die "start container from $IMAGE failed"
   require_running
   # The host-owned git mount is foreign to the container's root; trust it
   # explicitly or every git read of it fails the dubious-ownership check.
@@ -75,7 +79,7 @@ cmd_up() {
   exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
   docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/pfm-dev.Dockerfile" "$REPO_ROOT/infra" >/dev/null \
     || die "build image $IMAGE failed"
-  start_from "$IMAGE"
+  start_from
 }
 
 cmd_seed() {
@@ -114,18 +118,21 @@ cmd_publish() {
     || die "publish $tag failed"
 }
 
+# The Go caches are shared volumes, not machine state — they stay out of the archive.
 cmd_snapshot() {
   require_running
-  docker commit -q "$NAME" "$SNAPSHOT" >/dev/null || die "snapshot: docker commit failed"
-  docker image inspect "$SNAPSHOT" >/dev/null 2>&1 || die "snapshot: image $SNAPSHOT absent after commit"
-  echo "snapshot: $SNAPSHOT"
+  inside "tar -C / --exclude=root/go/pkg/mod --exclude=root/.cache/go-build -cpf $SNAPSHOT.tmp root && mv $SNAPSHOT.tmp $SNAPSHOT && test -s $SNAPSHOT" \
+    || die "snapshot: archive HOME into $SNAPSHOT failed"
+  echo "snapshot: $SNAPSHOT_VOLUME:$SNAPSHOT ($(inside "du -h $SNAPSHOT | cut -f1"))"
 }
 
 cmd_revert() {
-  docker image inspect "$SNAPSHOT" >/dev/null 2>&1 || die "revert: no snapshot image $SNAPSHOT — run 'snapshot' after the stable install"
   if exists; then docker rm -f "$NAME" >/dev/null || die "revert: remove container $NAME failed"; fi
-  start_from "$SNAPSHOT"
-  echo "reverted: $NAME restarted from $SNAPSHOT"
+  start_from
+  inside "test -s $SNAPSHOT" || die "revert: no snapshot archive in $SNAPSHOT_VOLUME — run 'snapshot' after the stable install"
+  inside "find /root -mindepth 1 -maxdepth 1 ! -name go ! -name .cache -exec rm -rf {} + && tar -C / -xpf $SNAPSHOT" \
+    || die "revert: restore HOME from $SNAPSHOT failed"
+  echo "reverted: $NAME restarted with the snapshot HOME"
 }
 
 cmd_status() {
@@ -136,13 +143,13 @@ cmd_status() {
   else
     echo "container: absent"
   fi
-  if docker image inspect "$SNAPSHOT" >/dev/null 2>&1; then echo "snapshot: $SNAPSHOT"; else echo "snapshot: absent"; fi
+  if docker volume inspect "$SNAPSHOT_VOLUME" >/dev/null 2>&1; then echo "snapshot volume: $SNAPSHOT_VOLUME"; else echo "snapshot volume: absent"; fi
 }
 
 cmd_down() {
   if exists; then docker rm -f "$NAME" >/dev/null || die "down: remove container failed"; fi
-  if docker image inspect "$SNAPSHOT" >/dev/null 2>&1; then docker rmi -f "$SNAPSHOT" >/dev/null || die "down: remove snapshot failed"; fi
-  echo "down: container and snapshot removed"
+  if docker volume inspect "$SNAPSHOT_VOLUME" >/dev/null 2>&1; then docker volume rm "$SNAPSHOT_VOLUME" >/dev/null || die "down: remove snapshot volume failed"; fi
+  echo "down: container and snapshot volume removed"
 }
 
 [[ $# -ge 1 ]] || usage
