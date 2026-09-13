@@ -1,11 +1,11 @@
 package gather
 
 import (
+	"hostops/pfm/internal/resolve"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"hostops/pfm/internal/resolve"
 )
 
 // A Codex session that writes no rollout file holds no rollout descriptor
@@ -357,5 +357,34 @@ func TestDetectCodexThreadsMatchesRolloutsUnderEveryConfiguredRoot(t *testing.T)
 	}
 	if len(live) != 1 || live[0].RolloutPath != rollout {
 		t.Fatalf("multi-root live Codex=%#v, want rollout %q", live, rollout)
+	}
+}
+
+func TestHeldCodexRootOutranksSubagentDescriptor(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	if err := os.MkdirAll(sessions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(sessions, "rollout-child.jsonl")
+	parent := filepath.Join(sessions, "rollout-root.jsonl")
+	for path, text := range map[string]string{
+		child:  `{"type":"session_meta","payload":{"id":"child","source":{"subagent":{"thread_spawn":{"parent_thread_id":"root"}}}}}` + "\n",
+		parent: `{"type":"session_meta","payload":{"id":"root","source":"cli"}}` + "\n",
+	} {
+		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proc := &fakeProcFS{processes: map[int]fakeProcess{
+		100: {stat: ProcStat{ParentPID: 1}},
+		400: {cmdline: []string{"/usr/bin/codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 7, Target: parent}}},
+	}}
+	live, err := DetectCodexThreads(proc, root, []Pane{{Socket: "cx-1-2-3", PaneID: "%0", PID: 100}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].ThreadID != "root" || !live[0].RolloutHeld {
+		t.Fatalf("wrong live root: %#v", live)
 	}
 }

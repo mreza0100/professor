@@ -7,7 +7,6 @@ cmd/pfm/clear_kill_command.go
 cmd/pfm/codex_appendix_command.go
 cmd/pfm/commands.go
 cmd/pfm/config_command.go
-cmd/pfm/doctor.go
 cmd/pfm/engines.go
 cmd/pfm/harness_prompt_baselines.go
 cmd/pfm/harvest_command.go
@@ -127,7 +126,6 @@ internal/installer/files.go
 internal/installer/launchd.go
 internal/installer/mcp.go
 internal/installer/mcp_files.go
-internal/installer/mcp_inspect.go
 internal/installer/scheduler_darwin.go
 internal/installer/scheduler_other.go
 internal/installer/settings.go

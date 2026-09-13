@@ -14,7 +14,7 @@ func updateSettings(
 	owned settingsHookCounts,
 ) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return nil, false, nil, err
 	}
 	oldBinary := home + "/.local/bin/cc-fleet"
@@ -284,7 +284,7 @@ func rewriteCommandFields(value any, rewrite func(string) string) bool {
 // compound shell commands are operator content.
 func rewriteMemoryHelperHookPaths(raw []byte, paths map[string]string, home string) ([]byte, bool, error) {
 	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return nil, false, err
 	}
 	if document == nil {
