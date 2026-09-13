@@ -1,30 +1,18 @@
 package kill
 
 import (
-	"context"
-
 	pfmengine "hostops/pfm/internal/engine"
+	claudeengine "hostops/pfm/internal/engine/claude"
+	codexengine "hostops/pfm/internal/engine/codex"
+	opencodeengine "hostops/pfm/internal/engine/opencode"
 	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
 )
 
-type killIndexSource struct{ id pfmengine.ID }
-
-func (source killIndexSource) Sync(ctx context.Context, database *store.Store, roots []string, counters *index.Counters) error {
-	switch source.id {
-	case pfmengine.Claude:
-		return index.SyncClaude(ctx, database, roots, counters)
-	case pfmengine.Codex:
-		return index.SyncCodex(ctx, database, roots, counters)
-	case pfmengine.Opencode:
-		return index.SyncOpencode(ctx, database, roots, counters)
-	default:
-		return nil
-	}
-}
-
+// The composition root (cmd/pfm/engines.go) wires the engines in production;
+// kill's tests index real transcripts, so they wire every engine's source — an
+// index pass refuses an engine it cannot index.
 func init() {
-	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Opencode} {
-		index.RegisterSource(id, killIndexSource{id: id})
-	}
+	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
+	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
+	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
 }

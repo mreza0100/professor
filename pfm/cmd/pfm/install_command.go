@@ -140,7 +140,7 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
 		return runtime, 1
 	}
-	reloaded, err := loadCommandRuntime(migration.Path)
+	reloaded, err := pfmconfig.LoadRuntime(migration.Path)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: reload migrated config %s: %v\n", migration.Path, err)
 		return runtime, 1

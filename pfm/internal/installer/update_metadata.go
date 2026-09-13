@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
@@ -36,7 +38,7 @@ func WriteSourceRepoMarker(home, repo string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(SourceRepoPath(home), content, 0o600)
+	return atomicfile.Write(SourceRepoPath(home), content, 0o600)
 }
 
 func sourceRepoMarkerContent(repo string) ([]byte, error) {
@@ -109,7 +111,7 @@ func RecordCanonicalBinary(home string) error {
 	if sameFile(binaryOwnershipPath(home), content, 0o600) {
 		return nil
 	}
-	return atomicWrite(binaryOwnershipPath(home), content, 0o600)
+	return atomicfile.Write(binaryOwnershipPath(home), content, 0o600)
 }
 
 func canonicalBinaryOwnershipContent(home string) ([]byte, error) {

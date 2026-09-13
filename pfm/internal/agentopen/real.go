@@ -13,9 +13,9 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 // ExecCommands is the production command boundary. Every Claude invocation it
@@ -155,16 +155,8 @@ type RealTmux struct {
 	Stderr io.Writer
 }
 
-func (tmux RealTmux) binary() string {
-	if tmux.Binary != "" {
-		return deps.Executable(tmux.Binary)
-	}
-	return deps.Executable("tmux")
-}
 func (tmux RealTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, tmux.binary(), append([]string{"-S", filepath.Join(tmux.Dir, socket)}, args...)...)
-	command.Env = append(os.Environ(), "TMUX=")
-	return command
+	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), args...)
 }
 func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) {
 	entries, err := os.ReadDir(tmux.Dir)

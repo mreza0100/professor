@@ -36,7 +36,7 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	}
 	run := func(t *testing.T) string {
 		t.Helper()
-		runtime, err := loadCommandRuntime("")
+		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	t.Run("loopback routes with retired authentication are incomplete", func(t *testing.T) {
 		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester","headers":{"Authorization":"Bearer retired"}}}}`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n[mcp_servers.harvester.headers]\nAuthorization = \"Bearer retired\"\n")
-		runtime, err := loadCommandRuntime("")
+		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	t.Run("foreign routes are warnings for both clients", func(t *testing.T) {
 		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"https://foreign.invalid/mcp"}}}`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"https://foreign.invalid/mcp\"\n")
-		runtime, err := loadCommandRuntime("")
+		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +135,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	t.Run("malformed Claude JSON is unreadable", func(t *testing.T) {
 		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
-		runtime, err := loadCommandRuntime("")
+		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +152,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	t.Run("malformed Codex TOML is unreadable", func(t *testing.T) {
 		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
 		write(codexPath, "[mcp_servers.harvester\n")
-		runtime, err := loadCommandRuntime("")
+		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,7 +170,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	jailTest(t)
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}

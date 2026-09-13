@@ -6,8 +6,10 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/inject"
@@ -54,26 +56,21 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 
-	environment, err := resolveScanEnvironment(scanRequest{Runtime: &runtime})
+	environment, err := fleet.ResolveEnv(fleet.Request{Runtime: &runtime})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	data, err := loadFleetData(ctx, database)
+	data, err := fleet.LoadData(ctx, database)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
 	// ReadOnly is what makes --dry-run a dry run: the gather pass applies the
 	// renames it plans, and only a read-only pass plans without applying.
-	live, err := gatherFleet(
-		ctx,
-		database,
-		environment.paths,
-		environment.config,
-		data,
+	live, err := fleet.Gather(ctx, database, environment, data,
 		*dryRun,
-		printWarn(stderr),
+		fleet.PrintWarn(stderr),
 		stderr,
 	)
 	if err != nil {
@@ -81,7 +78,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return 1
 	}
 	if !*dryRun {
-		reconcileCodexPanes(ctx, database, live, runtime, printWarn(stderr))
+		fleet.ReconcileCodexPanes(ctx, database, live, runtime, fleet.PrintWarn(stderr))
 	}
 	verb := "renamed"
 	if *dryRun {
@@ -105,17 +102,17 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}
-	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.paths.TmuxDir)}
-	_, titlesUnverified := convergeTmuxTitles(
+	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
+	titlesUnverified := convergeChatServerOptions(
 		ctx,
 		titlesTmux,
 		liveSockets(live.Panes),
-		environment.config.Tmux.Titles,
+		environment.Config.Tmux.Titles,
 		stdout,
 		stderr,
 	)
 	if titlesUnverified != 0 {
-		fmt.Fprintf(stdout, "tmux titles unverified: %d\n", titlesUnverified)
+		fmt.Fprintf(stdout, "tmux options unverified: %d\n", titlesUnverified)
 	}
 	converged, unverified := verifyRenames(ctx, runtime, live.Renames, stderr)
 	fmt.Fprintf(stdout, "windows converged: %d\n", converged)
@@ -188,110 +185,47 @@ func liveSockets(panes []gather.Pane) []string {
 	return sockets
 }
 
-// convergeTmuxTitles is the ONE place an EXISTING live server's tmux.titles
-// state is brought onto the machine's intended policy. The three creation
-// doors (spawn.CommandTmux.NewSession, action.CommandTmux.CreateCodexServer,
-// the pfm.zsh shim) apply the policy once, at birth — nothing converged a
-// server that predates a policy change, or one a scheduler outage left
-// behind, until this pass. It runs on every scheduled name-sync alongside the
-// window-name convergence it already performs.
+// convergeChatServerOptions is the ONE place an EXISTING live server is
+// brought onto pfmconfig.ChatServerOptions — the list the one chat-server
+// creator (spawn.CommandTmux.NewSession) applies at birth — so a server that
+// predates a policy change, one a scheduler outage left behind, or one born
+// before its door went through the creator converges on the next scheduled
+// name-sync. A HOST-owned title policy contributes no title option, so a host
+// that owns its own OSC title keeps it; automatic-rename off is never gated.
 //
-// A HOST-owned policy (Enabled == false) touches nothing on any server: that
-// policy exists precisely so a host that owns its own OSC title before tmux
-// starts keeps it, and a server already `set-titles off` for that reason is
-// not drift.
-//
-// A PFM-owned policy converges any server that diverges — `set-titles` not
-// `on`, or the string not config.TmuxTitlesString — by applying
-// config.TmuxTitles.Options() to it, the exact argv the creation doors use.
-// Every pfm-owned server, converged or already correct, then gets the same
-// flip-and-restore nudge tmux-title-renudge performs, so a terminal caching a
-// stale title (a VS Code tab reviving a persistent pane) repaints even when
-// the server's OPTIONS never changed.
-//
-// Convergence is reported per server — a named transition, never silence —
-// plus one summary count; a read or apply failure on one socket is named on
-// stderr and does not stop the pass from converging the rest.
-func convergeTmuxTitles(
+// Every server on a pfm-owned title policy then gets the flip-and-restore
+// nudge tmux-title-renudge performs, so a terminal caching a stale title (a
+// VS Code tab reviving a persistent pane) repaints even when no option
+// changed. Each converged server is named with its transitions, a read or
+// apply failure is named on stderr without stopping the pass, and one summary
+// count closes it.
+func convergeChatServerOptions(
 	ctx context.Context,
 	tmux gather.CommandTmux,
 	sockets []string,
 	titles pfmconfig.TmuxTitles,
 	stdout, stderr io.Writer,
-) (converged, unverified int) {
-	if !titles.Enabled {
-		return 0, 0
-	}
+) (unverified int) {
+	converged := 0
 	for _, socket := range sockets {
-		actualTitles, titlesErr := tmux.ShowGlobalOption(ctx, socket, "set-titles")
-		if titlesErr != nil {
-			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles: %v\n", socket, titlesErr)
+		transitions, err := tmux.ConvergeGlobalOptions(ctx, socket, pfmconfig.ChatServerOptions(&titles))
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm name-sync: tmux options %s: %v\n", socket, err)
 			unverified++
-		}
-		actualString, stringErr := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
-		if stringErr != nil {
-			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not read set-titles-string: %v\n", socket, stringErr)
-			unverified++
-		}
-		if titlesErr != nil || stringErr != nil {
 			continue
 		}
-		titlesOff := actualTitles != "on"
-		stringWrong := actualString != pfmconfig.TmuxTitlesString
-		if titlesOff || stringWrong {
-			if err := tmux.ApplyGlobalOptions(ctx, socket, titles.Options()); err != nil {
-				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: convergence failed: %v\n", socket, err)
-				unverified++
-				continue
-			}
-			verifiedTitles, verifyTitlesErr := tmux.ShowGlobalOption(ctx, socket, "set-titles")
-			if verifyTitlesErr != nil {
-				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not verify set-titles after apply: %v\n", socket, verifyTitlesErr)
-				unverified++
-				continue
-			}
-			verifiedString, verifyStringErr := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
-			if verifyStringErr != nil {
-				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: could not verify set-titles-string after apply: %v\n", socket, verifyStringErr)
-				unverified++
-				continue
-			}
-			if verifiedTitles != "on" {
-				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: set-titles read back %q after apply, wanted %q\n", socket, verifiedTitles, "on")
-				unverified++
-			}
-			if verifiedString != pfmconfig.TmuxTitlesString {
-				fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: set-titles-string read back %q after apply, wanted %q\n", socket, verifiedString, pfmconfig.TmuxTitlesString)
-				unverified++
-			}
-			if verifiedTitles != "on" || verifiedString != pfmconfig.TmuxTitlesString {
-				continue
-			}
-			switch {
-			case titlesOff && stringWrong:
-				fmt.Fprintf(
-					stdout,
-					"tmux titles %s converged: set-titles %s -> on, set-titles-string %q -> %q\n",
-					socket, actualTitles, actualString, pfmconfig.TmuxTitlesString,
-				)
-			case titlesOff:
-				fmt.Fprintf(stdout, "tmux titles %s converged: set-titles %s -> on\n", socket, actualTitles)
-			default:
-				fmt.Fprintf(
-					stdout,
-					"tmux titles %s converged: set-titles-string %q -> %q\n",
-					socket, actualString, pfmconfig.TmuxTitlesString,
-				)
-			}
+		if len(transitions) != 0 {
+			fmt.Fprintf(stdout, "tmux options %s converged: %s\n", socket, strings.Join(transitions, ", "))
 			converged++
 		}
-		// The nudge runs on every pfm-owned server, converged or already
-		// correct, so a terminal caching a stale title still repaints.
+		if !titles.Enabled {
+			continue
+		}
 		if err := tmux.NudgeTitlesString(ctx, socket, pfmconfig.TmuxTitlesString); err != nil {
 			fmt.Fprintf(stderr, "pfm name-sync: tmux titles %s: %v\n", socket, err)
 			unverified++
 		}
 	}
-	fmt.Fprintf(stdout, "tmux titles converged: %d\n", converged)
-	return converged, unverified
+	fmt.Fprintf(stdout, "tmux options converged: %d\n", converged)
+	return unverified
 }

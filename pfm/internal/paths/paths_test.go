@@ -140,3 +140,34 @@ func TestResolveUsesScratchTmuxBase(t *testing.T) {
 		t.Fatalf("Resolve().TmuxDir = %q, want %q", got.TmuxDir, want)
 	}
 }
+
+// TestFirstRootIsTheEnginesFirstConfiguredRoot pins the single-root read and
+// its empty answer for an engine with no roots.
+func TestFirstRootIsTheEnginesFirstConfiguredRoot(t *testing.T) {
+	values := Values{Roots: map[pfmengine.ID][]string{pfmengine.Codex: {"/r/codex-1", "/r/codex-2"}}}
+	if got := values.FirstRoot(pfmengine.Codex); got != "/r/codex-1" {
+		t.Fatalf("FirstRoot(codex) = %q", got)
+	}
+	if got := values.FirstRoot(pfmengine.Claude); got != "" {
+		t.Fatalf("FirstRoot(claude) = %q, want empty", got)
+	}
+}
+
+// TestSocketUnderKeepsTheSocketInsideTheTmuxDirectory pins the one socket
+// guard: a bare name joins the tmux directory; anything that could dial a
+// server elsewhere — absolute, nested, dot names — or an unset directory is
+// refused.
+func TestSocketUnderKeepsTheSocketInsideTheTmuxDirectory(t *testing.T) {
+	values := Values{TmuxDir: "/jail/tmux"}
+	if got, err := values.SocketUnder("cc-1-2-3"); err != nil || got != "/jail/tmux/cc-1-2-3" {
+		t.Fatalf("SocketUnder(cc-1-2-3) = %q, %v", got, err)
+	}
+	for _, socket := range []string{"", ".", "..", "../escape", "/tmp/elsewhere", "nested/name"} {
+		if got, err := values.SocketUnder(socket); err == nil {
+			t.Fatalf("SocketUnder(%q) = %q; want it refused", socket, got)
+		}
+	}
+	if _, err := (Values{}).SocketUnder("cc-1-2-3"); err == nil {
+		t.Fatal("SocketUnder with no tmux directory answered a path")
+	}
+}

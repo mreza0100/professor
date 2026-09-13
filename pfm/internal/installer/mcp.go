@@ -328,24 +328,6 @@ func (installer *engine) removeMCPCodeConfigAt(path string) error {
 	})
 }
 
-func readJSONObject(path string) (map[string]any, bool, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]any{}, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, true, err
-	}
-	if document == nil {
-		return nil, true, fmt.Errorf("expected JSON object at %s", path)
-	}
-	return document, true, nil
-}
-
 func sameJSONValue(left, right any) bool {
 	a, err := json.Marshal(left)
 	if err != nil {

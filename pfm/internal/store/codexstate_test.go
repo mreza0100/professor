@@ -37,7 +37,7 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if err != nil {
 		t.Fatalf("read Codex state schema: %v", err)
 	}
-	database, err := sql.Open(driverName, path)
+	database, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestReadCodexThreadsHighestGenerationWinsAndClassifies(t *testing.T) {
 
 func TestReadCodexThreadsSkipsUnusableGenerations(t *testing.T) {
 	root := t.TempDir()
-	ancient, err := sql.Open(driverName, filepath.Join(root, "state_1.sqlite"))
+	ancient, err := sql.Open("sqlite", filepath.Join(root, "state_1.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -372,7 +372,7 @@ func TestV4MigrationAddsCxNameProvenanceIdempotently(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	database, err := sql.Open(driverName, dbPath)
+	database, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

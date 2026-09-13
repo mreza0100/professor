@@ -18,7 +18,7 @@ import (
 // does. A fleet where one engine seizes the terminal title and the other does
 // not is worse than either choice made consistently.
 
-func newCodexTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.TmuxTitles) string {
+func newCodexTitlesProbeServer(t *testing.T, socket, window string, titles *pfmconfig.TmuxTitles) string {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -35,8 +35,8 @@ func newCodexTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.Tm
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 
 	tmux := CommandTmux{TmuxDir: tmuxDir}
-	if err := tmux.CreateCodexServer(context.Background(), CodexServer{
-		Socket: socket, CWD: root, Run: "sleep 120", Titles: titles,
+	if err := tmux.CreateChatServer(context.Background(), ChatServer{
+		Socket: socket, CWD: root, Window: window, Run: "sleep 120", Titles: titles,
 	}); err != nil {
 		t.Fatalf("create Codex server: %v", err)
 	}
@@ -61,7 +61,7 @@ func showCodexOption(t *testing.T, socketPath string, arguments ...string) strin
 
 func TestCodexServerAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
 	titles := pfmconfig.DefaultTmuxTitles()
-	socketPath := newCodexTitlesProbeServer(t, "probe-cx-1800000021-1-1", &titles)
+	socketPath := newCodexTitlesProbeServer(t, "probe-cx-1800000021-1-1", "Codex", &titles)
 	if got := showCodexOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles on" {
 		t.Fatalf("set-titles = %q, want on", got)
 	}
@@ -73,7 +73,7 @@ func TestCodexServerAppliesTheTitleOptionsWhenPfmOwnsThem(t *testing.T) {
 
 func TestCodexServerLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
 	socketPath := newCodexTitlesProbeServer(
-		t, "probe-cx-1800000022-1-1", &pfmconfig.TmuxTitles{Enabled: false},
+		t, "probe-cx-1800000022-1-1", "Codex", &pfmconfig.TmuxTitles{Enabled: false},
 	)
 	if got := showCodexOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles off" {
 		t.Fatalf("set-titles = %q, want tmux's own default off", got)
@@ -103,11 +103,24 @@ func TestSynthesizeCarriesTheConfiguredTitlePolicyIntoTheCodexPlan(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if plan.CodexServer == nil || plan.CodexServer.Titles == nil {
-			t.Fatalf("plan carries no tmux.titles policy: %#v", plan.CodexServer)
+		if plan.ChatServer == nil || plan.ChatServer.Titles == nil {
+			t.Fatalf("plan carries no tmux.titles policy: %#v", plan.ChatServer)
 		}
-		if plan.CodexServer.Titles.Enabled != enabled {
-			t.Fatalf("plan title policy = %t, want %t", plan.CodexServer.Titles.Enabled, enabled)
+		if plan.ChatServer.Titles.Enabled != enabled {
+			t.Fatalf("plan title policy = %t, want %t", plan.ChatServer.Titles.Enabled, enabled)
 		}
+	}
+}
+
+// The picker's server is born through spawn's creator with the window name
+// its plan chose, so a Claude or OpenCode chat opened from the picker is
+// addressable by name from its first frame, and no pane command renames it.
+func TestChatServerIsBornWithThePlannedWindowName(t *testing.T) {
+	socketPath := newCodexTitlesProbeServer(t, "probe-ox-1800000023-1-1", "OpenCode", nil)
+	if got := showCodexOption(t, socketPath, "display-message", "-p", "-t", "probe-ox-1800000023-1-1", "#{window_name}"); got != "OpenCode" {
+		t.Fatalf("window name = %q, want the planned OpenCode", got)
+	}
+	if got := showCodexOption(t, socketPath, "show-window-options", "-g", "automatic-rename"); got != "automatic-rename off" {
+		t.Fatalf("automatic-rename = %q, want off", got)
 	}
 }

@@ -152,6 +152,7 @@ func TestShimAutoOpenDefersDisarmsAndMapsLegacyValuesToPicker(t *testing.T) {
 	}
 	writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), `#!/bin/sh
 if [ "$#" -eq 0 ]; then printf 'picker\n' >> "$SHIM_AUTO_LOG"; fi
+if [ "$1" = internal ] && [ "$2" = chat-server ]; then shift 2; printf 'create %s\n' "$*" >> "$SHIM_AUTO_LOG"; fi
 `)
 	writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
 printf 'launch %s\n' "$*" >> "$SHIM_AUTO_LOG"
@@ -172,10 +173,10 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		{name: "retired cc", environ: []string{"CC_AUTO_OPEN=cc"}, want: []string{"picker"}, absent: []string{"launch "}},
 		{name: "retired cc2", environ: []string{"CC_AUTO_OPEN=cc2"}, want: []string{"picker"}, absent: []string{"launch "}},
 		{name: "retired VS Code spelling", environ: []string{"VSCODE_AUTO_CC=1"}, want: []string{"picker"}},
-		{name: "Codex survives", environ: []string{"PFM_AUTO_OPEN=cx"}, want: []string{"launch ", "codex"}},
+		{name: "Codex survives", environ: []string{"PFM_AUTO_OPEN=cx"}, want: []string{"create cx-", "codex", "launch "}},
 		{name: "unknown is never evaluated", environ: []string{"PFM_AUTO_OPEN=rm -rf /"}, want: []string{"picker"}, absent: []string{"EVALUATED"}},
-		{name: "unset", absent: []string{"picker", "launch "}},
-		{name: "inside chat", environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1"}, absent: []string{"picker", "launch "}},
+		{name: "unset", absent: []string{"picker", "create ", "launch "}},
+		{name: "inside chat", environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1"}, absent: []string{"picker", "create ", "launch "}},
 	}
 
 	for _, testCase := range cases {
@@ -194,7 +195,7 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 					t.Fatalf("auto-open log %q contains %q", got, unwanted)
 				}
 			}
-			if pickers, launches := strings.Count(got, "picker\n"), strings.Count(got, "new-session"); pickers > 1 || launches > 1 {
+			if pickers, launches := strings.Count(got, "picker\n"), strings.Count(got, "create "); pickers > 1 || launches > 1 {
 				t.Fatalf("auto-open fired more than once (pickers=%d launches=%d): %q", pickers, launches, got)
 			}
 		})

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 // ClaudeUserRegistry is Claude's user scope: the default account stores it
@@ -89,7 +91,7 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		original, existed, err := readMCPFile(path)
 		document := map[string]any{}
 		if err == nil && existed {
-			err = json.Unmarshal(original, &document)
+			err = unmarshalKeepingNumbers(original, &document)
 			if err == nil && document == nil {
 				err = errors.New("registry must be an object")
 			}
@@ -211,5 +213,5 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 	if sameFile(path, encoded, 0600) {
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicWrite(path, encoded, 0600) })
+	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0600) })
 }

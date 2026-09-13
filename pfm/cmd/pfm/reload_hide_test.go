@@ -88,7 +88,7 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 // this change must not disturb: a --new --hide reload tombstones the
 // conversation it left behind through a kill.Request that carries no socket
 // or pane (hideReloadedConversation calls manager.Kill with only ID/Engine/
-// RolloutPath — never resolveRowTarget), so manager.Kill's own `live` gate
+// RolloutPath — never fleet.ResolveRow), so manager.Kill's own `live` gate
 // (SocketPath != "" && PaneID != "") can never see one either. The reborn
 // pane in the SAME socket/window this reload just repainted must keep
 // running, never get closed out from under the conversation now living

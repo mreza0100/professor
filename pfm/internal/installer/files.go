@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 func sameFile(path string, content []byte, mode fs.FileMode) bool {
@@ -19,33 +21,6 @@ func sameFile(path string, content []byte, mode fs.FileMode) bool {
 	}
 	existing, err := os.ReadFile(path)
 	return err == nil && bytes.Equal(existing, content)
-}
-
-func atomicWrite(path string, content []byte, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create %s parent: %w", path, err)
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".pfm-install-*")
-	if err != nil {
-		return fmt.Errorf("create %s scratch: %w", path, err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode.Perm()); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("set %s scratch mode: %w", path, err)
-	}
-	if _, err := temporary.Write(content); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("write %s scratch: %w", path, err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close %s scratch: %w", path, err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
 }
 
 func resolvedLink(path string) (string, bool) {
@@ -94,7 +69,7 @@ func copyBackup(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(target, content, info.Mode().Perm())
+	return atomicfile.Write(target, content, info.Mode().Perm())
 }
 
 func sourceLine(path string) string {

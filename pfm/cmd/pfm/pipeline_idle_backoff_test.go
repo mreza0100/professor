@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
 )
@@ -100,7 +101,6 @@ func TestRefreshCadenceCapsAndNilClockNeverBacksOff(t *testing.T) {
 // already-scheduled multi-minute timer.
 func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 	jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 
 	database, err := store.Open()
 	if err != nil {
@@ -118,7 +118,7 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 		ctx,
 		database,
 		scanRequest{},
-		printWarn(&stderr),
+		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
 		refreshDependencies{

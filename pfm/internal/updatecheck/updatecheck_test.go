@@ -64,7 +64,7 @@ func TestFailedRefreshPreservesLastSuccessfulNotice(t *testing.T) {
 		t.Fatalf("read primed cache: notice=%#v found=%t err=%v", notice, found, err)
 	}
 	notice.CheckedAt = time.Now().Add(-checkFreshFor - time.Minute)
-	if err := writeAtomic(cache, notice); err != nil {
+	if err := writeNotice(cache, notice); err != nil {
 		t.Fatalf("age primed cache: %v", err)
 	}
 	good.Close()

@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 var threadIDPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -214,38 +216,14 @@ func textOf(payload map[string]any) string {
 }
 
 func writeBundle(out, threadID, rollout string, turns, carried []turn) error {
-	if err := writeAtomic(filepath.Join(out, "transcript.md"), transcript(threadID, rollout, turns)); err != nil {
+	if err := atomicfile.Write(filepath.Join(out, "transcript.md"), []byte(transcript(threadID, rollout, turns)), 0o600); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(out, "compaction-memory.md"), memory(threadID, carried)); err != nil {
+	if err := atomicfile.Write(filepath.Join(out, "compaction-memory.md"), []byte(memory(threadID, carried)), 0o600); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(out, "brief.md"), brief(out, threadID, rollout, turns, carried)); err != nil {
+	if err := atomicfile.Write(filepath.Join(out, "brief.md"), []byte(brief(out, threadID, rollout, turns, carried)), 0o600); err != nil {
 		return err
-	}
-	return nil
-}
-
-func writeAtomic(path, content string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".recovery-*")
-	if err != nil {
-		return fmt.Errorf("create recovery file %q: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod recovery file %q: %w", path, err)
-	}
-	if _, err := tmp.WriteString(content); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write recovery file %q: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close recovery file %q: %w", path, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace recovery file %q: %w", path, err)
 	}
 	return nil
 }

@@ -163,7 +163,7 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, err
 		}
 		plan.Run = run
-		plan.Line = newSessionLine(request.FreshSocket, request.Row.CWD, plan.Run, request.Bunker)
+		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 	case NewCodex:
 		if request.Row.CWD == "" {
 			return Plan{}, errors.New("new Codex action requires a project directory")
@@ -194,12 +194,7 @@ func Synthesize(request Request) (Plan, error) {
 			command.WriteString(Quote(request.Prompt))
 		}
 		plan.Run = command.String()
-		plan.Line = newSessionLine(
-			request.FreshSocket,
-			request.Row.CWD,
-			plan.Run,
-			request.Bunker,
-		)
+		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
 	case ResumeOpencode:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
@@ -220,12 +215,7 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
-		plan.Line = newSessionLine(
-			request.FreshSocket,
-			request.Row.CWD,
-			plan.Run,
-			request.Bunker,
-		)
+		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
 	case Live:
 		if request.Row.Socket == "" {
 			return Plan{}, errors.New("live action requires a socket")
@@ -269,12 +259,7 @@ func Synthesize(request Request) (Plan, error) {
 			" || { echo; echo " +
 			Quote("agent router failed — resuming fresh:") +
 			"; exec " + resume + "; }"
-		plan.Line = newSessionLine(
-			request.FreshSocket,
-			request.Row.CWD,
-			plan.Run,
-			request.Bunker,
-		)
+		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 	case ResumeClaude:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
@@ -304,12 +289,7 @@ func Synthesize(request Request) (Plan, error) {
 			" || { echo; echo " +
 			Quote("resume refused — session is live elsewhere:") +
 			"; " + agent + "; }"
-		plan.Line = newSessionLine(
-			request.FreshSocket,
-			request.Row.CWD,
-			plan.Run,
-			request.Bunker,
-		)
+		plan = onChatServer(plan, request, machine, pfmengine.Claude)
 	case ResumeCodex:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
@@ -319,18 +299,7 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		plan.Run = continuityBanner(request.Row) +
 			codexCommandFor(machine, request.PrimaryAccount, "resume", request.Row.ID)
-		titles := machine.Tmux.Titles
-		plan.CodexServer = &CodexServer{
-			Socket: request.FreshSocket,
-			CWD:    request.Row.CWD,
-			Run:    plan.Run,
-			Titles: &titles,
-		}
-		plan.Line = attachLine(
-			request.FreshSocket,
-			request.FreshSocket+":Codex",
-			request.Bunker,
-		)
+		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
 }
@@ -584,14 +553,23 @@ func agentCommand(
 	return command.String()
 }
 
-func newSessionLine(socket, cwd, run string, bunker bool) string {
-	prefix := "TMUX= "
-	if bunker {
-		prefix += "exec "
+// onChatServer puts the plan's run on a fresh server the executor creates
+// detached through the one chat-server creator (spawn.CommandTmux.NewSession),
+// born with the engine's short name as its window, and makes the eval line
+// the attach to it. The line never creates a server itself: an attached
+// `tmux new-session` there was a creator with no title policy and a window
+// its pane command renamed.
+func onChatServer(plan Plan, request Request, machine pfmconfig.Config, engine pfmengine.ID) Plan {
+	titles := machine.Tmux.Titles
+	plan.ChatServer = &ChatServer{
+		Socket: request.FreshSocket,
+		CWD:    request.Row.CWD,
+		Window: pfmengine.MustLookup(engine).Short,
+		Run:    plan.Run,
+		Titles: &titles,
 	}
-	return prefix + "tmux -L " + Quote(socket) +
-		" new-session -s " + Quote(socket) +
-		" -c " + Quote(cwd) + " " + Quote(run)
+	plan.Line = attachLine(request.FreshSocket, request.FreshSocket, request.Bunker)
+	return plan
 }
 
 func attachLine(socket, target string, bunker bool) string {

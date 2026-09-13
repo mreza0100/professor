@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
@@ -133,68 +134,6 @@ func recordCompactNudgeSources(sources map[string]Source, prefix string, raw *ra
 	if raw.Step != nil {
 		sources[prefix+".compactNudge.step"] = SourceFile
 	}
-}
-
-// TmuxTitles is the tmux.titles policy: whether pfm owns the OUTER terminal's
-// title on a server it creates.
-//
-// Enabled sets `set-titles on` plus pfm's own set-titles-string, so a terminal
-// tab reads the chat's window name. Disabled sets NEITHER option and leaves
-// whatever the host put there — a host that emits its own OSC title on the
-// outer pty before tmux starts (and keeps `set-titles off` so tmux cannot
-// clobber it) keeps its tab badges. The default is enabled, which is what
-// every install did before this key existed.
-type TmuxTitles struct {
-	Enabled bool
-}
-
-// DefaultTmuxTitles is the policy when the file says nothing: pfm owns the
-// title.
-func DefaultTmuxTitles() TmuxTitles {
-	return TmuxTitles{Enabled: true}
-}
-
-// TmuxTitlesOrDefault resolves an OPTIONAL policy. A nil pointer is the
-// default (pfm owns the title), never "off": a tmux client constructed without
-// a machine config must keep today's behaviour rather than silently hand the
-// terminal title to the host.
-func TmuxTitlesOrDefault(titles *TmuxTitles) TmuxTitles {
-	if titles == nil {
-		return DefaultTmuxTitles()
-	}
-	return *titles
-}
-
-// TmuxTitlesString is the format pfm gives tmux when it owns the title. It is
-// stated once here because three surfaces apply it — the Claude spawn path,
-// the Codex spawn path, and the shell shim — and three spellings of one
-// string is how the tab of one engine stops matching the tab of the other.
-// It renders ONE name per tab. A Claude pane (a `cc-*` session) shows Claude
-// Code's own title with the status glyph stripped: it follows /rename (and
-// `pfm chat name`, which injects /rename) at once, unclipped, and holds still
-// through the spinner — tmux re-emits only on change, which
-// bin/tmux-title-renudge relies on. The window name would trail a rename by a
-// statusline redraw and clip at gather.WindowNameRunes. Every other engine
-// shows #{window_name}, which name-sync converges: a Codex pane's own title is
-// its working directory, not its name.
-const TmuxTitlesString = "⬢ #{?#{m:cc-*,#{session_name}},#{s/^[^ ]* //:pane_title},#{window_name}}"
-
-// Options returns the tmux `set-option` argument vectors that put this policy
-// on a server. A disabled policy returns none: pfm applies neither option.
-func (titles TmuxTitles) Options() [][]string {
-	if !titles.Enabled {
-		return nil
-	}
-	return [][]string{
-		{"set-option", "-g", "set-titles", "on"},
-		{"set-option", "-g", "set-titles-string", TmuxTitlesString},
-	}
-}
-
-// Tmux is the fleet-wide tmux posture. It is not per-account: a terminal title
-// belongs to the terminal, not to whichever account happens to be in the pane.
-type Tmux struct {
-	Titles TmuxTitles
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -1471,7 +1410,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 		return false, fmt.Errorf("encode config %s: %w", config.Path, err)
 	}
 	content = append(content, '\n')
-	if err := writeAtomic(config.Path, content); err != nil {
+	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1485,7 +1424,7 @@ func RemoveMCPAuthToken(config Config) (bool, error) {
 	if err != nil || !changed {
 		return changed, err
 	}
-	if err := writeAtomic(config.Path, content); err != nil {
+	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1533,34 +1472,6 @@ func configWithoutMCPAuthToken(config Config) ([]byte, bool, error) {
 	return append(content, '\n'), true, nil
 }
 
-func writeAtomic(path string, content []byte) error {
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create config directory %s: %w", directory, err)
-	}
-	file, err := os.CreateTemp(directory, ".config.json.tmp-*")
-	if err != nil {
-		return fmt.Errorf("create config scratch beside %s: %w", path, err)
-	}
-	temporary := file.Name()
-	defer os.Remove(temporary)
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("secure config scratch %s: %w", temporary, err)
-	}
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write config scratch %s: %w", temporary, err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close config scratch %s: %w", temporary, err)
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		return fmt.Errorf("install config %s: %w", path, err)
-	}
-	return nil
-}
-
 // MarshalDefault returns the strict, comment-free JSON used by `pfm config
 // init`. It deliberately emits resolved defaults so the file is useful as a
 // documented starting point while the loader remains backward compatible.
@@ -1583,7 +1494,7 @@ func WriteDefault(path, home string, projectRoots []string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("encode defaults: %w", err)
 	}
-	return writeAtomic(path, content)
+	return atomicfile.Write(path, content, 0o600)
 }
 
 // Marshal encodes a resolved config as strict JSON. The redaction option is

@@ -30,7 +30,7 @@ type CodexThread struct {
 // everything else: the pane's TUI process is never restarted by /clear, so
 // matching it by birth time or an exported CODEX_THREAD_ID keeps returning
 // the PRE-clear thread forever, while the binding is what a pane-status-line
-// reconcile pass (pipeline.reconcileCodexPanes) actively advances across a
+// reconcile pass (fleet.ReconcileCodexPanes) actively advances across a
 // clear. Without a binding, an exported CODEX_THREAD_ID is authoritative and
 // is honored even when the state store has not caught up with it. Without
 // either, the pane is matched to the thread created nearest its own start

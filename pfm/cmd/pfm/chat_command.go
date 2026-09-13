@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	pfmchat "hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
@@ -20,10 +19,7 @@ import (
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/recovery"
 	"hostops/pfm/internal/resolve"
-)
-
-var chatUUIDPattern = regexp.MustCompile(
-	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`,
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 func runChatRead(args []string, stdin io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -72,7 +68,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		// their CODEX_THREAD_ID through the fleet store, then preserve the live
 		// row's immutable socket and pane for the detached exit finisher.
 		if os.Getenv("TMUX") == "" && os.Getenv(resolve.CodexThreadEnv) != "" {
-			chat, found, err := resolveChat(context.Background(), "self", io.Discard, runtimes...)
+			chat, found, err := pfmchat.Resolve(context.Background(), "self", io.Discard, firstRuntime(runtimes))
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 				return 1
@@ -96,9 +92,9 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	// used to answer "killed" for a chat whose engine was still running. A
 	// target that resolves to nothing still reaches runKill below, which is
 	// the only path that can tombstone an id the composer no longer lists.
-	chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
+	chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
 	if err != nil {
-		if !chatUUIDPattern.MatchString(target) {
+		if !fleet.ChatIDPattern.MatchString(target) {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 			return 1
 		}
@@ -128,7 +124,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 				id, chat.Socket, chat.Pane,
 			)
 		}
-	case !chatUUIDPattern.MatchString(target):
+	case !fleet.ChatIDPattern.MatchString(target):
 		fmt.Fprintf(stdout, "%s\tnot-found\n", target)
 		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
 		return codeUnknownChat
@@ -196,8 +192,8 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		return 2
 	}
 	target := flags.Arg(0)
-	if !chatUUIDPattern.MatchString(target) {
-		chat, found, err := resolveChat(context.Background(), target, io.Discard, runtimes...)
+	if !fleet.ChatIDPattern.MatchString(target) {
+		chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 			return 1
@@ -315,7 +311,7 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat recover: resolve source paths: %v\n", err)
 		return 1
 	}
-	codexRoot := firstRoot(resolved.Roots[pfmengine.Codex])
+	codexRoot := resolved.FirstRoot(pfmengine.Codex)
 	result, err := recovery.Run(context.Background(), codexRoot, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat recover: %v\n", err)
@@ -461,7 +457,7 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
 		return 1
 	}
-	command := exec.Command(deps.Executable("tmux"), "-S", socketPath, "kill-server")
+	command := pfmtmux.Command(context.Background(), "", socketPath, "kill-server")
 	if output, err := command.CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
@@ -493,7 +489,7 @@ func renameChatWindow(ctx context.Context, socket, target, name string) error {
 	if target == "" {
 		target = socket
 	}
-	command := exec.CommandContext(ctx, deps.Executable("tmux"), "-S", socketPath, "rename-window", "-t", target, name)
+	command := pfmtmux.Command(ctx, "", socketPath, "rename-window", "-t", target, name)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-window: %w: %s", err, strings.TrimSpace(string(output)))
 	}

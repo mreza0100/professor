@@ -352,20 +352,19 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 	path := filepath.Join(home, ".local", "bin") + string(os.PathListSeparator) +
 		os.Getenv("PATH")
 	env := replaceAttachEnv(os.Environ(), map[string]string{
-		attachHelperEnv:       "1",
-		"HOME":                home,
-		"PATH":                path,
-		"TERM":                "xterm-256color",
-		"TMUX":                "",
-		"TMUX_TMPDIR":         root,
-		"PFM_HOME":            home,
-		"PFM_DB":              filepath.Join(root, "fleet.db"),
-		"PFM_SID_DIR":         sidDir,
-		"PFM_CLAUDE_ROOTS":    claudeRoot,
-		"PFM_CODEX_ROOT":      codexRoot,
-		"PFM_TMUX_DIR":        tmuxDir,
-		"PFM_PROC_ROOT":       procRoot,
-		"PFM_CODEX_AVAILABLE": "0",
+		attachHelperEnv:    "1",
+		"HOME":             home,
+		"PATH":             path,
+		"TERM":             "xterm-256color",
+		"TMUX":             "",
+		"TMUX_TMPDIR":      root,
+		"PFM_HOME":         home,
+		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_SID_DIR":      sidDir,
+		"PFM_CLAUDE_ROOTS": claudeRoot,
+		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_TMUX_DIR":     tmuxDir,
+		"PFM_PROC_ROOT":    procRoot,
 	})
 	return &bootingPickerJail{root: root, procRoot: procRoot, binary: binary, env: env}
 }

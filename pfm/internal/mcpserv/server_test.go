@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
@@ -164,101 +162,6 @@ func TestChatResolveCxWindowUsesTheInjectionResolutionGate(t *testing.T) {
 	}
 }
 
-func TestMCPRosterNameResolverKeepsCxWindowCodexScoped(t *testing.T) {
-	const name = "same name"
-	resolver := mcpRosterNameResolver{
-		tmuxDir: "/tmp/tmux-1000",
-		operations: SharedOperations{List: func(context.Context, LSInput) (LSOutput, error) {
-			return LSOutput{Rows: []ChatRow{
-				{ID: "claude-id", Name: name, Engine: pfmengine.Claude, Kind: compose.LiveClaude.String(), Socket: "cc-1-2-3", Pane: "%1"},
-				{ID: "codex-id", Name: name, Engine: pfmengine.Codex, Kind: compose.LiveCodex.String(), Socket: "cx-1-2-3", Pane: "%2"},
-			}}, nil
-		}},
-	}
-	target, code, detail, err := resolver.ResolveName(
-		context.Background(), name, string(pfmengine.Codex),
-	)
-	if err != nil || code != 0 || detail != "" || target.ID != "codex-id" ||
-		target.SocketPath != "/tmp/tmux-1000/cx-1-2-3" || target.Pane != "%2" {
-		t.Fatalf("ResolveName()=(%+v,%d,%q,%v), want Codex candidate", target, code, detail, err)
-	}
-}
-
-// TestMCPRosterNameResolverNamesTheCallersOwnSeat is the reverse lookup the
-// delivery footer is built from over the MCP door: the live roster row for
-// the caller's own id answers with its name, a killed or resume row never
-// does, and a roster that cannot be listed is a reported failure, not "no
-// name" — the engine must fall to the screen only for a real miss.
-func TestMCPRosterNameResolverNamesTheCallersOwnSeat(t *testing.T) {
-	rows := []ChatRow{
-		{ID: "5a3bb7cb-258d", Name: "LUNA:ORCHESTRATOR", Engine: pfmengine.Claude, Kind: compose.LiveClaude.String(), Socket: "cc-1788256324-1866070-42739", Pane: "%0"},
-		{ID: "5a3bb7cb-258d", Name: "LUNA:ORCHESTRATOR (old)", Engine: pfmengine.Claude, Kind: compose.LiveClaude.String(), Socket: "cc-dead", Pane: "%0", Killed: true},
-		{ID: "resume-only", Name: "Resume", Engine: pfmengine.Claude, Kind: "resume", Socket: "cc-2"},
-	}
-	resolver := mcpRosterNameResolver{
-		tmuxDir: "/tmp/tmux-1000",
-		operations: SharedOperations{List: func(context.Context, LSInput) (LSOutput, error) {
-			return LSOutput{Rows: rows}, nil
-		}},
-	}
-	name, found, err := resolver.SenderName(context.Background(), resolve.Identity{ID: "5a3bb7cb-258d"})
-	if err != nil || !found || name != "LUNA:ORCHESTRATOR" {
-		t.Fatalf("SenderName()=(%q,%t,%v), want the live row's name", name, found, err)
-	}
-	name, found, err = resolver.SenderName(context.Background(), resolve.Identity{ID: "resume-only"})
-	if err != nil || found || name != "" {
-		t.Fatalf("SenderName(resume row)=(%q,%t,%v), want not found", name, found, err)
-	}
-	resolver.operations.List = func(context.Context, LSInput) (LSOutput, error) {
-		return LSOutput{}, errors.New("fleet database busy")
-	}
-	if _, found, err := resolver.SenderName(context.Background(), resolve.Identity{ID: "5a3bb7cb-258d", Session: "cc-1788256324-1866070-42739"}); err == nil || found ||
-		!strings.Contains(err.Error(), "list live chats: fleet database busy") {
-		t.Fatalf("SenderName(list fails)=(found %t, err %v), want the listing failure reported", found, err)
-	}
-	if name, found, err := (mcpRosterNameResolver{}).SenderName(context.Background(), resolve.Identity{ID: "x"}); err != nil || found || name != "" {
-		t.Fatalf("SenderName(no List)=(%q,%t,%v), want a quiet miss", name, found, err)
-	}
-}
-
-func TestChatStatusSummaryUsesCanonicalCommandAndReturnsField(t *testing.T) {
-	var gotArgs []string
-	service := newService("test", &backend{dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
-		gotArgs = append([]string(nil), args...)
-		_, _ = io.WriteString(stdout, `{"name":"seat","state":"idle","idle_seconds":2,"engine":"cc","summary":"done","summary_cached":true}`+"\n")
-		return 0
-	}})
-	protocol := connectInMemory(t, service.Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "chat_status", StatusInput{
-		Target: "seat", Summary: true, Engine: "codex", Model: "test-model",
-	})
-	if strings.Join(gotArgs, " ") != "chat status seat --json --summary --engine codex --model test-model" {
-		t.Fatalf("dispatch args=%q", gotArgs)
-	}
-	if output.Summary != "done" || !output.SummaryCached {
-		t.Fatalf("status output=%+v", output)
-	}
-}
-
-func TestChatStatusAskUsesCanonicalCommandAndReturnsField(t *testing.T) {
-	var gotArgs []string
-	service := newService("test", &backend{dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
-		gotArgs = append([]string(nil), args...)
-		_, _ = io.WriteString(stdout, `{"name":"seat","state":"idle","idle_seconds":2,"engine":"cc","ask":"TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): steady state"}`+"\n")
-		return 0
-	}})
-	protocol := connectInMemory(t, service.Server())
-	output := callTool[StatusOutput](t, protocol.clientSession, "chat_status", StatusInput{
-		Target: "seat", Ask: true, Engine: "codex", Model: "test-model",
-	})
-	if strings.Join(gotArgs, " ") != "chat status seat --json --ask --engine codex --model test-model" {
-		t.Fatalf("dispatch args=%q", gotArgs)
-	}
-	if output.Ask != "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): steady state" {
-		t.Fatalf("status output=%+v", output)
-	}
-}
-
 func setupBackendFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -309,7 +212,6 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv(paths.EnvCodexRoot, codex)
 	t.Setenv(paths.EnvTmuxDir, tmux)
 	t.Setenv(paths.EnvProcRoot, proc)
-	t.Setenv("PFM_CODEX_AVAILABLE", "0")
 	return root
 }
 
@@ -825,7 +727,6 @@ func (jail *stdioJail) environment() []string {
 		paths.EnvCodexRoot+"="+jail.codex,
 		paths.EnvTmuxDir+"="+jail.tmuxDir,
 		paths.EnvProcRoot+"="+jail.proc,
-		"PFM_CODEX_AVAILABLE=0",
 		// A jailed daemon has no tmux server, no session id and no ancestry to
 		// recover a handle from, so it derives NO sender — and pfm refuses to
 		// deliver an unsigned message rather than hand the recipient an

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/paths"
 )
 
@@ -61,7 +62,7 @@ func RefreshGPT(ctx context.Context, options GPTOptions) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(options.CachePath, encoded, 0o600)
+	return atomicfile.Write(options.CachePath, encoded, 0o600)
 }
 
 func parseGPTRateLimits(body []byte) (map[string]any, error) {

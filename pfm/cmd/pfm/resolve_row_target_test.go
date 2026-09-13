@@ -11,10 +11,11 @@ import (
 	"testing"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/store"
 )
 
-// TestResolveRowTargetReturnsTheComposedRowsLiveAddress pins resolveRowTarget
+// TestResolveRowTargetReturnsTheComposedRowsLiveAddress pins fleet.ResolveRow
 // (renamed from resolveRowEngine) as the single place runKill's plain id path
 // gets a row's live socket and pane from: hiding a live chat now also ends it
 // (kill.Manager.Kill's `live` gate), and that gate only fires when THIS
@@ -70,8 +71,8 @@ func TestResolveRowTargetReturnsTheComposedRowsLiveAddress(t *testing.T) {
 	defer database.Close()
 
 	var stderr bytes.Buffer
-	engine, rolloutPath, gotSocket, gotPane := resolveRowTarget(
-		context.Background(), database, agentID, &stderr, commandRuntime{Paths: jailPaths(t)},
+	engine, rolloutPath, gotSocket, gotPane := fleet.ResolveRow(
+		context.Background(), database, agentID, &stderr, &commandRuntime{Paths: jailPaths(t)},
 	)
 	if engine != pfmengine.Claude {
 		t.Fatalf("engine = %q, want %q (stderr=%s)", engine, pfmengine.Claude, stderr.String())
@@ -117,8 +118,8 @@ func TestResolveRowTargetResolvesNoLiveAddressForAResumableID(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	engine, _, gotSocket, gotPane := resolveRowTarget(
-		context.Background(), database, id, &stderr, commandRuntime{Paths: jailPaths(t)},
+	engine, _, gotSocket, gotPane := fleet.ResolveRow(
+		context.Background(), database, id, &stderr, &commandRuntime{Paths: jailPaths(t)},
 	)
 	if engine != pfmengine.Claude {
 		t.Fatalf("engine = %q, want %q (stderr=%s)", engine, pfmengine.Claude, stderr.String())

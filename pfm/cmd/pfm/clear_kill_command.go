@@ -14,7 +14,7 @@ import (
 // directly. Codex has no equivalent hook wired anymore — its
 // SessionStart(source=clear) fires on the new session's FIRST TURN, by which
 // point every Codex chat on the host shares one app-server daemon pid, so the
-// hook could never say which pane cleared. pipeline.reconcileCodexPanes
+// hook could never say which pane cleared. fleet.ReconcileCodexPanes
 // replaces it: a gather pass reads each pane's own status line and detects
 // the clear from there. Every unrelated or malformed payload returns 0
 // without output.

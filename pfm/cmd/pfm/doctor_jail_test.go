@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "hostops/pfm/internal/config"
 )
 
 func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
@@ -78,7 +80,7 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	t.Setenv("PFM_PROC_ROOT", filepath.Join(home, "proc"))
 	t.Setenv("PATH", strings.Join([]string{canonicalDir, hostShimDir}, string(os.PathListSeparator)))
 
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}

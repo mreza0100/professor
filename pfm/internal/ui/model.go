@@ -823,14 +823,7 @@ func nextAccount(current int, ids []int) int {
 }
 
 func (model Model) accountForKind(kind compose.Kind) int {
-	engine := compose.EngineForKind(kind)
-	if engine == pfmengine.Codex {
-		return model.codexPrimary
-	}
-	if engine == pfmengine.Opencode {
-		return model.opencodePrimary
-	}
-	return model.primary
+	return model.accountForEngine(compose.EngineForKind(kind))
 }
 
 func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {

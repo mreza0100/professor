@@ -61,8 +61,8 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	}
 	if plan.Route != ResumeClaude ||
 		!strings.HasPrefix(plan.Line, "TMUX= exec tmux ") ||
-		!strings.Contains(plan.Line, Quote(request.Row.CWD)) {
-		t.Fatalf("resume plan = %#v", plan)
+		plan.ChatServer == nil || plan.ChatServer.CWD != request.Row.CWD {
+		t.Fatalf("resume plan = %#v server = %#v", plan, plan.ChatServer)
 	}
 	wantPrefix := hygiene +
 		" CLAUDE_CONFIG_DIR='/home/test/.cc/2'" +
@@ -113,8 +113,9 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Line != newSessionLine(request.FreshSocket, request.Row.CWD, plan.Run, false) {
-		t.Fatalf("new Claude line = %q, run = %q", plan.Line, plan.Run)
+	if plan.Line != attachLine(request.FreshSocket, request.FreshSocket, false) ||
+		plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
+		t.Fatalf("new Claude line = %q, server = %#v, run = %q", plan.Line, plan.ChatServer, plan.Run)
 	}
 	for _, want := range []string{
 		"CLAUDE_CONFIG_DIR='/home/test/.cc/2'",
@@ -372,7 +373,7 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 		{
 			name: "Claude",
 			row:  compose.Row{Kind: compose.NewClaude, CWD: "/work/.professor"},
-			want: []string{"claude", Quote(prompt), "new-session"},
+			want: []string{"claude", Quote(prompt), "attach"},
 		},
 		{
 			name: "Codex",
@@ -453,5 +454,59 @@ func writeActionFile(
 	}
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Every picker route that opens a chat on a fresh server is born through the
+// ONE chat-server creator: the plan names the server for the executor to
+// create detached, and the eval line only attaches to it. An attached
+// `tmux new-session` in the line was a fourth creator — no title policy,
+// automatic-rename left on, and a window the claude binary named "2.1.257".
+func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T) {
+	engineFor := map[Route]pfmengine.ID{
+		NewClaude: pfmengine.Claude, Agent: pfmengine.Claude, ResumeClaude: pfmengine.Claude,
+		NewOpencode: pfmengine.Opencode, ResumeOpencode: pfmengine.Opencode,
+		ResumeCodex: pfmengine.Codex,
+	}
+	seen := make(map[Route]bool, len(engineFor))
+	for _, request := range stressRequests() {
+		plan, err := Synthesize(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		engine, born := engineFor[plan.Route]
+		if !born {
+			if plan.ChatServer != nil {
+				t.Fatalf("route %c planned a chat server it never attaches to: %#v", plan.Route, plan.ChatServer)
+			}
+			continue
+		}
+		seen[plan.Route] = true
+		server := plan.ChatServer
+		if server == nil {
+			t.Fatalf("route %c plans no chat server; line = %s", plan.Route, plan.Line)
+		}
+		if server.Socket != request.FreshSocket || server.CWD != request.Row.CWD || server.Run != plan.Run {
+			t.Fatalf("route %c server = %#v, want the fresh socket, the row's cwd and the plan's run", plan.Route, server)
+		}
+		if want := pfmengine.MustLookup(engine).Short; server.Window != want {
+			t.Fatalf("route %c window = %q, want %q", plan.Route, server.Window, want)
+		}
+		if server.Titles == nil || *server.Titles != request.Config.Tmux.Titles {
+			t.Fatalf("route %c titles = %v, want the machine's %v", plan.Route, server.Titles, request.Config.Tmux.Titles)
+		}
+		prefix := "TMUX= "
+		if request.Bunker {
+			prefix += "exec "
+		}
+		socket := Quote(request.FreshSocket)
+		if want := prefix + "tmux -L " + socket + " attach -t " + socket; plan.Line != want {
+			t.Fatalf("route %c line = %s, want only the attach %s", plan.Route, plan.Line, want)
+		}
+	}
+	for route := range engineFor {
+		if !seen[route] {
+			t.Fatalf("stress requests never reached route %c — the table proved nothing for it", route)
+		}
 	}
 }

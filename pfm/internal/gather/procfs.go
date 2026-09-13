@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // FDLink is one numeric process file descriptor and its symlink target.
@@ -45,6 +46,34 @@ type ProcBirth interface {
 // everywhere else and the reaper reports no RAM rather than refusing to run.
 type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
+}
+
+// FileID names one file by device and inode: the identity an install's
+// rename-over gives the binary's path anew, and a process already running the
+// old image keeps.
+type FileID struct {
+	Device uint64
+	Inode  uint64
+}
+
+// ProcImage is the optional ProcFS extension that reports which file a
+// process is EXECUTING. Only the stale sweep needs it; a table without it is
+// refused there rather than read as "every process is fresh".
+type ProcImage interface {
+	Image(pid int) (FileID, error)
+}
+
+// FileIDOf is the identity of the file at path, following symlinks.
+func FileIDOf(path string) (FileID, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileID{}, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
+	}
+	return FileID{Device: uint64(stat.Dev), Inode: uint64(stat.Ino)}, nil
 }
 
 // NewProcFS returns the process-table reader for a given proc root.
@@ -240,6 +269,13 @@ func (proc RealProcFS) RSSKB(pid int) (int64, error) {
 		return 0, fmt.Errorf("parse resident pages for %d: %w", pid, err)
 	}
 	return pages * int64(os.Getpagesize()) / 1024, nil
+}
+
+// Image is the file /proc/<pid>/exe resolves to. The kernel keeps a replaced
+// image's inode alive for its process, so the identity survives the install
+// that unlinked its path.
+func (proc RealProcFS) Image(pid int) (FileID, error) {
+	return FileIDOf(proc.path(pid, "exe"))
 }
 
 func (proc RealProcFS) path(pid int, element string) string {

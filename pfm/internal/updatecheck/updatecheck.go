@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
@@ -126,7 +128,7 @@ func Check(ctx context.Context, path, current, latestURL string, client *http.Cl
 		ReleaseURL: resolved.String(),
 		CheckedAt:  now,
 	}
-	if err := writeAtomic(path, notice); err != nil {
+	if err := writeNotice(path, notice); err != nil {
 		return fmt.Errorf("write update cache: %w", err)
 	}
 	return nil
@@ -191,35 +193,12 @@ func acquire(path string) (func(), error) {
 	return nil, nil
 }
 
-func writeAtomic(path string, notice Notice) error {
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(directory, ".update-check-*")
+func writeNotice(path string, notice Notice) error {
+	encoded, err := json.MarshalIndent(notice, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode update notice: %w", err)
 	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	encoder := json.NewEncoder(temporary)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(notice); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
+	return atomicfile.Write(path, append(encoded, '\n'), 0o600)
 }
 
 func pathVersion(location *url.URL) string {

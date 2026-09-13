@@ -8,21 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/shared"
-
-	_ "modernc.org/sqlite"
+	"hostops/pfm/internal/sqlitedb"
 )
 
 const (
 	// SchemaVersion is the newest database schema understood by this binary.
 	SchemaVersion = 8
-
-	driverName = "sqlite"
 )
 
 //go:embed schema.sql
@@ -111,25 +106,16 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		option(&settings)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(resolved.DB), 0o700); err != nil {
-		return nil, fmt.Errorf("create database directory: %w", err)
-	}
-
-	db, err := sql.Open(driverName, resolved.DB)
+	db, err := sqlitedb.OpenStore(ctx, resolved.DB)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite database: %w", err)
+		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
 
 	store := &Store{
 		db:    db,
 		state: shared.Open(ctx, resolved),
 		path:  resolved.DB,
 		warn:  settings.warn,
-	}
-	if err := store.applyPragmas(ctx); err != nil {
-		return nil, errors.Join(err, store.Close())
 	}
 	if err := store.migrate(ctx); err != nil {
 		return nil, errors.Join(err, store.Close())
@@ -157,28 +143,6 @@ func (s *Store) SharedDegraded() error { return s.state.Degraded() }
 // Shared exposes the shared state store for the few callers that need it
 // directly, including the teammate reaper.
 func (s *Store) Shared() *shared.Store { return s.state }
-
-func (s *Store) applyPragmas(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, "PRAGMA busy_timeout=10000"); err != nil {
-		return fmt.Errorf("set sqlite busy_timeout: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
-		return fmt.Errorf("enable sqlite foreign keys: %w", err)
-	}
-
-	var journalMode string
-	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&journalMode); err != nil {
-		return fmt.Errorf("enable sqlite WAL: %w", err)
-	}
-	if !strings.EqualFold(journalMode, "wal") {
-		return fmt.Errorf("enable sqlite WAL: journal_mode is %q", journalMode)
-	}
-
-	if _, err := s.db.ExecContext(ctx, "PRAGMA synchronous=NORMAL"); err != nil {
-		return fmt.Errorf("set sqlite synchronous mode: %w", err)
-	}
-	return nil
-}
 
 func (s *Store) migrate(ctx context.Context) error {
 	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {

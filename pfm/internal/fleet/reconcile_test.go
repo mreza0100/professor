@@ -1,4 +1,4 @@
-package main
+package fleet
 
 import (
 	"testing"
@@ -14,7 +14,7 @@ func TestCodexRolloutFingerprintsCaptureIdentityPerPID(t *testing.T) {
 		{PID: 111, RolloutPath: "/codex/rollout-a.jsonl", RolloutHeld: true},
 		{PID: 222, IdentityError: "read Codex descriptors: boom"},
 	}
-	fingerprints := codexRolloutFingerprints(codex)
+	fingerprints := CodexRolloutFingerprints(codex)
 	if len(fingerprints) != 2 {
 		t.Fatalf("fingerprints = %#v, want 2 entries", fingerprints)
 	}
@@ -29,17 +29,17 @@ func TestCodexRolloutFingerprintsCaptureIdentityPerPID(t *testing.T) {
 // TestCodexRolloutFingerprintsEqualDetectsEveryKindOfChange is the direct
 // proof behind the parked poll's gate (streamFleetRefreshesWith): the ONLY
 // case that must read "unchanged" — and therefore skip the tmux
-// capture-pane reconcileCodexPanes would otherwise run — is bit-for-bit
+// capture-pane ReconcileCodexPanes would otherwise run — is bit-for-bit
 // identical fingerprints for the identical PID set. A rollout swap, an error
 // appearing or clearing, and a PID joining or leaving the live set must all
 // read as changed (2026-09-08 measurement: an idle Limits tab was paying for
 // capture-pane on every one of these polls regardless of whether any of
 // them actually happened).
 func TestCodexRolloutFingerprintsEqualDetectsEveryKindOfChange(t *testing.T) {
-	base := map[int]codexRolloutFingerprint{
+	base := map[int]CodexRolloutFingerprint{
 		111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true},
 	}
-	tests := map[string]map[int]codexRolloutFingerprint{
+	tests := map[string]map[int]CodexRolloutFingerprint{
 		"identical": {
 			111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true},
 		},
@@ -67,8 +67,8 @@ func TestCodexRolloutFingerprintsEqualDetectsEveryKindOfChange(t *testing.T) {
 		"the PID exited":                false,
 	}
 	for name, current := range tests {
-		if got := codexRolloutFingerprintsEqual(base, current); got != wantEqual[name] {
-			t.Errorf("%s: codexRolloutFingerprintsEqual() = %v, want %v", name, got, wantEqual[name])
+		if got := CodexRolloutFingerprintsEqual(base, current); got != wantEqual[name] {
+			t.Errorf("%s: CodexRolloutFingerprintsEqual() = %v, want %v", name, got, wantEqual[name])
 		}
 	}
 }
@@ -124,8 +124,8 @@ func TestCodexRolloutFingerprintsSkippableRequiresProcfsToFullyResolveEveryPID(t
 		},
 	}
 	for name, test := range tests {
-		if got := codexRolloutFingerprintsSkippable(test.codex); got != test.want {
-			t.Errorf("%s: codexRolloutFingerprintsSkippable() = %v, want %v", name, got, test.want)
+		if got := CodexRolloutFingerprintsSkippable(test.codex); got != test.want {
+			t.Errorf("%s: CodexRolloutFingerprintsSkippable() = %v, want %v", name, got, test.want)
 		}
 	}
 }
@@ -136,11 +136,11 @@ func TestCodexRolloutFingerprintsSkippableRequiresProcfsToFullyResolveEveryPID(t
 // must compare equal to another empty map (no PIDs, no change) but never to
 // a map that actually holds an entry.
 func TestCodexRolloutFingerprintsEqualTreatsNilAndEmptyAsNoPriorState(t *testing.T) {
-	if !codexRolloutFingerprintsEqual(nil, map[int]codexRolloutFingerprint{}) {
+	if !CodexRolloutFingerprintsEqual(nil, map[int]CodexRolloutFingerprint{}) {
 		t.Fatalf("nil vs empty map: want equal (both name zero PIDs)")
 	}
-	nonEmpty := map[int]codexRolloutFingerprint{111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true}}
-	if codexRolloutFingerprintsEqual(nil, nonEmpty) {
+	nonEmpty := map[int]CodexRolloutFingerprint{111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true}}
+	if CodexRolloutFingerprintsEqual(nil, nonEmpty) {
 		t.Fatalf("nil vs a populated map: want NOT equal")
 	}
 }

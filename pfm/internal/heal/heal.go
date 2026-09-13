@@ -31,11 +31,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	_ "modernc.org/sqlite"
+	"hostops/pfm/internal/sqlitedb"
 )
-
-// driverName is the pure-Go SQLite driver the whole engine uses.
-const driverName = "sqlite"
 
 // Verdict is one thread's projection state.
 type Verdict string
@@ -333,15 +330,10 @@ func rolloutPaths(ctx context.Context, statePath string) (map[string]string, err
 }
 
 func openReadOnly(path string) (*sql.DB, error) {
-	database, err := sql.Open(
-		driverName,
-		"file:"+path+"?mode=ro&_pragma=busy_timeout(2000)",
-	)
+	database, err := sqlitedb.OpenReadOnly(path, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open %q read-only: %w", path, err)
 	}
-	database.SetMaxOpenConns(1)
-	database.SetMaxIdleConns(1)
 	return database, nil
 }
 
@@ -400,15 +392,11 @@ func Backup(stores Stores, now time.Time) (string, error) {
 // transaction: a projection state without its items is a thread that resumes
 // empty, which is the very failure this repairs.
 func Delete(ctx context.Context, stores Stores, threadID string) error {
-	database, err := sql.Open(
-		driverName,
-		"file:"+stores.History+"?_pragma=busy_timeout(5000)",
-	)
+	database, err := sqlitedb.OpenReadWrite(stores.History, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", stores.History, err)
 	}
 	defer database.Close()
-	database.SetMaxOpenConns(1)
 
 	transaction, err := database.BeginTx(ctx, nil)
 	if err != nil {

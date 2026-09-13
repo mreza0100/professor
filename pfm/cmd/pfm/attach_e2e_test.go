@@ -150,20 +150,19 @@ func newAttachJail(t *testing.T) *attachJail {
 		// correctly has no 1h birth marker to observe. Match that explicit 5m
 		// posture now that the product default is 1h; otherwise the cache gate
 		// deliberately forks instead of proving the attach path.
-		"CC_ARM_1H":           "0",
-		"HOME":                home,
-		"PATH":                path,
-		"TERM":                "xterm-256color",
-		"TMUX":                "",
-		"TMUX_TMPDIR":         root,
-		"PFM_HOME":            home,
-		"PFM_DB":              filepath.Join(root, "fleet.db"),
-		"PFM_SID_DIR":         sidDir,
-		"PFM_CLAUDE_ROOTS":    claudeRoot,
-		"PFM_CODEX_ROOT":      codexRoot,
-		"PFM_TMUX_DIR":        tmuxDir,
-		"PFM_PROC_ROOT":       procRoot,
-		"PFM_CODEX_AVAILABLE": "0",
+		"CC_ARM_1H":        "0",
+		"HOME":             home,
+		"PATH":             path,
+		"TERM":             "xterm-256color",
+		"TMUX":             "",
+		"TMUX_TMPDIR":      root,
+		"PFM_HOME":         home,
+		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_SID_DIR":      sidDir,
+		"PFM_CLAUDE_ROOTS": claudeRoot,
+		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_TMUX_DIR":     tmuxDir,
+		"PFM_PROC_ROOT":    procRoot,
 	})
 	return &attachJail{
 		root:       root,

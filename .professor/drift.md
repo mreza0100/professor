@@ -436,6 +436,17 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   every branch, so gitter keeps the `Co-Authored-By` line and drops the URL. An adopter's private
   repo may keep the harness default — the template twin stays silent on it.
 
+- **KEEP-LOCAL: `dev.sh verify pfm` runs pfm's architecture ratchet; `pfm/CLAUDE.md` points at what exists.**
+  `verify pfm` runs `pfm/scripts/arch-check.sh` (C1–C16 against `pfm/.arch/`) after `go vet`, and the
+  ratchet reads the fence's mounted git dir, so the gate holds inside `dev.sh iso`. `pfm/CLAUDE.md`
+  drops its dangling `PLAN.md`/`CUTOVER.md`/`check/`/`legacy/`/`PFM_DB_SCRIPT` pointers, replaces the
+  package table with the `go list` doc map, and names the façades and the ratchet. pfm is this repo's
+  own engine, so the `templates/project/scripts/dev.sh` twin carries no ratchet.
+- Project: `pfm/CLAUDE.md` + `pfm/scripts/arch-check.sh` — the ratchet runs in the C locale (the
+  baselines are byte-ordered), C3/C4 report ERROR when no `cmd/pfm` source is listed, C12 counts a
+  `PFM_*` name only when production code uses it beyond declaring it, and C16 also catches env reads
+  through a `"PFM_*"` constant. The dead `PFM_CODEX_AVAILABLE` knob is gone from the doc and the tree;
+  K3 names `internal/chat` as the typed verbs, with the remaining MCP argv verbs counted by C10.
 - Local: `scripts/description-check.sh` + its `dev.sh verify templates` gate — parses every tracked markdown frontmatter and ledgers the description budget (heaviest first, count over the 400-char tier). It exists because no other instrument sees the failure: `/quality:description` states the law but a prompt rule cannot detect an unquoted `: ` that breaks the YAML, Claude Code registers the entry anyway, and `rumdl check` ignores frontmatter entirely. Exit 2 TOOLCHAIN-MISSING (python3/PyYAML absent — nothing was parsed), exit 3 NOTHING SCANNED (the scan is broken, not the tree), exit 1 a real parse failure; all three watched. Repo-level gate like `leak-check.sh`, not shipped to adopters — the law and the policy are what reach them.
 - Local: `.claude/settings.json` wires the `format-md.sh` PostToolUse hook, which this install had deliberately left unwired while it called `npx prettier` (recorded in `manifest.json`: prettier absent on this host and an npx-fetching hook is a silent network call mid-turn). With `rumdl` provisioned by `pfm install` the objection is gone. `.gitignore` gains `.rumdl_cache/`.
 - Local: `/markdown` was promoted out of this install's drift — the generic half became the machine-global `/quality:md-forlint` (see `release.md`), and the source project keeps only its own deltas: which live prompt trees route to `/km`, and its private RND evidence paths.
@@ -443,4 +454,3 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
 - Local: the source project keeps its own formatter automation — its `format-md.sh` hook stays on `npx prettier` (on the user's order: "just don't automate it there"), and its `.rumdl.toml` disables MD060 so a manual `rumdl fmt` never compacts a table prettier will re-pad on the next edit. The config and the `/quality:md-forlint` route are available there; nothing there runs rumdl unasked. Seven flat `.claude/skills/*.md` files removed there — the harness only discovers `skills/<name>/SKILL.md`, so they had never loaded.
 
 - Local: the source project's `/jc` removal keeps the fix PROCEDURE under a neutral name, because its `gitter` has no generic COMMIT phase — only DOCS-COMMIT and JC-COMMIT — so deleting the phase would leave `/wave:live` and `/contentor` unable to commit. There: the command, its persona overlay (`.claude/prompts/jc.md`) and the Codex mirror are deleted, `docs/references/jc-core.md` becomes `fix-core.md` with its identity stripped, the phase is renamed COMMIT, the documenter mode FIX-UPDATE, and every route now names `/wave:live`. The blueprint's twin takes the SAME rename, not a deletion: its `gitter` carried only DOCS-COMMIT and JC-COMMIT too, so deleting the phase left `/wave:live` W5 with no commit mechanism at all — the brief that said otherwise was wrong about the file. Its documenter did already carry ARCHIVE. The source project's residue is cleaned in the same pass: `/dev`'s autoheal prose, the documenter mode label, the walker's WALK field and commit-SHA lines, the fix-core card's own leftovers, `docs/references/pfm-refresh.md`'s cast lists, and the access-control audit workflow's finding schema.
-

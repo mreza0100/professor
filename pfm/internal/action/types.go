@@ -39,11 +39,16 @@ type Request struct {
 	Config         pfmconfig.Config
 }
 
-// CodexServer is a detached server that must exist before its attach line is
-// emitted.
-type CodexServer struct {
+// ChatServer is a detached server that must exist before its attach line is
+// emitted. The executor creates it through spawn.CommandTmux.NewSession, the
+// one chat-server creator, so a picker-born chat carries the same server
+// options as every other door's.
+type ChatServer struct {
 	Socket string
 	CWD    string
+	// Window is the name the chat's window is born with: the engine's short
+	// name until name-sync converges it onto the chat's own name.
+	Window string
 	Run    string
 	// Titles is the resolved tmux.titles policy Synthesize read off the
 	// machine config. NIL is the default (pfm owns the terminal title), never
@@ -55,10 +60,10 @@ type CodexServer struct {
 // Plan contains the pure run string and the one eval line. Line never carries
 // a trailing newline; the CLI writer owns the sole terminating newline.
 type Plan struct {
-	Route       Route
-	Run         string
-	Line        string
-	CodexServer *CodexServer
+	Route      Route
+	Run        string
+	Line       string
+	ChatServer *ChatServer
 }
 
 // Pane is the tmux state needed by solo and self-switch.
@@ -79,7 +84,7 @@ type TmuxClient interface {
 	KillServer(ctx context.Context, socket string) error
 	SetWindowSizeLatest(ctx context.Context, socket string) error
 	SelectWindow(ctx context.Context, socket string, windowIndex int) error
-	CreateCodexServer(ctx context.Context, server CodexServer) error
+	CreateChatServer(ctx context.Context, server ChatServer) error
 }
 
 // Process is one candidate for _cc_solo's stray-Claude sweep.

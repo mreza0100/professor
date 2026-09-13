@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hostops/pfm/internal/binwatch"
 	"hostops/pfm/internal/harvestmcp"
 	"hostops/pfm/internal/mcpserv"
 )
@@ -164,7 +165,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 	// accidentally reach.
 	options := mcpDaemonOptions{Version: version, Endpoint: "http://" + address}
 	if chatEnabled {
-		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime))
+		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, false))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm mcp serve: configure chat: %v\n", err)
 			return 1
@@ -214,11 +215,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\tharvester_external=%s\n",
 		address, enabledState(chatEnabled), enabledState(harvesterEnabled), *external.Load(),
 	)
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		fmt.Fprintf(stderr, "pfm mcp serve: %v\n", err)
-		return 1
-	}
-	return 0
+	return binwatch.Serve(server, listener, stderr)
 }
 
 // startHarvesterExternal opens the authenticated external harvester gateway on

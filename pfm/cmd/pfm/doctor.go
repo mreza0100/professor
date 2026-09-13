@@ -20,6 +20,7 @@ import (
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestpy"
@@ -121,7 +122,7 @@ func runDoctor(
 		stdout,
 		resolved,
 		runtime.Config,
-		readPrimaryAccount(resolved, runtime.Config),
+		fleet.PrimaryAccount(resolved, runtime.Config),
 	)
 	// INFO only, and it adds no warnings: both title owners are legitimate.
 	printTmuxTitlesDoctor(context.Background(), stdout, resolved, runtime.Config)
@@ -321,7 +322,7 @@ func printCodexPaneBindingDoctor(
 	database *store.Store,
 	runtime commandRuntime,
 ) int {
-	manager, err := kill.New(database, killDependencies(runtime))
+	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: warning codex_pane_bindings=unreadable error=%v\n", err)
 		return 1
@@ -438,7 +439,7 @@ func printCodexPaneBindingDoctor(
 				"which is the one input Codex renders as a bare thread id; a CONTESTED binding "+
 				"resolves as soon as either pane shows a bare thread id, which happens on its next "+
 				"/clear\n",
-			codexPaneNameRetired,
+			fleet.CodexPaneNameRetired,
 		)
 	}
 	return warnings
@@ -482,7 +483,7 @@ func printCodexPaneFollowDoctor(
 	}
 	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 	silent := func(message string) { fmt.Fprintf(stdout, "doctor: warning %s\n", message) }
-	_, actions := observeCodexPanes(
+	_, actions := fleet.ObserveCodexPanes(
 		ctx, database, manager, capturer, snapshot, runtime, cxNames, silent,
 	)
 
@@ -490,7 +491,7 @@ func printCodexPaneFollowDoctor(
 	warnings := 0
 	for _, action := range actions {
 		switch action.Skip {
-		case "", codexPaneSameLineage:
+		case "", fleet.CodexPaneSameLineage:
 			continue
 		}
 		unfollowable++
@@ -1443,7 +1444,7 @@ func liveCodexSnapshot(ctx context.Context, runtime commandRuntime, manager *kil
 	if err != nil || len(panes) == 0 {
 		return snapshot, err
 	}
-	roots := codexHomes(runtime.Config)
+	roots := runtime.Config.CodexHomes()
 	resolver := store.NewCodexThreadResolverRoots(ctx, roots, manager.CodexPaneBound(ctx))
 	snapshot.Codex, err = gather.DetectCodexThreadsInRoots(gather.NewProcFS(runtime.Paths.ProcRoot), roots, panes, resolver, runtime.Config.Codex.Binary)
 	return snapshot, err

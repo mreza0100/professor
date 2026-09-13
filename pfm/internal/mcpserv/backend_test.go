@@ -6,27 +6,56 @@ import (
 	"hostops/pfm/internal/compose"
 )
 
-// TestExcludedFromChatLSKeepsBootingOffTheMCPContract is the MCP-backend half
-// of the booting-row fix: a Booting row is a real live chat, but its "id" is
-// a crumbless socket with no stable identity for the MCP tool contract to
-// hand a caller, so chat_ls must keep excluding it exactly as it already
-// excludes the two synthetic New* actions — never surfacing, never flipping
-// back on by accident for an ordinary live/resumable kind.
-func TestExcludedFromChatLSKeepsBootingOffTheMCPContract(t *testing.T) {
-	excluded := map[compose.Kind]bool{
-		compose.NewClaude:    true,
-		compose.NewCodex:     true,
-		compose.Booting:      true,
-		compose.LiveClaude:   false,
-		compose.LiveCodex:    false,
-		compose.LiveSplit:    false,
-		compose.Agent:        false,
-		compose.ResumeClaude: false,
-		compose.ResumeCodex:  false,
+// TestChatRowStateNamesTheKilledButLiveContradiction is the honesty half of the
+// kill regression. A kill that closed nothing still wrote its tombstone row, so
+// chat_ls handed back a row asserting BOTH things at once — killed:true beside
+// state "idle" over a live kind — and a caller had no way to tell a real kill
+// from a de-listing. The state names the contradiction instead of collapsing
+// it into either half.
+func TestChatRowStateNamesTheKilledButLiveContradiction(t *testing.T) {
+	for _, kind := range []compose.Kind{
+		compose.LiveClaude,
+		compose.LiveCodex,
+		compose.LiveSplit,
+		compose.Agent,
+		compose.Booting,
+	} {
+		row := compose.Row{Kind: kind, Killed: true}
+		if state := chatRowState(row); state != "killed-but-live" {
+			t.Errorf(
+				"killed %s row reports state %q, want %q",
+				kind, state, "killed-but-live",
+			)
+		}
 	}
-	for kind, want := range excluded {
-		if got := excludedFromChatLS(kind); got != want {
-			t.Fatalf("excludedFromChatLS(%s) = %v, want %v", kind, got, want)
+}
+
+// TestChatRowStateKeepsEveryOtherVerdict pins the arms the contradiction check
+// must not have swallowed: an unkilled live row is idle, a booting row says so,
+// a resumable row stays resumable, and a killed row that is NOT live is an
+// ordinary de-listed row with nothing to contradict.
+func TestChatRowStateKeepsEveryOtherVerdict(t *testing.T) {
+	cases := []struct {
+		name string
+		row  compose.Row
+		want string
+	}{
+		{"live claude", compose.Row{Kind: compose.LiveClaude}, "idle"},
+		{"live codex", compose.Row{Kind: compose.LiveCodex}, "idle"},
+		{"booting", compose.Row{Kind: compose.Booting}, "booting"},
+		{"resumable", compose.Row{Kind: compose.ResumeClaude}, "resumable"},
+		{
+			"killed resumable",
+			compose.Row{Kind: compose.ResumeClaude, Killed: true},
+			"resumable",
+		},
+	}
+	for _, testCase := range cases {
+		if state := chatRowState(testCase.row); state != testCase.want {
+			t.Errorf(
+				"%s: state = %q, want %q",
+				testCase.name, state, testCase.want,
+			)
 		}
 	}
 }

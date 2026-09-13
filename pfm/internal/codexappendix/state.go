@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 func receiptPath(account string) string {
@@ -147,25 +149,12 @@ func normalizeEmptyTables(value map[string]any) {
 }
 
 func replaceFile(path string, raw []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".appendix-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
+	mode := os.FileMode(0o600)
 	existing, err := os.Stat(path)
 	if err == nil {
-		if err := os.Chmod(tmp.Name(), existing.Mode().Perm()); err != nil {
-			return err
-		}
+		mode = existing.Mode().Perm()
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.Write(path, raw, mode)
 }

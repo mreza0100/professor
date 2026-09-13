@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/codexappendix"
 	"hostops/pfm/internal/codexgen"
 	"hostops/pfm/internal/harvestpy"
@@ -765,7 +766,7 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 		if err != nil {
 			return fail(fmt.Errorf("read planned command asset %s: %w", asset.path, err))
 		}
-		if err := atomicWrite(filepath.Join(target, relative), content, asset.mode); err != nil {
+		if err := atomicfile.Write(filepath.Join(target, relative), content, asset.mode); err != nil {
 			return fail(fmt.Errorf("stage planned command %s: %w", relative, err))
 		}
 	}
@@ -838,7 +839,7 @@ func copyPlanTree(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(target, content, info.Mode().Perm())
+	return atomicfile.Write(target, content, info.Mode().Perm())
 }
 
 func (installer *engine) uninstall(ctx context.Context) error {
@@ -1171,6 +1172,8 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			content, err = renderReloadCommandAsset(content)
 		} else if asset.path == "systemd/"+nameSyncTimerUnit {
 			content, err = renderNameSyncTimerAsset(content, installer.options)
+		} else if strings.HasPrefix(asset.path, "systemd/") {
+			content, err = renderServicePath(content, installer.options.Home)
 		}
 		if err != nil {
 			return false, fmt.Errorf("render embedded asset %s: %w", asset.path, err)
@@ -1184,7 +1187,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			systemdChanged = true
 		}
 		if err := installer.change("write "+target, func() error {
-			return atomicWrite(target, content, asset.mode)
+			return atomicfile.Write(target, content, asset.mode)
 		}); err != nil {
 			return false, err
 		}
@@ -2007,7 +2010,7 @@ func (installer *engine) wireSettings() error {
 			if err := copyBackup(candidate, backup); err != nil {
 				return fmt.Errorf("backup %s: %w", candidate, err)
 			}
-			return atomicWrite(physical, updated, 0o600)
+			return atomicfile.Write(physical, updated, 0o600)
 		}); err != nil {
 			return err
 		}
@@ -2050,7 +2053,7 @@ func (installer *engine) writeSettingsHookOwnership(
 		return nil
 	}
 	return installer.change("write "+path, func() error {
-		return atomicWrite(path, encoded, 0o600)
+		return atomicfile.Write(path, encoded, 0o600)
 	})
 }
 
@@ -2115,7 +2118,7 @@ func (installer *engine) wireCodexHooks() error {
 					return fmt.Errorf("backup %s: %w", path, err)
 				}
 			}
-			return atomicWrite(physical, updated, 0o600)
+			return atomicfile.Write(physical, updated, 0o600)
 		}); err != nil {
 			return err
 		}
@@ -2195,7 +2198,7 @@ func (installer *engine) wireShell(uninstall bool) error {
 		if uninstall && updated == "" {
 			return os.Remove(zshrc)
 		}
-		return atomicWrite(zshrc, []byte(updated), 0o600)
+		return atomicfile.Write(zshrc, []byte(updated), 0o600)
 	})
 }
 
