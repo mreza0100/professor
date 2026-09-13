@@ -224,7 +224,7 @@ These slot into the concept families above — registered here to close prior ga
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |
 | the cloud CLI forbidden at the execpolicy layer (e.g. `aws`) | `{CLOUD_CLI}` | Tech stack |
-| the CMO character's own name (parallel to Professor/JC identity slot) | `{MARKETER_NAME}` | Identity |
+| the CMO character's own name (parallel to the Professor identity slot) | `{MARKETER_NAME}` | Identity |
 | the artifact an ATLAS/compliance finding gets routed to (e.g. the adopter's DPIA) | `{PRIVACY_ASSESSMENT}` | Tier B |
 | the persona's founding metaphor (e.g. "the couch meets the terminal") | `{DOMAIN_METAPHOR_A}` | Persona |
 | the N+1-query-joke punchline concept, domain-side | `{DOMAIN_UNCONSCIOUS}` | Persona |

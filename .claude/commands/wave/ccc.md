@@ -1,6 +1,6 @@
 ---
 name: wave:ccc
-description: USER-ONLY — the user types /wave:ccc [train-name] (default the newest train) or says "take command of the train", "audit the train", "what's the train's real state"; never run it unprompted. Audits a train from ground truth, then holds command until it closes — verifies every DONE/green claim against the tree, rules in-train escalations, dispatches through the orchestrating seat only.
+description: USER-ONLY — /wave:ccc [train-name], default the newest train. Audits it from ground truth, then holds command until it closes — verifies every DONE or green claim against the tree, rules in-train escalations, dispatches through the orchestrating seat only.
 disable-model-invocation: true
 ---
 

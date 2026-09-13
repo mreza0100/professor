@@ -26,7 +26,6 @@
     ".claude/commands/contentor.md",
     ".claude/commands/h/",
     ".claude/commands/deploy.md",
-    "docs/commands/jc/references/deploy.md",
     ".claude/commands/test.md",
     ".claude/commands/prod-deploy.md",
     ".claude/scripts/prod-deploy-watch.sh"
@@ -62,7 +61,7 @@
     "global/commands/quality/doc.md": {
       "curated": true
     },
-    "global/commands/quality/forlint.md": {
+    "global/commands/quality/md-forlint.md": {
       "curated": true
     },
     "global/commands/quality/prompt.md": {
@@ -207,11 +206,6 @@
     "project/commands/documenter/archive.md": {
       "curated": true
     },
-    "project/commands/jc.md": {
-      "sources": {
-        ".claude/commands/jc.md": "a3a7d86bbda4331c309c31ce8ff52bce5eec8ff9f127b191e52d7463bf12fb26"
-      }
-    },
     "project/commands/km.md": {
       "sources": {
         ".claude/commands/km.md": "044cba1c5e2e86dc50da208278638d89b93ce86b84a4e7f5e2ed901369897428"
@@ -246,9 +240,6 @@
       "sources": {
         ".claude/commands/pm.md": "36e608b9e7b9a9e2eceee3cf8b2d445fa08ef8133526de0783f63264ed5c7414"
       }
-    },
-    "project/commands/qa/live.md": {
-      "curated": true
     },
     "project/commands/rnd.md": {
       "sources": {
@@ -348,14 +339,12 @@
         "docs/references/gitter-phase-wave.md": "fbf9e77ba5babeb1e9b77c025ac5ed20a576bb7d68e9982e34842b23f6ff8e04"
       }
     },
-    "project/docs-commands/jc/references/debug-discipline.md": {
-      "sources": {
-        "docs/commands/jc/references/debug-discipline.md": "478dc74c2c88cd79a604c04c8cb40f4792366c3ae0bb6717f5d468a2310913a9"
-      }
+    "project/docs-commands/wave/references/debug-discipline.md": {
+      "curated": true
     },
-    "project/docs-commands/jc/references/jc-core.md": {
+    "project/docs-commands/wave/references/fix-core.md": {
       "sources": {
-        "docs/references/jc-core.md": "0c8b20e38bfff5f0d84161c90de348db59962257e484c893e29f0d36399ff523"
+        "docs/references/fix-core.md": "4d98c7a21df6b163893f4594842ead550a59c8d8a7da5f12647784ca058829b1"
       }
     },
     "project/epics/TEMPLATE.md": {
@@ -365,6 +354,9 @@
       "sources": {
         "{project:backend}/CLAUDE.md": "72080fc35f119da41761a5bdbaa368a31052935747b31c4a7038e0122984ee5a"
       }
+    },
+    "project/rumdl-policy.toml": {
+      "curated": true
     },
     "project/scripts/alloc-ports.sh": {
       "sources": {
@@ -377,12 +369,6 @@
       }
     },
     "project/scripts/build-codex.mjs": {
-      "curated": true
-    },
-    "project/scripts/memory-consolidate.sh": {
-      "curated": true
-    },
-    "project/scripts/memory-wire.sh": {
       "curated": true
     },
     "project/scripts/checkpoint.sh": {
@@ -410,9 +396,6 @@
         ".claude/scripts/filter-test-output.sh": "355139e4e037ea58fc017ad4d32da4ab1286e5a5860c619024fc4f523a1ca3c2"
       }
     },
-    "project/rumdl-policy.toml": {
-      "curated": true
-    },
     "project/scripts/format-md.sh": {
       "curated": true
     },
@@ -431,7 +414,13 @@
         ".claude/scripts/km-guard.sh": "695dbfc5952209a4b7df6262421440e09a74c4f7402c42e6f24e07a74ba989ad"
       }
     },
+    "project/scripts/memory-consolidate.sh": {
+      "curated": true
+    },
     "project/scripts/memory-sync.sh": {
+      "curated": true
+    },
+    "project/scripts/memory-wire.sh": {
       "curated": true
     },
     "project/scripts/notify.sh": {

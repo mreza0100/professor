@@ -20,7 +20,7 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 ### How the pieces connect
 
 - `CLAUDE.md` — request routing + guards; routes non-obvious requests to commands, names mandatory-load obligations; carries no rosters (§ Authoring conventions, no-rosters law)
-- `.claude/commands/*.md` — slash commands (/wave:builder, /jc, /pfm, …)
+- `.claude/commands/*.md` — slash commands (/wave:builder, /pfm, …)
 - `.claude/agents/*.md` — root pipeline agents (gitter) + qa-{proj} wrappers, one per project (registered QA gates that read the child protocol and carry the test-output filter hook)
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set)
 - `.claude/scripts/*.{sh,mjs}` — worktree.sh, alloc-ports.sh, dev.sh, codex-sync.sh (the `pfm codex` hook bridge)

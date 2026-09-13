@@ -1,6 +1,6 @@
 ---
 name: pfm:release
-description: Versions, tags and publishes this repo — `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}] [--ledger {root}]…`, "blueprint release", "publish the blueprint"; only on the user's explicit in-turn publish request. Sweeps every linked .professor/release.md into CHANGELOG.md + releases/vX.Y.Z.md, runs /pfm:refresh under --from, lands develop → main via gitter's release PR.
+description: Versions, tags and publishes this repo — `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}] [--ledger {root}]…`, "blueprint release", "publish the blueprint"; only on the user's explicit in-turn publish request. Sweeps every linked .professor/release.md into CHANGELOG.md + releases/vX.Y.Z.md, re-derives templates/** from that source under --from, lands develop → main via gitter's release PR.
 argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--ledger {root}]…'
 ---
 
@@ -29,7 +29,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--
 
 3. **Refresh pass — only when `--from {live-project-root}` is given.** Without it, say `refresh skipped — no live source named` and go to Step 4; a release of hand-authored blueprint edits is legitimate, a SILENT skip is not.
 
-   Run `/pfm:refresh {live-project-root}` — it owns the scope scan, the MISSING-SOURCE rulings, the hunk-by-hunk SYNC/LOCAL/TOKEN classification, the reviewed sonnet batches, and the closing `regen`. Feed it every template named by a bullet the Step 2b sweep collected, from ANY ledger. STOP if it stops; a FAILED scan is never an empty one. Update the public README from its report.
+   Run the pass per `$CDOCS/pfm/$REFS/refresh.md` § The pass — `scripts/refresh-scope.sh scan` for the scope and the MISSING-SOURCE rulings, then hunk-by-hunk SYNC/LOCAL/TOKEN classification in reviewed sonnet batches, then its closing `regen` to re-baseline the map. Feed it every template named by a bullet the Step 2b sweep collected, from ANY ledger. STOP if it stops; a FAILED scan is never an empty one. Update the public README from its report.
 
 4. **Read `VERSION`, compute the new version.** It must exceed every tag from Pre-flight 4.
 

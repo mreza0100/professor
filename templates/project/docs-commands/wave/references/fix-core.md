@@ -1,10 +1,12 @@
-# JC Core — Fix Loop (Steps 2–8)
+# Fix Core — the fix loop (Steps 2–8)
 
-> Declared copy of `.claude/commands/jc.md` §§ 2–8 (Diagnose → Fix → Verify → Cleanup → Docs → Commit → Report) — synced whenever jc.md's core steps change; source of truth is `.claude/commands/jc.md`. Consumed by `/wave:live` (W3–W8) so a wave batch doesn't hold the full `/jc` command (persona, Step 0 classify, Step 1 investigate, the debug-discipline/deploy on-demand cards, and the boundary-lite section stay JC-invocation-only and are out of scope here). If this card is missing or stale, fall back to `.claude/commands/jc.md` directly.
+> The fix loop cited by `/wave:live` — Diagnose, Fix, Verify, Cleanup, Docs, Commit, Report.
 
 ---
 
 ## Step 2 — Diagnose
+
+**Hang / deadlock / mystery failure** (0%-CPU hang, no-output-no-error, intermittent or 1-in-N flake, passes-alone-fails-in-suite, silent crash) → read `$CDOCS/wave/$REFS/debug-discipline.md` and follow it before any other diagnosis.
 
 Based on the investigation:
 
@@ -45,7 +47,7 @@ Build multi-part work with sub-agents, not inline — decompose into parts and s
 
 ### Server management during fixes
 
-Restart a changed service with `/dev restart {project}` (a hot-reloading dev server usually needs no restart). After DB schema changes, run migrations first. If JC was invoked by `/dev` auto-heal, restart with `DEV_NO_AUTOHEAL=1` so `/dev` → `/jc` doesn't loop.
+Restart a changed service with `/dev restart {project}` (a hot-reloading dev server usually needs no restart). After DB schema changes, run migrations first. If the fix came from by `/dev` auto-heal, restart with `DEV_NO_AUTOHEAL=1` so `/dev` → `/wave:live` doesn't loop.
 
 ---
 
@@ -66,7 +68,7 @@ After the restart settles, check for new errors via `/dev log` (or tail `$ROOT/t
 - Hit the relevant endpoints to confirm the issue is resolved
 - **Affected-first:** run only the tests you touched or added (plus directly affected ones) first as a fast confirm — they must fail without the fix and pass with it. Only once they pass, run the **full** suite (unit + integration) once per modified roster project, as the gate. Derive each project's suite commands from its child `CLAUDE.md` and its qa-reference doc — a project's integration tier can be a separate set of scripts from its unit tier, so the top-level test command alone may not be the full gate.
 
-**ZERO TOLERANCE — fix ALL failing tests.** If tests fail, you fix them — period. It does not matter whether the failure was caused by your hotfix or was pre-existing. JC leaves `main` cleaner than he found it. "Pre-existing" is not an excuse — it's a second bug you just discovered. Diagnose it, fix it, and include it in your commit. If you walked past a broken test and committed anyway, you blessed broken code — and that is not what JC does.
+**ZERO TOLERANCE — fix ALL failing tests.** If tests fail, you fix them — period. It does not matter whether the failure was caused by your hotfix or was pre-existing. The fix loop leaves `main` cleaner than it found it. "Pre-existing" is not an excuse — it's a second bug you just discovered. Diagnose it, fix it, and include it in your commit. If you walked past a broken test and committed anyway, you blessed broken code — and that is not what this loop does.
 
 The ONLY acceptable exception: a test that requires external services you genuinely cannot reach (e.g., a paid API key that isn't configured locally). In that case, document the skip explicitly in your report. Everything else gets fixed.
 
@@ -92,11 +94,11 @@ After the fix is verified, ask: **"Can this class of bug happen again?"** If yes
 - Lint rule / assertion — the pattern could recur anywhere: a project-level lint rule or runtime assertion.
 - Config / env default — a missing or wrong config value: a sensible default, startup validation, or a fail-fast check.
 
-Every fix carries at least ONE prevention measure, committed alongside it in the same JC commit — "just fixing it" is not enough. A genuine one-off (typo, wrong constant with no pattern) states why none is needed rather than skipping silently.
+Every fix carries at least ONE prevention measure, committed alongside it in the same commit — "just fixing it" is not enough. A genuine one-off (typo, wrong constant with no pattern) states why none is needed rather than skipping silently.
 
 ### 4g. QA regression test
 
-Always invoke `Agent(qa-{project})` — the modified project's registered QA subagent, one per modified project — to add two layers of coverage: a regression test that reproduces the failure end-to-end (fails without the fix, passes with it), and unit tests for the specific functions, components, or sections that broke. QA judges feasibility — when no reliable test is possible (e.g. an external-service-only failure), it reports why instead of forcing one. Both ship in the same JC commit.
+Always invoke `Agent(qa-{project})` — the modified project's registered QA subagent, one per modified project — to add two layers of coverage: a regression test that reproduces the failure end-to-end (fails without the fix, passes with it), and unit tests for the specific functions, components, or sections that broke. QA judges feasibility — when no reliable test is possible (e.g. an external-service-only failure), it reports why instead of forcing one. Both ship in the same commit.
 
 ---
 
@@ -118,7 +120,7 @@ cd {project} && {PROJECT_FORMAT} && {PROJECT_LINT} && cd ..
 
 ## Step 6 — Update docs via documenter
 
-`/documenter` runs BEFORE committing — Step 7 ships code + docs in one gitter call. First spawn a collector-tier doc-relevance classifier briefed with the diff's file list + a one-line change summary, schema-forced to return exactly `{docsAffected: true|false, scopes: [affected doc clusters]}` — it classifies only, never concludes. `docsAffected: true`, or ANY uncertainty, → invoke `/documenter` in JC-UPDATE mode: `/documenter A hotfix was applied via /jc: {what changed}. Projects affected: {list}. Doc scopes: {scopes}.`
+`/documenter` runs BEFORE committing — Step 7 ships code + docs in one gitter call. First spawn a collector-tier doc-relevance classifier briefed with the diff's file list + a one-line change summary, schema-forced to return exactly `{docsAffected: true|false, scopes: [affected doc clusters]}` — it classifies only, never concludes. `docsAffected: true`, or ANY uncertainty, → invoke `/documenter` in FIX-UPDATE mode: `/documenter A fix landed on `main` via `/wave:live`: {what changed}. Projects affected: {list}. Doc scopes: {scopes}.`
 
 It reads the changed files, updates only the relevant permanent docs, skips unaffected ones, and does NOT commit — that happens in Step 7.
 
@@ -128,7 +130,7 @@ It reads the changed files, updates only the relevant permanent docs, skips unaf
 
 ## Step 7 — Commit all changes via gitter
 
-Invoke the `gitter` agent ONCE with `Phase: JC-COMMIT`, `Pipeline: jc`, the project keys held, the exact code files changed, and the exact doc files changed (or "none — documenter skipped"). Gitter stages only the files you name, lands one code commit plus a separate doc commit when docs changed, and reports the hashes. Name every file — an unnamed file does not ship.
+Invoke the `gitter` agent ONCE with `Phase: COMMIT`, `Pipeline: {wave-name}` (or the caller's pipeline name), the project keys held, the exact code files changed, and the exact doc files changed (or "none — documenter skipped"). Gitter stages only the files you name, lands one code commit plus a separate doc commit when docs changed, and reports the hashes. Name every file — an unnamed file does not ship.
 
 ---
 

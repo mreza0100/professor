@@ -14,6 +14,6 @@ Resolve the epic: use the `Epic:` value from your invocation (build Step 10 pass
 
 Consolidate the pipeline into the matched epic per the Epic consolidation contract: merge what shipped (dev reports + the features the `root-features` scope added) into `update.md` — `## Delivered` per area, `## State of work` refreshed; fold new architectural/scope decisions from `$DOCS/0-task.md` (legacy trails: `1-plan.md`/`3-architecture.md`) into `## Key Decisions` (deduped); add one `## Progress Log` line; add `{PIPELINE}` to `pipelines:`; bump `updated:`. `## Discoveries` and `## Open Questions` stay untouched in this mode.
 
-## JC-UPDATE
+## FIX-UPDATE
 
-Never emitted in JC-UPDATE mode — this scope is standalone-ARCHIVE only.
+Never emitted in FIX-UPDATE mode — this scope is standalone-ARCHIVE only.

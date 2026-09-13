@@ -54,7 +54,7 @@ Header: `# Wave: {slug}` · `**Status:** QUEUED` · `**Refined:** {YYYY-MM-DD} �
 6. `**File plan:**`
 7. `**Boundaries & anchors:**` what's NOT included + existing files/identifiers to reuse, every parity claim with its exact anchor. Every fact the builder's hand depends on is quoted here with its `file:line` — a pointer to a ledger, walk-notes or evidence directory in place of the quoted fact is a gap; the hand's first command is its target file.
 
-Rules blocks binding a subset of tasks sit above those tasks; all-task rules sit in the header. `[CMD: /km]` / `[CMD: /jc]` tags route non-builder tasks. Tag `[MILESTONE]` on checkpoint task headings.
+Rules blocks binding a subset of tasks sit above those tasks; all-task rules sit in the header. `[CMD: /km]` tags route non-builder tasks. Tag `[MILESTONE]` on checkpoint task headings.
 
 ### RND findings (when RND/POC fed the wave)
 

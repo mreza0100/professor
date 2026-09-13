@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: MANDATORY — route every change to CLAUDE.md, .claude/**, the .codex/ mirror or templates/** here. `/pfm {change request}` applies it; `/pfm audit [scope|all]` reports framework consistency, read-only; `/pfm retro` folds the .professor/retro.md inbox. Family — /pfm:release publishes the blueprint, /pfm:refresh re-derives templates/** from a live project. Not for context budget → /context-meter.
+description: MANDATORY — route every change to CLAUDE.md, .claude/**, the .codex/ mirror or templates/** here. `/pfm {change request}` applies it; `/pfm audit [scope|all]` reports framework consistency, read-only; `/pfm retro` folds the .professor/retro.md inbox. Family — /pfm:release publishes the blueprint and re-derives templates/** from a live source under --from. Not for context budget → /context-meter.
 argument-hint: [change request|audit]
 ---
 

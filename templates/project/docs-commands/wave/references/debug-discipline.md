@@ -1,4 +1,4 @@
-# JC Debug Discipline — hangs, deadlocks, mystery failures
+# Debug Discipline — hangs, deadlocks, mystery failures
 
 For invisible failure modes (hang, deadlock, "no output no error", intermittent, passes-alone-fails-in-suite, silent crash): **instrument, don't wait** — a 0%-CPU hang hangs forever; never re-run with `-v` hoping.
 

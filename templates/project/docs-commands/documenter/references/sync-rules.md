@@ -156,7 +156,7 @@ Rules that `/documenter audit` uses to verify cross-reference consistency. Each 
 
 **Severity:** `STALE-ROADMAP` — not critical (nothing breaks), but file rot causes future pipelines to re-research solved problems. Clean up during ARCHIVE/JC-UPDATE every time; audit flags accumulated rot.
 
-**Who enforces:** the `root-features` scope card's Clean-backlog section, during ARCHIVE and JC-UPDATE. Audit detects rot; cleanup happens in pipeline/hotfix modes.
+**Who enforces:** the `root-features` scope card's Clean-backlog section, during ARCHIVE and FIX-UPDATE. Audit detects rot; cleanup happens in pipeline/hotfix modes.
 
 ---
 

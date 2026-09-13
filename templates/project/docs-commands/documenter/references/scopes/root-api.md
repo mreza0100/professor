@@ -10,6 +10,6 @@ Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration sco
 
 Route by surface (e.g. `graphql-queries-*.md`, `graphql-mutations-*.md`, `rest.md`, `websocket.md`, `sse-*.md`, `sqs-*.md`, `shared-types.md` — see the cluster `_index.md` for the current file set). Consumers grep for an operation, then read its surface file — keep each entry self-contained.
 
-## JC-UPDATE
+## FIX-UPDATE
 
-Same merge logic over only the docs the hotfix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir.
+Same merge logic over only the docs the fix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir.

@@ -1,5 +1,5 @@
 ---
-name: quality:forlint
+name: quality:md-forlint
 description: Lint/format markdown — `check [path]` reports, `fmt [path]` rewrites, `prompt-safe <file>` keeps machine-read markers intact, `audit` prices the policy, `profile <path>` names a path's category. Route every markdown lint/format/style ask here; load before changing `.rumdl.toml`. Prose quality lives in /quality:prompt and /quality:doc.
 argument-hint: "[check [path] | fmt [path] | prompt-safe <file> | audit | profile <path>]"
 ---

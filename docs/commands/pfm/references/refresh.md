@@ -27,13 +27,13 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 | Tier | Description | Ships | Gets parameterized |
 | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| **A — Universal archetypes** | Personalities that work in any domain. Voice IS value. | Full character, structure, identity | Domain REFERENCES inside the character (Professor's PhDs, JC's stack traces) |
+| **A — Universal archetypes** | Personalities that work in any domain. Voice IS value. | Full character, structure, identity | Domain REFERENCES inside the character (the Professor's PhDs, a persona's stack traces) |
 | **B — Domain archetypes** | Roles every project needs, content domain-shaped | Archetype skeleton: identity, voice, charter, modes, doc structure | Regulation, knowledge domain, user persona, market segment — filled via interview |
 | **C — Pure mechanics** | Infrastructure agents and plumbing | Mechanics only — no character | Tech-specific commands (test runner, package manager, build tool) |
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/jc`, `/pfm` (with its `update` and `release` subcommands), `/wave:builder`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/km` `{KNOWLEDGE_DOMAIN}`, `/pm` `{USER_PERSONA}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (mono-planner, mono-architect, mono-documenter, gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/wave:builder`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/km` `{KNOWLEDGE_DOMAIN}`, `/pm` `{USER_PERSONA}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (mono-planner, mono-architect, mono-documenter, gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -54,7 +54,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 - Ports → `{PORT_A}`, `{PORT_B}`; package managers/test runners → `{PROJECT_PKG_MGR}`, `{PROJECT_TEST_RUNNER}`
 - Blueprint self-references (`{BLUEPRINT_REPO}`, `{GH_USER}`, `{BLUEPRINT_CLONE_PATH}`) → resolved at install: a user with push access to the canonical repo targets it directly; everyone else targets their own fork
 
-Character names (Professor, JC, etc.) ship as **default names with "rename if you want" instruction**. Concrete beats abstract.
+Character names (Professor, and any persona the install adds) ship as **default names with "rename if you want" instruction**. Concrete beats abstract.
 
 ---
 
@@ -144,7 +144,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and `/git` read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/jc` task and watch its project checks.
+**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/wave:live` task and watch its project checks.
 
 ## 5. Public README
 
@@ -158,11 +158,10 @@ If the repo-root `README.md` is missing → write it from the template below. If
 One-paragraph pitch: portable .claude/ that turns Claude Code into a self-disciplined engineering team with character. Personality is load-bearing.
 
 ## What you get
-- Full cast (Professor, JC, Audit + Tier B opt-ins)
+- Full cast (Professor, Audit + Tier B opt-ins)
 - Pipeline (planner→architect→developer→QA→gitter)
 - Worktree isolation + port allocation
 - Single git owner (gitter)
-- Hotfix mode (/jc)
 - Self-improvement at source (/pfm)
 - Scaffold-and-own updates (`pfm update check` — reported template diffs, reviewed hand application, per-file pins)
 - Epics — cross-conversation context persistence via manifest files (PLANNING → IN_PROGRESS → SHIPPED)
@@ -173,7 +172,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.md install interview → customize → smoke test
 
 ## The cast — Tier A
-Professor, /jc, /pfm, /wave:builder, /dev, /git, /wave:orchestrator, /documenter
+Professor, /pfm, /wave:builder, /dev, /git, /wave:orchestrator, /documenter
 
 ## Tier B (opt-in)
 /officer, /km, /pm, /mentor, /marketer
@@ -210,6 +209,119 @@ Refresh pass complete in templates/project/. {N} files updated, {M} unchanged.
 Tier A: {count} | Tier B: {count} | Tier C: {count}
 Sources mined: {list}
 Generalizations: identifiers→placeholders {count}, tech→placeholders {count}, domain→slots {count}
-Character preservation: Professor ✓, JC ✓
+Character preservation: Professor ✓
 Continuing release.
 ```
+
+## The pass — how a refresh runs
+
+Driven by `/pfm:release --from {live-project-root}` (step 3); there is no standalone command. The tier table, preservation list and placeholder law above are the rules every worker applies — this section owns HOW the pass runs: cheaply, in reviewed batches.
+
+### The cost law
+
+The pass is diff-driven, never file-driven. Whole-file reads are what make a refresh unaffordable, and a 5,000-line sweep dies of context long before it dies of difficulty.
+
+- The orchestrator reads NO template and NO live source. It reads `refresh-scope.sh` output, `diff -u` hunks, and worker reports.
+- A worker reads at most **2 files**: its one template and its one live source. Nothing else — not a sibling template, not the map, not a reference doc beyond what its brief quotes.
+- One worker owns exactly one template pair.
+
+### Step 1 — Scope
+
+```bash
+bash scripts/refresh-scope.sh scan {live-project-root}
+```
+
+`CHANGED` is the work list. `UNCHANGED` is a mechanical untouched-proof — skipped, never re-read. A scan that fails to RUN is a failed look, not an empty one: stop and report it.
+
+Add any template named by a bullet the `refresh-scope.sh ledgers` sweep collected, from any ledger — a linked project's bullet earns its template a re-derivation exactly as this repo's does.
+
+`MISSING-SOURCE` exits 3 and blocks the pass → Step 2. `curated` templates have no live source and are never derived here.
+
+### Step 2 — `rulings`
+
+Runs alone as `/pfm:refresh {root} rulings`, and runs first whenever a scan exits 3. Every `MISSING-SOURCE` gets one of three rulings, and each is a judgment the user's blueprint has to live with, so state the evidence for each:
+
+- **REMAP** — the live source moved or was renamed. Point the entry at the successor. Prove the successor is the same file (same role, continuous content), never a same-named coincidence.
+- **DELETE** — the live source is gone with no successor and the template ships a dead pattern. Remove the template file AND its map entry, end to end, including any pointer that cited it.
+- **CURATED** — the template has legitimately outgrown its live source and is now hand-maintained here (every machine-global template is this by law: `templates/global/**` IS the truth, so a global entry still carrying a live source is a mapping bug). Set `curated: true` and drop the dead `sources` map.
+
+`UNMAPPED-LIVE` gets a mapping or an `ignore_sources` entry, same evidence bar.
+
+Re-baselining around a missing source keeps a zombie template alive forever — never regen to clear one.
+
+Two integrity checks the scan structurally cannot make, because it reads the map's keys rather than the tree:
+
+```bash
+# ZOMBIE — map entry whose template file does not ship
+jq -r '.templates | keys[]' templates/refresh-map.json | while read -r k; do [ -e "templates/$k" ] || echo "ZOMBIE $k"; done
+# ORPHAN — shipped template with no map entry
+comm -13 <(jq -r '.templates | keys[]' templates/refresh-map.json | sort) \
+         <(cd templates && find . -type f -not -name refresh-map.json | sed 's|^\./||' | sort)
+```
+
+### Step 3 — Cascades first, then batch
+
+A per-template worker structurally cannot carry a change that spans templates: it sees one file, so it applies the cascade's local fragment and leaves the blueprint half-migrated — some files on the new contract, one on the old, every check still green. Detect these BEFORE batching and route them out of the per-template lane.
+
+A hunk is a CASCADE when it renames or retires a token, path var, command, agent, artifact, or term that other templates name. Measure the blast radius, closed-world, before ruling it:
+
+```bash
+grep -rl '{the symbol}' templates/ | sort        # every template that must move together
+```
+
+Each cascade becomes ONE task owning every file in its radius, dispatched alone, verified by the symbol's count reaching zero (or its full replacement) across `templates/`, `docs/`, and every citing pointer. A cascade half-applied is a worse defect than one not started, so a batch worker that meets a cascade hunk reports it and applies nothing.
+
+The reverse holds too: a term this blueprint's other files depend on is not renamed because one live file renamed it. Grep the term before accepting a rename — a live-side rename with citers here is LOCAL until its own cascade task lands.
+
+Order the remaining `CHANGED` list smallest diff first (`diff -u {template} {live} | grep -c '^[+-]'`) so the cheap batches retire early and the expensive ones arrive with the classification pattern already established. Batch at `--batch N` (default 4), one worker per template.
+
+Dispatch each batch as ONE message — every sibling in a wave goes together, and a missing report is a named coverage hole, never a silent one.
+
+Tier and effort per the fleet prompt § Model Selection: **spec-execution (sonnet), effort High**. The work arrives with a spec; the judgment that stays here is which hunks were classified wrong.
+
+#### The worker brief
+
+Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
+
+**Quote every ledger bullet naming this template's mechanism into the brief.** The source project's `.professor/release.md` is where that project ALREADY ruled the change framework-bound — a bullet carrying a `#### → For:` adopter migration line is a declaration of SYNC intent, and a worker that cannot see it will read a generic mechanism as install-specific topology and rule it LOCAL. Grep the Step 2b sweep output for the template's subject before dispatching; a template with no matching bullet is briefed as such, so "no bullet quoted" means the orchestrator looked, not that it skipped.
+
+> Re-derive ONE blueprint template from its live source. Read at most these 2 files: the template `templates/{key}` and the live source `{live-root}/{source}`. Read nothing else.
+>
+> 1. Stage and run the deterministic pass first: copy the LIVE source to a `tmp/` scratch path, `bash scripts/genericize.sh -i {scratch}`. It applies `scripts/placeholder-map.tsv` longest-search-first. Never hand-substitute a value that map already covers.
+> 2. `diff -u templates/{key} {scratch}` — the hunks are the whole job.
+> 3. Classify EVERY hunk as exactly one of:
+>    - **SYNC** — a framework change: a mechanism, rule, gate, threshold, structure, or correction any adopter of this blueprint would want. Apply it to the template.
+>    - **LOCAL** — project-specific: the source project's brand, roster, ports, stack, domain nouns, its own business rules, a fix meaningful only in that repo. Never applied. A LOCAL hunk that carries a value the template already parameterizes is TOKEN instead. A mechanism is not LOCAL merely because the source project is its only instance today — judge the mechanism, and treat the concrete repo, remote, or path it names as the TOKEN half. A brief quoting a ledger bullet for the hunk has already settled it as SYNC.
+>    - **TOKEN** — a project value sitting where the template holds a registered placeholder. Apply with the token, never the literal. One canonical token per concept; a concept with no registered token is UNRULED, not an invented one.
+>    - **UNRULED** — you cannot tell. Report it verbatim with your reasoning. An unruled hunk is a result; a silently dropped one is a defect.
+> 4. Apply only SYNC and TOKEN, surgically, with `Edit`. A template IS the live source file verbatim — same structure, mechanics, character, logic; only project-specific values swap for tokens. Never abstract, skeletonize, or thin prose, and never trim a persona's voice sections.
+> 5. Verify: `bash scripts/leak-check.sh --files templates/{key}` and quote its exit status. No machine-absolute path (`/home/…`, `/Users/…`), no brand current or former, no PII.
+>
+> Return: one line per hunk (`SYNC` / `LOCAL` / `TOKEN` / `UNRULED` + a phrase naming it), the leak-check exit status quoted, and a draft `release.md` bullet for the SYNC set in the ledger's final-bullet shape. Report a tool that would not run as a failure naming the tool — never as a clean result.
+
+### Step 4 — Review, then continue
+
+The orchestrator reviews each batch before the next dispatches. Agent reports are evidence, not truth: read the actual diff, never the worker's claim about it.
+
+```bash
+git diff --stat templates/            # scope: only briefed templates moved
+git diff templates/{key}              # the hunks that landed
+bash scripts/leak-check.sh --files $(git diff --name-only templates/)
+```
+
+Reject and re-dispatch on any of: a template touched that no brief named, a LOCAL hunk applied, a literal where a registered token belongs, prose thinned rather than derived, a leak-check the worker did not quote. A worker's UNRULED hunks are ruled HERE, by the orchestrator or by the user — never left in the report.
+
+Reconcile telemetry per batch: workers dispatched vs reports received, and the count appears in the report.
+
+### Step 5 — Close
+
+1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next release's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
+2. Every SYNC set logs its bullet to `.professor/release.md`; a change this repo alone wants logs to `drift.md` (§ Logging in `/pfm`).
+3. Report: templates re-derived / skipped-unchanged / ruled, the per-verdict hunk totals, every UNRULED hunk and how it was ruled, workers dispatched vs reports received, leak-check status, and what a reader must verify by hand.
+
+### Rules
+
+- `--dry-run` classifies and reports; it writes no template, no map entry, and no ledger line.
+- Never regen hashes for a template a worker did not actually re-derive — the baseline would claim a sync that never happened.
+- A worker that reports zero hunks names the command it ran; "found nothing" and "failed to look" are different results and are reported differently.
+- The public repo is the stakes: a leaked identifier cannot be unpublished. Leak-check is the backstop, never the plan.

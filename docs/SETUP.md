@@ -85,9 +85,9 @@ This becomes `{PROJECT_NAME}` and `{PROJECT_PITCH}`. Example: "Acme is a develop
 
 Most adopters keep Professor as-is. The voice transplants well across domains. If you want a different name (e.g., "Beatrix" for a finance project, "Gandalf" for an open-source library), name it. The voice can stay.
 
-Each persona ships as ONE version: the Professor (`professor.md`) is the **session style** loaded on every main-loop turn; JC (`jc.md`) is a command overlay loaded only when `/jc` runs.
+The Professor (`professor.md`) ships as ONE version: the **session style** loaded on every main-loop turn.
 
-Sacred ground (the topics where humor drops) is collected in question 8 — it feeds JC and the Tier B archetypes; the Professor persona itself stays generic.
+Sacred ground (the topics where humor drops) is collected in question 8 — it feeds the Tier B archetypes; the Professor persona itself stays generic.
 
 ### 3. Project roster
 
@@ -231,7 +231,6 @@ If no: skip — the entire Codex layer is omitted. No pipeline operation require
 
 This becomes `{SACRED_GROUND}` and is referenced by:
 
-- JC (the trigger that escalates from chill to temple-flipping)
 - Officer (if opted in — the protected category)
 
 Be specific. "Privacy" is too vague. "Patient session content and identifying details" is concrete. "Financial transaction integrity at the millisecond level" is concrete. "Scientific data reproducibility for FDA submissions" is concrete.
@@ -256,7 +255,7 @@ Claude takes your answers and:
 
 1. **Writes root `CLAUDE.md`** — fills in `{PROJECT_NAME}`, `{PROJECT_PITCH}`, the Professor persona section, and the non-negotiable rules. Emits `{PROJECT_ROSTER}` (one Architecture bullet per roster entry) and `{PROJECT_AGENT_ROSTER}` (one Agents line per entry, listing only that project's installed agents); a single-project install collapses the monorepo framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; infra rules only if a project owns infra).
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
-3. **Writes Tier A command files** — `/wave:builder`, `/jc`, `/pfm`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`. Voice intact, domain content filled.
+3. **Writes Tier A command files** — `/wave:builder`, `/pfm`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`. Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/km`, `/pm`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line.
 5. **Writes root agents** — `gitter`, `mono-documenter`, `rndier`, and `tracer` always; one `qa-{project}` gate wrapper per roster entry; `mono-planner` + `mono-architect` only for a roster of 2+, each with the roster pinned. A single-project install omits the two `mono-` consolidators.
 6. **Writes per-project agents** — for each roster entry, instantiates that project's `planner`, `architect`, `developer`, `qa` (plus any specialists from Q3) under `{project}/.claude/agents/`, with its test/lint/build commands pinned. One set per entry; none for projects not in the roster.
@@ -275,7 +274,7 @@ Claude takes your answers and:
 | `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{KNOWLEDGE_ROOT}`, `{KNOWLEDGE_DOMAIN}`, `{SACRED_GROUND}` |
 | `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
 | `/quality:description` | Command `templates/global/commands/quality/description.md` | None |
-| `/quality:forlint` | Command `templates/global/commands/quality/forlint.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
+| `/quality:md-forlint` | Command `templates/global/commands/quality/md-forlint.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |
 | `/audit:security` | Command `templates/project/commands/audit/security.md` | Hydrated by RR (Phase 2.5) |
 
@@ -322,7 +321,7 @@ Claude takes your answers and:
 }
 ```
 
-7e. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
+7e. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
 
     ```json
     {
@@ -450,7 +449,7 @@ After install, Claude verifies the project routes through the installed develope
 /dev status
 ```
 
-Then run one tiny `/jc` task and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pfm` to fix it at the source.
+Then exercise one small task through the pipeline and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pfm` to fix it at the source.
 
 Before the pipeline smoke, rerun `{BLUEPRINT_CLONE_PATH}/engines/wave-walker/engine`'s `npm run verify` and confirm its Claude and Codex manifests carry the same `workflowHash`. This proves the permanent paths and pinned library survived materialization.
 
@@ -543,7 +542,7 @@ Same for adding a new Tier A archetype if you build one — `/pfm` copies the te
 - Read `BLUEPRINT.md` § "The five load-bearing walls" — these don't change, ever.
 - Verify the statusline shows in your terminal (you should see model, fleet counts, context %, and git branch). If not, check `~/.claude/settings.json` runs `~/.local/bin/pfm statusline` and that the binary is executable.
 - Verify notifications work — start a task that takes 30+ seconds and check you get the macOS notification when the turn completes.
-- Run `/wave:builder` for new features. Run `/jc` for hotfixes. Run `/pfm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
+- Run `/wave:builder` for new features. Run `/pfm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
 
 **When something feels wrong** after a few real pipelines:
 

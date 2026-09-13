@@ -48,7 +48,7 @@ Repo law is enforced at two layers — the kernel sandbox (workspace-write, the 
 
 6. **End-of-wave GATE-1** — dispatch the registered `qa-{project}` role in PRE-MERGE mode (full suite, zero tolerance, filtered + timed per Toolset). It writes `$WAVES/{wave}/gate1.md` and stamps the verdict `Executor: codex-subagent/qa_{project}`. A missing registered QA role is a gate failure, never an inline substitute.
 
-7. **Boundary mode** — GATE-2 suites + teardown are shell and therefore yours, exactly per builder.md § Boundary duties. The walker launch is NOT yours (no Workflow tool): ping `walker-launch request {report path}` and the orchestrator launches it. `/jc` fix-now rulings: implement the edit per the ruling, then dispatch registered gitter for JC-COMMIT — you never commit.
+7. **Boundary mode** — GATE-2 suites + teardown are shell and therefore yours, exactly per builder.md § Boundary duties. The walker launch is NOT yours (no Workflow tool): ping `walker-launch request {report path}` and the orchestrator launches it. You never commit — that stays with registered gitter.
 
 8. **Report cards** — identical, no adaptation: `$TASKS/task-{n}-report.md` per the BRIEF's env card, fixed headers, ≤1KB, `Expected:` / `Got:` deviations.
 

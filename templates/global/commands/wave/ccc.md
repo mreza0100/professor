@@ -1,6 +1,6 @@
 ---
 name: wave:ccc
-description: USER-ONLY — the user types /wave:ccc {train?} (default the newest under docs/dev/trains/); never run it unprompted. Control & Command Center — the standing seat over a running /wave:orchestrator train, verifying every DONE/green claim against the tree, ruling in-train escalations, dispatching only through the orchestrator. Triggers "take command of the train", "audit the train".
+description: USER-ONLY — /wave:ccc {train?}, default the newest under docs/dev/trains/. The standing Control & Command seat over a running /wave:orchestrator train — verifies every DONE or green claim against the tree, rules in-train escalations, dispatches only through the orchestrator.
 disable-model-invocation: true
 ---
 

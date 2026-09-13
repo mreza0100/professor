@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # PostToolUse hook — formats the one Professor-owned .md file just written, under
-# the repo-root `.rumdl.toml` policy (see /quality:forlint). Receives hook JSON
+# the repo-root `.rumdl.toml` policy (see /quality:md-forlint). Receives hook JSON
 # on stdin.
 #
 # What this reports when IT is broken: a missing `jq` or `rumdl`, and a failing

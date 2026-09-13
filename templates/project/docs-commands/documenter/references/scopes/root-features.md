@@ -23,6 +23,6 @@ Match criteria: name overlap, concept overlap, component overlap (same files/cha
 
 Skip if the features merge was skipped. Do NOT add new sections during ARCHIVE.
 
-## JC-UPDATE
+## FIX-UPDATE
 
 A hotfix that shipped a parked feature triggers the backlog-clean procedure above; purely a bug fix → features check only.

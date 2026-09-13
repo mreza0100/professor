@@ -1,12 +1,12 @@
 export const meta = {
   name: 'documenter-fanout',
-  description: 'Documentation consolidation engine — CANONICAL here (documenter.md § Orchestration is the pointer + scope table). Scouts a pipeline/hotfix blast radius into DISJOINT doc scopes (one Sonnet pass), a collector-tier no-op check drops zero-hit scopes pre-spawn, then fans out one spec-execution documenter per scope in parallel, each merging only its own write-set from its scope card. The parallel replacement for the single serial mono-documenter. Invoked for ARCHIVE (a completed pipeline; args.pipelineName + args.docsPath) and JC-UPDATE (a /jc hotfix; args.changeSummary); a small blast radius yields one or two workers, a wide one yields many.',
+  description: 'Documentation consolidation engine — CANONICAL here (documenter.md § Orchestration is the pointer + scope table). Scouts a pipeline or landed-fix blast radius into DISJOINT doc scopes (one Sonnet pass), a collector-tier no-op check drops zero-hit scopes pre-spawn, then fans out one spec-execution documenter per scope in parallel, each merging only its own write-set from its scope card. The parallel replacement for the single serial mono-documenter. Invoked for ARCHIVE (a completed pipeline; args.pipelineName + args.docsPath) and JC-UPDATE (a /jc hotfix; args.changeSummary); a small blast radius yields one or two workers, a wide one yields many.',
   phases: [{ title: 'Scout' }, { title: 'Consolidate' }],
 }
 
-// args: { mode: 'ARCHIVE'|'JC-UPDATE', pipelineName, docsPath?, epicName?, waveOwned?, changeSummary?, projects?, timestamp }
+// args: { mode: 'ARCHIVE'|'FIX-UPDATE', pipelineName, docsPath?, epicName?, waveOwned?, changeSummary?, projects?, timestamp }
 //  - ARCHIVE   → docsPath is the pipeline's $DOCS dir (0-task, 4-*, 5-dev-report*, legacy 1-plan/3-architecture*, …); epicName/waveOwned gate the epic scope.
-//  - JC-UPDATE → changeSummary describes the hotfix; projects lists the touched project keys (no $DOCS pipeline docs).
+//  - FIX-UPDATE → changeSummary describes the landed fix; projects lists the touched project keys (no $DOCS pipeline docs).
 // The harness may deliver args JSON-STRING-encoded — parse before validating.
 // Flow graph + spawn briefs are canonical here — documenter.md § Orchestration is the pointer + scope table; update both together.
 
@@ -15,8 +15,8 @@ if (typeof args === 'string') {
     throw new Error('documenter: args arrived as a string but is not valid JSON: ' + e.message)
   }
 }
-if (!args || !args.mode || (args.mode === 'ARCHIVE' && !args.docsPath) || (args.mode === 'JC-UPDATE' && !args.changeSummary)) {
-  throw new Error('documenter requires args.mode plus ARCHIVE→docsPath or JC-UPDATE→changeSummary; see documenter.md § Orchestration for the contract')
+if (!args || !args.mode || (args.mode === 'ARCHIVE' && !args.docsPath) || (args.mode === 'FIX-UPDATE' && !args.changeSummary)) {
+  throw new Error('documenter requires args.mode plus ARCHIVE→docsPath or FIX-UPDATE→changeSummary; see documenter.md § Orchestration for the contract')
 }
 
 const CMD = '.claude/commands/documenter.md'
@@ -58,7 +58,7 @@ async function resilient(prompt, opts) {
 const sourceBrief = args.mode === 'ARCHIVE'
   ? 'Mode ARCHIVE. Pipeline ' + args.pipelineName + ' just shipped; its decisions live in ' + args.docsPath + '/ (0-task.md, 4-*.md, 5-dev-report-*.md, 6-*.md, 7-post-merge-qa.md; legacy trails: 1-plan.md, 3-architecture*.md — read only what exists). ' +
     'Epic scope: ' + (args.waveOwned ? 'EXCLUDE it — this is a wave-owned build and the wave consolidates the epic.' : 'include an `epic` scope only when epicName is set (' + (args.epicName || 'none') + ') and resolves to an IN_PROGRESS manifest.')
-  : 'Mode JC-UPDATE. A /jc hotfix shipped on main: ' + args.changeSummary + '. Touched projects: ' + ((args.projects || []).join(', ') || 'derive from `git diff` of the last commit') + '. There is no pipeline $DOCS dir — verify the blast radius against the changed source itself (read-only git diff is fine). No epic scope in JC-UPDATE.'
+  : 'Mode FIX-UPDATE. A fix landed on main: ' + args.changeSummary + '. Touched projects: ' + ((args.projects || []).join(', ') || 'derive from `git diff` of the last commit') + '. There is no pipeline $DOCS dir — verify the blast radius against the changed source itself (read-only git diff is fine). No epic scope in JC-UPDATE.'
 
 function scoutAgent() {
   return resilient(
@@ -79,7 +79,7 @@ const DOC_BRIEF = (s, sourceLine) =>
   ' Structured output: status (OK | SKIP if nothing in your scope actually changed | FAIL), summary (the files you wrote).'
 
 function workerAgent(s) {
-  const sourceLine = args.mode === 'ARCHIVE' ? 'Mode ARCHIVE — pipeline docs: ' + args.docsPath + '/.' : 'Mode JC-UPDATE — hotfix: ' + args.changeSummary + '.'
+  const sourceLine = args.mode === 'ARCHIVE' ? 'Mode ARCHIVE — pipeline docs: ' + args.docsPath + '/.' : 'Mode FIX-UPDATE — fix: ' + args.changeSummary + '.'
   return resilient(DOC_BRIEF(s, sourceLine), { label: 'doc · ' + s.key, phase: 'Consolidate', model: 'sonnet', schema: STATUS })
 }
 

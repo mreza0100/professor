@@ -125,7 +125,7 @@ Written to `.professor/AUDIT/ai-output/{date}-{channel}.md`, in this order:
 - Verdict: FAITHFUL / MOSTLY FAITHFUL (N issues) / UNFAITHFUL — FIX REQUIRED.
 - Findings by severity (CRITICAL / HIGH / MEDIUM·LOW), each carrying subject · unit · index · field · Got vs Expected · source evidence.
 - Completeness — missed codable content, per subject.
-- The one root confusion that explains the most failures and where a single example would help most; prompt fixes route to `/km`, code/guard fixes to `/jc`.
+- The one root confusion that explains the most failures and where a single example would help most; prompt fixes route to `/km`, code/guard fixes are reported for the user to route.
 
 ---
 
@@ -157,4 +157,4 @@ Illustrative shape (replace with the real per-channel list): "Are the {DOMAIN_NO
 - **Evidence-based** — every finding references a specific unit index, a specific output field, and the prompt instruction it violates.
 - **Domain lens first** — a technically valid output that's misleading in the domain is still a failure.
 - **Sacred ground** — if the model is producing forbidden output ({FORBIDDEN_DOMAIN_OUTPUTS}), that's CRITICAL regardless of whether the prompt asked for it.
-- **Delegate fixes** — if findings warrant code changes, recommend `/jc` (single chain fix) or `/wave:orchestrator` (systematic migration). This skill diagnoses, it doesn't treat.
+- **Delegate fixes** — if findings warrant code changes, recommend `/wave:orchestrator` (systematic migration) or report the finding for the user to route directly (single chain fix). This skill diagnoses, it doesn't treat.

@@ -10,11 +10,10 @@ This is the **transplantable nervous system** — not a config dump. Built by th
 
 A complete `.claude/` infrastructure that turns Claude Code from "an AI that writes code when you ask" into **a self-disciplined engineering team with character**:
 
-- **The full cast** — The Professor (orchestrator), JC, PFM, Audit, plus optional Tier B archetypes (Officer, PM, Mentor, Marketer, KM). The harness prompt owns the Professor voice; working prompts carry their task contracts.
+- **The full cast** — The Professor (orchestrator), PFM, Audit, plus optional Tier B archetypes (Officer, PM, Mentor, Marketer, KM). The harness prompt owns the Professor voice; working prompts carry their task contracts.
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
 - **A pipeline that refuses cowboy coding** — `planner → architect → developer → QA → merge`. QA gates block bad code from reaching `main`. Only one agent (`gitter`) touches git.
 - **Self-improvement at the source** — a meta-agent (`/pfm`) edits the pipeline rules where they live instead of accumulating "lessons learned" files nobody reads.
-- **Hotfix mode** — `/jc` lets you bypass the full pipeline for surgical bug fixes, but still routes through tests + gitter.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths. Rename a directory once, every agent follows.
 - **Documentation discipline** — pipeline docs are temporary and archived; only one agent writes to permanent project docs.
 - **Memory backup (opt-in)** — a `SessionEnd` hook auto-syncs Claude's persistent project memory to a private repo on session end, so a machine wipe or new machine doesn't lose what Claude learned. Plain git, zero tokens.
@@ -88,7 +87,7 @@ For the manual path, see `SETUP.md`.
 
 Every command, agent, and rule in this blueprint sorts into one of three tiers:
 
-- **Tier A — Universal archetypes** ship with FULL CHARACTER. Domain references inside (the opted-in Tier B cast, JC's example stack traces) parameterize per install.
+- **Tier A — Universal archetypes** ship with FULL CHARACTER. Domain references inside (the opted-in Tier B cast, the Professor's example stack traces) parameterize per install.
 - **Tier B — Domain archetypes** ship as ARCHETYPE SKELETONS with placeholders. You fill in regulation, user persona, market, knowledge domain — the voice and structure are universal.
 - **Tier C — Pure mechanics** ship as INFRASTRUCTURE. No character; just role-defined plumbing.
 
@@ -101,11 +100,10 @@ See `SETUP.md` for the install interview and adaptation guidance.
 **Tier A — universal archetypes (ship with character):**
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
-- **/jc** — "Jesus Christ but make it cool." Chill panic-debugger with holy weight. The one command allowed to edit `main` directly.
 - **/pfm** — Professor Template Management. Edits pipeline rules at the source.
 - **/wave:{orchestrator,builder,refine,walker,live,schedule,watcher}, /dev, /git, /documenter** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:forlint`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`. `/rnd` is project-scope and spawns the `rndier` agent to execute one research run.
+**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:md-forlint`, `/audit:code-hygiene`, `/audit:security`, `/audit:ai-output`. `/rnd` is project-scope and spawns the `rndier` agent to execute one research run.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `engines/deep-rr/`; `architecture-design` ships in-tree under `templates/global/skills/architecture-design/`; `legal` is bundled under `templates/project/skills/`.
 
@@ -131,7 +129,7 @@ If you find a tech-specific assumption leaking through after install (e.g., a ha
 
 ## A note on character
 
-**Personality is load-bearing, not decoration.** Strip the Professor's voice and you have a Confluence wiki. Strip JC's panic energy and the hotfix command becomes a checklist. Strip Professor's cross-disciplinary depth and the analysis becomes generic.
+**Personality is load-bearing, not decoration.** Strip the Professor's voice and you have a Confluence wiki. Strip Professor's cross-disciplinary depth and the analysis becomes generic.
 
 The blueprint deliberately does NOT offer a "no character" mode. If you want sterile agents, this isn't the blueprint for you. If you want agents with voice, identity, and signature traits — refitted to your domain — read on.
 

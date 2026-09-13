@@ -67,17 +67,14 @@ An `ERRORS` value other than `none` adds an "Errors detected" section carrying t
 
 ## Auto-Heal Escalation
 
-Applies to UP, RESTART, DROP-with-restart and FRESH, after the report is shown. Skip it when `DEV_NO_AUTOHEAL=1` is set — that flag breaks the `/dev` → `/jc` → `/dev` loop.
+Applies to UP, RESTART, DROP-with-restart and FRESH, after the report is shown. Skip it when `DEV_NO_AUTOHEAL=1` is set.
 
 Escalate when a service is RED, `ERRORS` is not `none`, or `RESTART_RESULT=fail`:
 
-1. Tell the user: "One or more services came up unhealthy — calling JC to diagnose and fix. ☕"
-2. Read the last 30 lines of each failing service's log (`tmp/dev/{project}.log`).
-3. Invoke `/jc` with the RED service list, the `ERRORS` value, the log details, and the instruction to fix and restart the failing service(s) with `DEV_NO_AUTOHEAL=1` set.
+1. Read the last 30 lines of each failing service's log (`tmp/dev/{project}.log`).
+2. Report the RED service list, the `ERRORS` value, and the log details.
 
 Healthy, not failures: a bundling/compiling project YELLOW, `ALREADY_RUNNING=true`, all-GREEN with `CREDENTIALS_FILE=MISSING`.
-
-When JC restarts a service it fixed, `/dev restart {project}` bounces just that one.
 
 ---
 

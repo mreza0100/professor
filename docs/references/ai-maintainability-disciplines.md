@@ -47,8 +47,6 @@ Structural enforcement closes the gap:
 | `--allowedTools` flag | Per-session | Tool restriction |
 | Permission allowlists | Glob-pattern | File access control |
 
-The instructional rule covers the `/jc` hotfix path where worktree isolation does not apply.
-
 ### Sources
 
 - Karpathy CLAUDE.md analysis (forrestchang/andrej-karpathy-skills, 100K+ GitHub stars)
