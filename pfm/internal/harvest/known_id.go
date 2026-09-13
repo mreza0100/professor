@@ -175,7 +175,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 		// Name only what was ACTUALLY queried: Unpaywall is gated on an operator
 		// email, so a keyless run must not claim to have checked it.
-		checked := "OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, CORE, DOAJ, arXiv/ar5iv/OSF, and the Wayback Machine"
+		checked := "OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, Crossref, CORE, DOAJ, arXiv/ar5iv/OSF, and the Wayback Machine"
 		skipped := " Unpaywall was SKIPPED — it requires an operator email (scholarly.contactEmail in harvester.config.json)."
 		if h.resolver().contact() != "" {
 			checked = "Unpaywall, " + checked
