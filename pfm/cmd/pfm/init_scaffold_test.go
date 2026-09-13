@@ -48,7 +48,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		".claude/skills/legal/SKILL.md",
 		".claude/workflows/audit.js",
 		".codex/config.toml",
-		"docs/commands/jc/references/jc-core.md",
+		"docs/commands/wave/references/fix-core.md",
 		"docs/agents/_index.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
@@ -151,19 +151,19 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		content string
 		mode    os.FileMode
 	}{
-		"VERSION":                                                  {content: "0.65.0\n", mode: 0o600},
-		"templates/project/CLAUDE.md":                              {content: "# {TOKEN} contract\n", mode: 0o600},
-		"templates/project/settings.json":                          {content: "{}\n", mode: 0o600},
-		"templates/project/rumdl-policy.toml":                      {content: "# fixture rumdl policy\n[global]\n", mode: 0o600},
-		"templates/project/commands/dev.md":                        {content: "---\nname: dev\n---\n{TOKEN}\n", mode: 0o600},
-		"templates/project/agents/gitter.md":                       {content: "---\nname: gitter\n---\nbody\n", mode: 0o600},
-		"templates/project/agents/per-project/developer.md":        {content: "---\nname: developer\n---\nbody\n", mode: 0o600},
-		"templates/project/scripts/dev.sh":                         {content: "#!/usr/bin/env bash\nset -euo pipefail\n", mode: 0o755},
-		"templates/project/skills/legal/SKILL.md":                  {content: "---\nname: legal\n---\nbody\n", mode: 0o600},
-		"templates/project/workflows/audit.js":                     {content: "export default {};\n", mode: 0o600},
-		"templates/project/codex/config.toml":                      {content: "model = \"{TOKEN}\"\n", mode: 0o600},
-		"templates/project/docs-commands/jc/references/jc-core.md": {content: "# JC\n", mode: 0o600},
-		"templates/project/docs-agents/_index.md":                  {content: "# Agents\n", mode: 0o600},
+		"VERSION":                                                     {content: "0.65.0\n", mode: 0o600},
+		"templates/project/CLAUDE.md":                                 {content: "# {TOKEN} contract\n", mode: 0o600},
+		"templates/project/settings.json":                             {content: "{}\n", mode: 0o600},
+		"templates/project/rumdl-policy.toml":                         {content: "# fixture rumdl policy\n[global]\n", mode: 0o600},
+		"templates/project/commands/dev.md":                           {content: "---\nname: dev\n---\n{TOKEN}\n", mode: 0o600},
+		"templates/project/agents/gitter.md":                          {content: "---\nname: gitter\n---\nbody\n", mode: 0o600},
+		"templates/project/agents/per-project/developer.md":           {content: "---\nname: developer\n---\nbody\n", mode: 0o600},
+		"templates/project/scripts/dev.sh":                            {content: "#!/usr/bin/env bash\nset -euo pipefail\n", mode: 0o755},
+		"templates/project/skills/legal/SKILL.md":                     {content: "---\nname: legal\n---\nbody\n", mode: 0o600},
+		"templates/project/workflows/audit.js":                        {content: "export default {};\n", mode: 0o600},
+		"templates/project/codex/config.toml":                         {content: "model = \"{TOKEN}\"\n", mode: 0o600},
+		"templates/project/docs-commands/wave/references/fix-core.md": {content: "# Fix Core\n", mode: 0o600},
+		"templates/project/docs-agents/_index.md":                     {content: "# Agents\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))
