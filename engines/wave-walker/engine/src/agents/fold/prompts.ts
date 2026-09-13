@@ -61,7 +61,7 @@ export const buildFold = ({
       (finalJudge.rationale || '') +
       '\n'
     : '') +
-  'Fold rules: every functional defect (thread) AND every confirmed ledger anomaly AND every digest fix AND every security finding becomes a `### /jc Action Items` line (deduped — a thread defect and a ledger anomaly at the same anchor are ONE item). ' +
+  'Fold rules: every functional defect (thread) AND every confirmed ledger anomaly AND every digest fix AND every security finding becomes a `### Action Items` line (deduped — a thread defect and a ledger anomaly at the same anchor are ONE item). ' +
   (finalJudge
     ? 'ADOPT the FINAL JUDGMENT verdict verbatim; fold each missedRisk into the review (fixable → an action item, else Unproven/needs-eyes). '
     : '') +
@@ -83,6 +83,6 @@ export const buildFold = ({
       telemetryMd +
       '\n'
     : '') +
-  "Report format (per wave/walker.md § Report Format): ## Professor's Wave Review (Wave · Date · Verdict); Executive Summary; Thread Walk table; Ledger Anomalies by rule (Expected/Got + anchors + severity); Territory Digests; Security Audit (per-category Expected/Got, or None); ### /jc Action Items; Coverage.\n" +
+  "Report format (per wave/walker.md § Report Format): ## Professor's Wave Review (Wave · Date · Verdict); Executive Summary; Thread Walk table; Ledger Anomalies by rule (Expected/Got + anchors + severity); Territory Digests; Security Audit (per-category Expected/Got, or None); ### Action Items; Coverage.\n" +
   'Verdict: SMOOTH SAILING (nothing) | MOSTLY GOOD (minor only) | ROUGH SEAS (a confirmed high or a BROKEN thread) | SHIPWRECK (a confirmed critical / security, or multiple broken flows).' +
-  ' Structured output: verdict, actionItems (verbatim /jc lines), review (the full markdown you wrote).';
+  ' Structured output: verdict, actionItems (verbatim action-item lines), review (the full markdown you wrote).';

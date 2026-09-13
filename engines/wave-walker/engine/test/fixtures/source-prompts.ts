@@ -58,7 +58,7 @@ export const expectedScout = ({
       '`. The report carries the wave manifest + slice list for context. changedFileCount = run `git diff --name-only main...' +
       branch +
       ' | wc -l` as a SEPARATE command and copy its printed integer EXACTLY — never the length of your enumerated list. The engine FAILS the walk when list and count disagree: enumerate EVERY file the diff prints, no salience filtering, no truncation.\n'
-    : '1) From the report — a `**Merge SHA:**` line (the dual-chat wave writes one at MERGE) and/or the Final Summary / Grouping / `## JC Pre-flight` sections: list SUCCEEDED pipeline merge SHAs (mergeShas) and any JC commits. Run `git diff {merge}^1 {merge}` per merge SHA (`git show {sha}` for a JC fix) and union into changedFiles (the integrated changed-and-generated set). headSha = git rev-parse HEAD. changedFileCount = re-run the same name-only diffs (`git diff --name-only {merge}^1 {merge}` per merge, `git show --name-only --format= {sha}` per JC commit) in ONE piped command through `sort -u | wc -l` and copy the printed integer EXACTLY — never the length of your enumerated list. The engine FAILS the walk when list and count disagree: enumerate EVERY file, no salience filtering, no truncation.\n') +
+    : '1) From the report — a `**Merge SHA:**` line (the dual-chat wave writes one at MERGE) and/or the Final Summary / Grouping / `## Pre-flight` sections: list SUCCEEDED pipeline merge SHAs (mergeShas) and any direct fix commits. Run `git diff {merge}^1 {merge}` per merge SHA (`git show {sha}` for a direct fix commit) and union into changedFiles (the integrated changed-and-generated set). headSha = git rev-parse HEAD. changedFileCount = re-run the same name-only diffs (`git diff --name-only {merge}^1 {merge}` per merge, `git show --name-only --format= {sha}` per fix commit) in ONE piped command through `sort -u | wc -l` and copy the printed integer EXACTLY — never the length of your enumerated list. The engine FAILS the walk when list and count disagree: enumerate EVERY file, no salience filtering, no truncation.\n') +
   '2) THREADS — the functional/hygiene walk manifest (the proven floor). Read ' +
   walkerDoc +
   ' § Role: Scout for the thread taxonomy; aim for >= 4, one per feature flow plus a thread for each seam, field, schema change, invariant, test-data-discipline, or dead-code-ripple the diff puts at risk. Emit a Field thread with an explicit READ-BACK check for EVERY new persisted field (writer AND reader mapping). Each: id, type, name, scope, files, verify.\n' +
@@ -122,7 +122,7 @@ export const expectedThreadWalker = ({
   JSON.stringify(thread) +
   '.' +
   RO +
-  ' Structured output: threadId, name, type, flow (INTACT|AT-RISK|BROKEN|N/A), trace (step → step, marking any break), defects (each {what, location=file:line, failureScenario, jc=`/jc {fix}`}), hygiene (each {kind, where=file:line, detail, jc}), notes.';
+  ' Structured output: threadId, name, type, flow (INTACT|AT-RISK|BROKEN|N/A), trace (step → step, marking any break), defects (each {what, location=file:line, failureScenario, fix=`{one-line fix}`}), hygiene (each {kind, where=file:line, detail, fix}), notes.';
 
 // ── sliceSensor (source lines 455-467) ──
 export const expectedSliceSensor = ({
@@ -259,7 +259,7 @@ export const expectedAnomalyJudge = ({
   ': ' +
   ruleMeaning +
   '\n' +
-  "For EACH instance: open the file(s) at the cited anchors (BOTH ends where two are given), confirm the facts, and rule CONFIRMED (severity, one-sentence what, location=file:line, fix=`/jc {fix}`), FALSE (say why), or UNPROVEN (say what is missing). When a claimed fix or consumer handles a produced SHAPE (a response envelope, an error body, a message payload), also open the PRODUCER that actually emits it — middleware, service, emitter — even when it sits outside the cited anchors; a test's fabricated envelope is never evidence the shapes agree. Judge evidence, not vibes.\n" +
+  "For EACH instance: open the file(s) at the cited anchors (BOTH ends where two are given), confirm the facts, and rule CONFIRMED (severity, one-sentence what, location=file:line, fix=`{one-line fix}`), FALSE (say why), or UNPROVEN (say what is missing). When a claimed fix or consumer handles a produced SHAPE (a response envelope, an error body, a message payload), also open the PRODUCER that actually emits it — middleware, service, emitter — even when it sits outside the cited anchors; a test's fabricated envelope is never evidence the shapes agree. Judge evidence, not vibes.\n" +
   (sec
     ? 'SECURITY: this rule enforces a WRITTEN project invariant. "Every sibling does it the same way" is NOT a defense — a documented-rule violation is CONFIRMED even when it is the file-wide pattern.' +
       (authDoc ? ' Read ' + authDoc + ' before any FALSE.\n' : '\n')
@@ -450,7 +450,7 @@ export const expectedFold = (a: {
       (a.finalJudge.rationale || '') +
       '\n'
     : '') +
-  'Fold rules: every functional defect (thread) AND every confirmed ledger anomaly AND every digest fix AND every security finding becomes a `### /jc Action Items` line (deduped — a thread defect and a ledger anomaly at the same anchor are ONE item). ' +
+  'Fold rules: every functional defect (thread) AND every confirmed ledger anomaly AND every digest fix AND every security finding becomes a `### Action Items` line (deduped — a thread defect and a ledger anomaly at the same anchor are ONE item). ' +
   (a.finalJudge
     ? 'ADOPT the FINAL JUDGMENT verdict verbatim; fold each missedRisk into the review (fixable → an action item, else Unproven/needs-eyes). '
     : '') +
@@ -459,9 +459,9 @@ export const expectedFold = (a: {
     ? ', AND the security files-opened denominator with every UNSWEPT file'
     : '') +
   '.\n' +
-  "Report format (per wave/walker.md § Report Format): ## Professor's Wave Review (Wave · Date · Verdict); Executive Summary; Thread Walk table; Ledger Anomalies by rule (Expected/Got + anchors + severity); Territory Digests; Security Audit (per-category Expected/Got, or None); ### /jc Action Items; Coverage.\n" +
+  "Report format (per wave/walker.md § Report Format): ## Professor's Wave Review (Wave · Date · Verdict); Executive Summary; Thread Walk table; Ledger Anomalies by rule (Expected/Got + anchors + severity); Territory Digests; Security Audit (per-category Expected/Got, or None); ### Action Items; Coverage.\n" +
   'Verdict: SMOOTH SAILING (nothing) | MOSTLY GOOD (minor only) | ROUGH SEAS (a confirmed high or a BROKEN thread) | SHIPWRECK (a confirmed critical / security, or multiple broken flows).' +
-  ' Structured output: verdict, actionItems (verbatim /jc lines), review (the full markdown you wrote).';
+  ' Structured output: verdict, actionItems (verbatim action-item lines), review (the full markdown you wrote).';
 
 // ── claimExtractor (source lines 75-77 + the E2 breadth clause — the ONE intended extractor-prompt
 // change: "Target ~4-6 claims per task, covering EVERY task — breadth across tasks before depth within

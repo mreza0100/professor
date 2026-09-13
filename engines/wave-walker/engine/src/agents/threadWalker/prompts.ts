@@ -25,7 +25,7 @@ export const buildThreadWalker = ({
   JSON.stringify(thread) +
   '.' +
   RO +
-  ' Structured output: threadId, name, type, flow (INTACT|AT-RISK|BROKEN|N/A), trace (step → step, marking any break), defects (each {what, location=file:line, failureScenario, jc=`/jc {fix}`}), hygiene (each {kind, where=file:line, detail, jc}), notes.' +
+  ' Structured output: threadId, name, type, flow (INTACT|AT-RISK|BROKEN|N/A), trace (step → step, marking any break), defects (each {what, location=file:line, failureScenario, fix=`{one-line fix}`}), hygiene (each {kind, where=file:line, detail, fix}), notes.' +
   (charter
     ? '\nWALK CHARTER (caller-supplied duty): ' +
       charter +

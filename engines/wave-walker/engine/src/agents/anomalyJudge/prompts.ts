@@ -18,7 +18,7 @@ export const buildAnomalyJudge = ({
   ': ' +
   ruleMeaning +
   '\n' +
-  "For EACH instance: open the file(s) at the cited anchors (BOTH ends where two are given), confirm the facts, and rule CONFIRMED (severity, one-sentence what, location=file:line, fix=`/jc {fix}`), FALSE (say why), or UNPROVEN (say what is missing). When a claimed fix or consumer handles a produced SHAPE (a response envelope, an error body, a message payload), also open the PRODUCER that actually emits it — middleware, service, emitter — even when it sits outside the cited anchors; a test's fabricated envelope is never evidence the shapes agree. Judge evidence, not vibes.\n" +
+  "For EACH instance: open the file(s) at the cited anchors (BOTH ends where two are given), confirm the facts, and rule CONFIRMED (severity, one-sentence what, location=file:line, fix=`{one-line fix}`), FALSE (say why), or UNPROVEN (say what is missing). When a claimed fix or consumer handles a produced SHAPE (a response envelope, an error body, a message payload), also open the PRODUCER that actually emits it — middleware, service, emitter — even when it sits outside the cited anchors; a test's fabricated envelope is never evidence the shapes agree. Judge evidence, not vibes.\n" +
   (sec
     ? 'SECURITY: this rule enforces a WRITTEN project invariant. "Every sibling does it the same way" is NOT a defense — a documented-rule violation is CONFIRMED even when it is the file-wide pattern.' +
       (authDoc ? ' Read ' + authDoc + ' before any FALSE.\n' : '\n')
