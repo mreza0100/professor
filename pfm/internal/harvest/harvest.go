@@ -222,6 +222,13 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	if hops, ok := ctx.Value(bibliographicLandingHopKey{}).(int); ok {
 		landingHops = hops
 	}
+	// appShellText is the detected app shell's text (see appshell.go). Once set,
+	// every later rung's content that is still the shell is rejected, and the
+	// usual "longer than the earlier rung" test is dropped: a real render of the
+	// route may be SHORTER than the shell's explainer.
+	appShellText, _ := ctx.Value(appShellKey{}).(string)
+	appShellInherited := appShellText != ""
+	browserShellRender := false
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case "pdf", "docx", "xlsx", "pptx", "csv", "zip", "tar", "7z", "rar":
@@ -325,6 +332,16 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		if kind == "html" && contentChars(converted) < 500 {
 			continue
 		}
+		if kind == "html" && !googleDriveFile {
+			if appShellText != "" {
+				if sameAsShell(appShellText, converted) {
+					continue
+				}
+			} else if looksLikeClientApp(body) && h.probeAppShell(ctx, rung.client, rung.ua, fetchTarget, body) {
+				appShellText = converted
+				continue
+			}
+		}
 		if kind == "html" {
 			if localized, localizeErr := h.LocalizeImages(ctx, converted, source); localizeErr == nil {
 				converted = localized
@@ -362,7 +379,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			// original HTML-source kind for cache/type semantics.
 			kind := "html"
 			converted, convErr := stripJinaEnvelope(string(body)), error(nil)
-			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) {
+			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) && !sameAsShell(appShellText, converted) {
 				return h.storeResult(source, kind, "jina", converted, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -375,7 +392,8 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := stripDefuddleEnvelope(string(body))
-			if usableContent(converted, "html") && contentChars(converted) > lastContentChars && !isBibliographicLanding(converted) {
+			longer := contentChars(converted) > lastContentChars || appShellText != ""
+			if usableContent(converted, "html") && longer && !isBibliographicLanding(converted) && !sameAsShell(appShellText, converted) {
 				return h.storeResult(source, "html", "defuddle-reader", converted, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -430,8 +448,13 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 						// "the wall won".
 						converterOutage = true
 						log.Printf("harvest: browser rung conversion failed for %s: %v", source, convErr)
+					} else if sameAsShell(appShellText, converted) {
+						// The bundle did not produce route content in a real
+						// browser either — the render is still the shell.
+						browserShellRender = true
+						log.Printf("harvest: browser rung rendered only the app shell for %s", source)
 					} else if usableContent(converted, "html") && !isBibliographicLanding(converted) &&
-						contentChars(converted) > lastContentChars && contentChars(converted) >= 500 {
+						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500 {
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
 						// a shell, not the article.
@@ -499,7 +522,13 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) {
 		rungs = append(rungs, "wayback")
 		if snapshot, wbErr := WaybackRawURL(ctx, h.oa, source); wbErr == nil && snapshot != "" {
-			if result := h.fetchURLWithPolicy(ctx, snapshot, options, false); result.Error == "" {
+			snapshotCtx := ctx
+			if appShellText != "" {
+				// A snapshot of a client-rendered route is the same shell; the
+				// recursion rejects it before it is stored.
+				snapshotCtx = context.WithValue(ctx, appShellKey{}, appShellText)
+			}
+			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" {
 				result.Source = source
 				result.Rungs = append([]string(nil), rungs...)
 				return result
@@ -548,11 +577,19 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// not an outage), COULD NOT RUN (enabled but the environment/launch
 	// failed — an outage, not proof of IP reputation), RAN BUT CONVERSION
 	// FAILED (the wall was beaten and the tool dropped it — an outage),
-	// RAN AND RETURNED AN EMPTY PAGE, RAN AND STILL BLOCKED. The addendum
-	// fires on ANY challenge terminal, including one only the browser surface
-	// identified, on an empty render, and whenever the rung ran at all so a
-	// completed attempt is never silent.
-	if guess != "pdf" && (lastChallenge || browserRan || browserPolicyRefused) {
+	// RAN AND RETURNED AN EMPTY PAGE, RAN AND RENDERED ONLY THE APP SHELL,
+	// RAN AND STILL BLOCKED. The addendum fires on ANY challenge or app-shell
+	// terminal, including one only the browser surface identified, on an
+	// empty render, and whenever the rung ran at all so a completed attempt
+	// is never silent.
+	appShellFailure := appShellText != "" && !appShellInherited
+	if appShellFailure {
+		// The static page was READ and proved route-independent: an app
+		// shell is a named failure, never a generic wall and never content.
+		lastErrorKind = "app_shell"
+		message = fmt.Sprintf("%s is a JavaScript app shell: a sibling path that cannot exist returned the same page, so its static HTML is identical for every route and this route's content only exists after the app's JavaScript runs. No rendering rung returned the route's content.", source)
+	}
+	if appShellFailure || (guess != "pdf" && (lastChallenge || browserRan || browserPolicyRefused)) {
 		switch {
 		case !h.settings.browser:
 			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set fetch.browser=true in harvester.config.json to enable it."
@@ -564,6 +601,8 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			message += fmt.Sprintf(" The real-browser rung (fetch.browser) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.", browserUnavailable)
 		case browserEmptyRender:
 			message += " The real-browser rung DID run and returned an EMPTY page — a completed attempt with nothing usable, not an outage."
+		case browserShellRender:
+			message += " The real-browser rung DID run and rendered only the shell — the app's JavaScript produced no route content in a real browser either."
 		case browserRan:
 			message += " The real-browser rung (Patchright + system Chrome) DID run against this wall and still could not pass it."
 		}
