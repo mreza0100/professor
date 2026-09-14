@@ -320,8 +320,13 @@ func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 // current directory — the bare `pfm update` post-report finding no baseline
 // to check. This is not a failure: the blueprint refresh already succeeded,
 // and a directory outside any project is an ordinary place to run it from.
+//
+// It is NOT the missing-baseline error: the update prompt runs `pfm update`
+// from the source clone, and that error's `pfm init` advice would steer the
+// adopter to scaffold the clone itself. It names the step that finishes an
+// update instead.
 func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
-	terminal := "NOT-MANAGED — " + errBaselineNotFound.Error()
+	terminal := "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm update check` inside each adopted project"
 	if jsonOutput {
 		if encodeErr := json.NewEncoder(stdout).Encode(map[string]any{"terminal": terminal}); encodeErr != nil {
 			fmt.Fprintf(stdout, "NOT-MANAGED — encode project report: %v\n", encodeErr)

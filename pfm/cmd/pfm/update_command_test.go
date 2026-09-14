@@ -276,9 +276,17 @@ func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	var human bytes.Buffer
 	writeProjectUnmanaged(&human, false)
-	wantHuman := "NOT-MANAGED — " + errBaselineNotFound.Error() + "\n"
-	if got := human.String(); got != wantHuman {
-		t.Fatalf("writeProjectUnmanaged(human) = %q, want %q", got, wantHuman)
+	got := human.String()
+	if !strings.HasPrefix(got, "NOT-MANAGED — ") || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("writeProjectUnmanaged(human) = %q, want one NOT-MANAGED — line", got)
+	}
+	// REGRESSION (v0.77.2 release rehearsal): the update prompt runs `pfm update`
+	// from the source clone, where this terminal is expected. It used to reuse
+	// the missing-baseline error, which steers the adopter to `pfm init` the
+	// clone; it must instead name the per-project check that finishes the update.
+	// Watched failing against the build that printed missingBaselineMessage here.
+	if !strings.Contains(got, "pfm update check") || strings.Contains(got, "pfm init") {
+		t.Fatalf("writeProjectUnmanaged(human) = %q, want the `pfm update check` next step and no `pfm init` advice", got)
 	}
 
 	var jsonBuf bytes.Buffer
