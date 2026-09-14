@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1717,5 +1718,81 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".claude", "themes", "x.json")); !os.IsNotExist(statErr) {
 		t.Fatalf("non-JSON bundled file was installed anyway: %v", statErr)
+	}
+}
+
+func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
+	baseBody := `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#c95cff","promptBorder":"#7c4dff","promptBorderShimmer":"#aa8bff"}}`
+	overlay := `{"name":"Professor Gold","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
+	var baseStatus int
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/tokyo-night.json" {
+			http.NotFound(response, request)
+			return
+		}
+		if baseStatus != 0 {
+			http.Error(response, "base down", baseStatus)
+			return
+		}
+		_, _ = io.WriteString(response, baseBody)
+	}))
+	t.Cleanup(server.Close)
+	sourceRepo := t.TempDir()
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), fmt.Sprintf(`{
+  "source_fetched": {"tokyo-night": {"repo": %q, "raw": %q, "target": "~/.claude/themes/tokyo-night.json", "activate": "/theme", "requires": "fixture"}},
+  "bundled": {"professor-gold": {"file": "professor-gold.json", "base": "tokyo-night", "target": "~/.claude/themes/professor-gold.json", "activate": "/theme", "requires": "fixture"}}
+}`, server.URL, server.URL+"/tokyo-night.json"))
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "professor-gold.json"), overlay)
+	run := func() (string, error) {
+		var output bytes.Buffer
+		_, err := Run(context.Background(), Options{
+			Mode: ModeApply, Home: t.TempDir(), SourceRepo: sourceRepo, Stdout: &output,
+			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
+		})
+		return output.String(), err
+	}
+	home := t.TempDir()
+	var output bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
+	}); err != nil {
+		t.Fatalf("overlay install: %v\n%s", err, output.String())
+	}
+	var merged struct {
+		Name      string            `json:"name"`
+		Base      string            `json:"base"`
+		Overrides map[string]string `json:"overrides"`
+	}
+	if err := json.Unmarshal([]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "professor-gold.json"))), &merged); err != nil {
+		t.Fatalf("merged overlay is not JSON: %v", err)
+	}
+	if merged.Name != "Professor Gold" || merged.Base != "dark" || merged.Overrides["claude"] != "#c95cff" ||
+		merged.Overrides["promptBorder"] != "#ffd60a" || merged.Overrides["promptBorderShimmer"] != "#fff7c2" {
+		t.Fatalf("merged overlay=%#v, want the base palette with the overlay's name and two prompt-border keys", merged)
+	}
+
+	baseStatus = http.StatusServiceUnavailable
+	failedOutput, err := run()
+	if err != nil {
+		t.Fatalf("base fetch failure aborted host install: %v\n%s", err, failedOutput)
+	}
+	if !strings.Contains(failedOutput, "theme professor-gold base tokyo-night fetch failed") || !strings.Contains(failedOutput, "503") {
+		t.Fatalf("base fetch failure was silent or vague:\n%s", failedOutput)
+	}
+
+	for _, tc := range []struct{ name, base, overlay, want string }{
+		{"blank base", `{"name":"Tokyo Night","base":"dark"}`, overlay, "base palette carries no overrides"},
+		{"blank overlay", baseBody, `{"name":"Professor Gold"}`, "overlay carries no overrides"},
+		{"non-JSON base", `{"name":`, overlay, "decode base palette"},
+	} {
+		if _, err := mergeThemeOverlay([]byte(tc.base), []byte(tc.overlay)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
+		}
+	}
+
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{"bundled":{"professor-gold":{"file":"professor-gold.json","base":"nope","target":"~/.claude/themes/professor-gold.json"}}}`)
+	if _, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo}); err == nil || !strings.Contains(err.Error(), `bundled theme "professor-gold" base "nope" is not a source_fetched theme`) {
+		t.Fatalf("unknown base err=%v, want a named manifest refusal", err)
 	}
 }
