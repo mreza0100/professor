@@ -319,6 +319,14 @@ act_templates() { # the shipped product: mechanical gates, no build
   esac
 }
 
+gofmt_clean() { # gofmt_clean <dir> — 1 when gofmt lists a file, 2 when gofmt could not run
+  local out
+  out="$(gofmt -l "$1")" || { echo "gofmt could not run over $1 — NO file was checked" >&2; return 2; }
+  [[ -z "$out" ]] && return 0
+  printf 'unformatted (run gofmt -w under the pinned Go):\n%s\n' "$out" >&2
+  return 1
+}
+
 act_pfm() {
   local action="$1" d; d="$(proj_dir pfm)"
   need_tool go pfm || return 0
@@ -328,6 +336,10 @@ act_pfm() {
     typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
     verify)
       run "pfm: go vet" -- go -C "$d" vet ./...
+      # CI's gofmt step, under the same pinned Go: gofmt output differs across
+      # Go releases, so a host gofmt newer than go.mod's can call this clean
+      # while CI refuses it — run through `iso` for the verdict CI will give.
+      run "pfm: gofmt" -- gofmt_clean "$d"
       # The architecture ratchet (C1–C16 vs pfm/.arch/). Its own broken state
       # is rc 2 (an enumerator or grep that could not run), never a PASS.
       run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh" ;;
