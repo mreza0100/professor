@@ -125,6 +125,98 @@ func TestVSCodeUninstallPreservesEditedLegacyProfile(t *testing.T) {
 	}
 }
 
+// TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable pins vscodeProfile
+// itself: alongside PFM_AUTO_OPEN, the five chat-identity keys a launcher app
+// could inherit and hand to a fresh VS Code terminal must ride as JSON null
+// (VS Code's documented "delete this inherited var" spelling), never absent
+// and never a non-null placeholder value.
+func TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable(t *testing.T) {
+	profile := vscodeProfile()
+	env, ok := profile["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("vscodeProfile() env is not a map: %#v", profile["env"])
+	}
+	if env["PFM_AUTO_OPEN"] != "pfm" {
+		t.Fatalf("vscodeProfile() env PFM_AUTO_OPEN = %v, want \"pfm\"", env["PFM_AUTO_OPEN"])
+	}
+	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
+		value, present := env[key]
+		if !present {
+			t.Fatalf("vscodeProfile() env is missing %s entirely, want JSON null", key)
+		}
+		if value != nil {
+			t.Fatalf("vscodeProfile() env[%s] = %v, want JSON null", key, value)
+		}
+	}
+	encoded, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
+		if !strings.Contains(string(encoded), `"`+key+`":null`) {
+			t.Fatalf("vscodeProfile() JSON does not spell %s as null: %s", key, encoded)
+		}
+	}
+}
+
+// TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical proves
+// isLegacyVSCodeProfile recognizes the shape vscodeProfile() wrote BEFORE
+// this change — {"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm"}},
+// with no chat-identity keys at all — as pfm's own earlier install, so an
+// owned profile in that exact shape is upgraded rather than refused as an
+// operator edit.
+func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	writeFixture(t, settings, `{
+  "terminal.integrated.profiles.linux": {
+    "PFM": {"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm"}}
+  },
+  "terminal.integrated.defaultProfile.linux": "PFM"
+}`)
+	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
+		Path: settings, Platform: "linux", ProfileOwned: true, DefaultOwned: true,
+	})
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFixture(t, settings)
+	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
+		if !strings.Contains(got, `"`+key+`": null`) {
+			t.Fatalf("owned previous-canonical profile was not upgraded to null %s:\n%s", key, got)
+		}
+	}
+}
+
+// TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved proves the upgrade
+// in TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical is
+// exact-shape only: a profile that already diverges from every recognized
+// legacy shape (an operator's own PFM_AUTO_OPEN value) is left byte-for-byte
+// alone, the same law TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved
+// already pins for the CC_AUTO_OPEN spelling.
+func TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"operator-choice"}}}}`
+	writeFixture(t, settings, original)
+	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{Path: settings, Platform: "linux", ProfileOwned: true})
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFixture(t, settings)
+	if !strings.Contains(got, `"PFM_AUTO_OPEN":"operator-choice"`) || strings.Contains(got, "CLAUDECODE") {
+		t.Fatalf("hand-edited previous-canonical profile was overwritten:\n%s", got)
+	}
+}
+
 func writeVSCodeOwnershipFixture(t *testing.T, home string, record vscodeOwnershipRecord) {
 	t.Helper()
 	ledger, err := json.Marshal(vscodeOwnershipDocument{

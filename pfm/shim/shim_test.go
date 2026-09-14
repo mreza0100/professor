@@ -211,6 +211,56 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 	}
 }
 
+// TestShimAutoOpenSkipOnAnInheritedCLAUDECODESaysSoOnAnInteractiveTTY pins the
+// visibility half of the recursion guard: PFM_AUTO_OPEN set AND CLAUDECODE
+// set AND a real tty attached to stderr (via testjail.PTYCommand, the only
+// way this repo drives [[ -t 2 ]] true) must both skip the picker AND print
+// the named stderr line. The table-driven "inside chat" case in
+// TestShimAutoOpenDefersDisarmsAndMapsLegacyValuesToPicker pins the other
+// half: a non-interactive, non-tty shell (a chat's own Bash-tool shell) stays
+// completely silent.
+func TestShimAutoOpenSkipOnAnInheritedCLAUDECODESaysSoOnAnInteractiveTTY(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skip("script is not installed")
+	}
+	shimPath := embeddedShimPath(t)
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeShimFile(t, filepath.Join(binDir, "pfm"), `#!/bin/sh
+printf 'PICKER-LAUNCHED\n'
+`)
+	driver := filepath.Join(home, "driver.zsh")
+	writeShimFile(t, driver, "source "+quoteZsh(shimPath)+"\n")
+
+	command := testjail.PTYCommand(zsh, "-fi", driver)
+	command.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH="+binDir+":/usr/bin:/bin",
+		"TERM=dumb",
+		"PFM_AUTO_OPEN=pfm",
+		"CLAUDECODE=1",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run auto-open shell on a pty: %v: %s", err, output)
+	}
+	got := string(output)
+	want := "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit and relaunch it from the Dock"
+	if !strings.Contains(got, want) {
+		t.Fatalf("interactive tty with inherited CLAUDECODE did not report the skip:\n%q", got)
+	}
+	if strings.Contains(got, "PICKER-LAUNCHED") {
+		t.Fatalf("interactive tty with inherited CLAUDECODE still opened the picker:\n%q", got)
+	}
+}
+
 func runAutoOpenShell(t *testing.T, zsh, shimPath, home, fakeBin, log string, environ []string, body string) string {
 	t.Helper()
 	command := exec.Command(zsh, "-f", "-i", "+m")
