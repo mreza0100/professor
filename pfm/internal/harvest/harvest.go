@@ -489,7 +489,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		}
 		if allowOAPivot && metaDOI != "" && !strings.EqualFold(metaDOI, DOIFrom(source)) {
 			if result := h.fetchOA(ctx, metaDOI, rungs, options); result.Error == "" {
-				if isShadowProviderMethod(result.Method) {
+				if isMirrorProviderMethod(result.Method) {
 					return h.storeResultAlias(source, source, result, result.Rungs, options)
 				}
 				return result
@@ -512,7 +512,7 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// broad discovery traffic.
 	if doi := DOIFrom(source); allowOAPivot && doi != "" {
 		if result := h.fetchOA(ctx, doi, rungs, options); result.Error == "" {
-			if isShadowProviderMethod(result.Method) {
+			if isMirrorProviderMethod(result.Method) {
 				return h.storeResultAlias(source, source, result, result.Rungs, options)
 			}
 			return result

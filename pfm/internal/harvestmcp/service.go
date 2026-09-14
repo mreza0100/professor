@@ -58,10 +58,10 @@ type Runtime struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
-	SciHubURL             string
-	AnnasURL              string
-	SciDBURL              string
-	LibGenURL             string
+	DOIMirrorURL          string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
 	GoogleScholarURL      string
 
 	Browser   bool
@@ -119,9 +119,9 @@ func NewConfigured(version string, runtime Runtime) (*Service, error) {
 	resolver := &harvest.Resolver{
 		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
 		CoreAPIKey: runtime.CoreAPIKey, SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
-		AnnasURL:         runtime.AnnasURL,
-		SciDBURL:         runtime.SciDBURL,
-		LibGenURL:        runtime.LibGenURL,
+		IPFSCatalogURL:   runtime.IPFSCatalogURL,
+		DOIViewerURL:     runtime.DOIViewerURL,
+		MD5CatalogURL:    runtime.MD5CatalogURL,
 		GoogleScholarURL: runtime.GoogleScholarURL,
 	}
 	service := &Service{server: server, harvester: h, resolver: resolver, runtime: runtime, worker: worker}
@@ -197,10 +197,10 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		GoogleBooksAPIKey:     runtime.GoogleBooksAPIKey,
 		CoreAPIKey:            runtime.CoreAPIKey,
 		SemanticScholarAPIKey: runtime.SemanticScholarAPIKey,
-		SciHubURL:             runtime.SciHubURL,
-		AnnasURL:              runtime.AnnasURL,
-		SciDBURL:              runtime.SciDBURL,
-		LibGenURL:             runtime.LibGenURL,
+		DOIMirrorURL:          runtime.DOIMirrorURL,
+		IPFSCatalogURL:        runtime.IPFSCatalogURL,
+		DOIViewerURL:          runtime.DOIViewerURL,
+		MD5CatalogURL:         runtime.MD5CatalogURL,
 		GoogleScholarURL:      runtime.GoogleScholarURL,
 		SearXNGURL:            runtime.SearXNGURL,
 		BraveAPIKey:           runtime.BraveAPIKey,

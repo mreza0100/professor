@@ -53,7 +53,7 @@ func TestFetchPublicResolvesDOIIdentityAndISBNNamedLocalFile(t *testing.T) {
 
 func TestFetchPublicSelectedURLsWithSameDOIKeepTheirOwnArtifact(t *testing.T) {
 	setHarvestTestJail(t)
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	seen := []string{}
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen = append(seen, r.URL.String())
@@ -103,13 +103,13 @@ func TestPublicResultKeepsCompleteArtifactAndFetchedAtWithoutProvenance(t *testi
 		t.Fatal(err)
 	}
 	body := "**Source:** https://mirror.secret.example/private\n---\n\n" + strings.Repeat("article body ", 20) + "TAIL_SENTINEL"
-	raw := "---\nurl: https://mirror.secret.example/private\nfetched_at: 2025-01-02T03:04:05Z\nsource: harvester\nmethod: scihub\nrungs: direct, mirror\n---\n\n" + body
+	raw := "---\nurl: https://mirror.secret.example/private\nfetched_at: 2025-01-02T03:04:05Z\nsource: harvester\nmethod: doi-mirror\nrungs: direct, mirror\n---\n\n" + body
 	if err := os.WriteFile(privatePath, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	got := h.PublicResult("10.1234/private", Result{
-		Source: "10.1234/private", Kind: "html", Path: privatePath, Method: "scihub", Rungs: []string{"direct", "mirror"}, CacheStatus: "hit",
+		Source: "10.1234/private", Kind: "html", Path: privatePath, Method: "doi-mirror", Rungs: []string{"direct", "mirror"}, CacheStatus: "hit",
 	}, false)
 	if got.Error != "" {
 		t.Fatalf("PublicResult() error = %q", got.Error)

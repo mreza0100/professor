@@ -54,7 +54,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
   "external": {"enabled": true, "host": "0.0.0.0", "port": 19000, "publicURL": "https://harvester.example.com/",
                "auth": {"passphrase": "open sesame", "staticToken": "tok"}, "stateDir": "~/state"},
   "search": {"enabled": true, "searxngURL": "http://127.0.0.1:8888/", "braveApiKey": "brave"},
-	  "scholarly": {"contactEmail": "ops@example.com", "googleBooksApiKey": "g", "coreApiKey": "c", "semanticScholarApiKey": "s", "sciHubURL": "  https://mirror.example/base  ", "annasURL": "https://annas.example", "sciDBURL": "https://scidb.example", "libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example"},
+	  "scholarly": {"contactEmail": "ops@example.com", "googleBooksApiKey": "g", "coreApiKey": "c", "semanticScholarApiKey": "s", "googleScholarURL": "https://scholar.example", "mirrors": {"doi-mirror": "  https://mirror.example/base  ", "ipfs-catalog": "https://ipfs-catalog.example", "doi-viewer": "https://doi-viewer.example", "md5-catalog": "https://md5-catalog.example"}},
   "fetch": {"browser": true, "userAgent": "UA/1", "proxyURL": "http://proxy.example:3128"},
   "convert": {"pdfOcr": true, "pdfLayout": true},
   "cache": {"dir": "~/cache", "ttlSeconds": 60, "negativeTtlSeconds": 5, "negativeTransientTtlSeconds": 2},
@@ -76,7 +76,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	if h.Search.SearXNGURL != "http://127.0.0.1:8888" || h.Search.BraveAPIKey != "brave" {
 		t.Fatalf("search = %+v", h.Search)
 	}
-	if h.Scholarly != (HarvesterScholarly{ContactEmail: "ops@example.com", GoogleBooksAPIKey: "g", CoreAPIKey: "c", SemanticScholarAPIKey: "s", SciHubURL: "https://mirror.example/base", AnnasURL: "https://annas.example", SciDBURL: "https://scidb.example", LibGenURL: "https://libgen.example", GoogleScholarURL: "https://scholar.example"}) {
+	if h.Scholarly != (HarvesterScholarly{ContactEmail: "ops@example.com", GoogleBooksAPIKey: "g", CoreAPIKey: "c", SemanticScholarAPIKey: "s", DOIMirrorURL: "https://mirror.example/base", IPFSCatalogURL: "https://ipfs-catalog.example", DOIViewerURL: "https://doi-viewer.example", MD5CatalogURL: "https://md5-catalog.example", GoogleScholarURL: "https://scholar.example"}) {
 		t.Fatalf("scholarly = %+v", h.Scholarly)
 	}
 	if !h.Fetch.Browser || h.Fetch.UserAgent != "UA/1" || h.Fetch.ProxyURL != "http://proxy.example:3128" {
@@ -98,14 +98,14 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	}
 }
 
-func TestHarvesterSciHubURLRoundTripsWithoutChangingSiblingSettings(t *testing.T) {
+func TestHarvesterDOIMirrorURLRoundTripsWithoutChangingSiblingSettings(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	writeFile(t, filepath.Join(dir, HarvesterFileName), `{
   "enabled": true,
   "search": {"enabled": false, "searxngURL": "http://127.0.0.1:8888"},
-	  "scholarly": {"contactEmail": "ops@example.com", "sciHubURL": " https://mirror.example/scihub ", "annasURL": " https://annas.example ", "sciDBURL": "https://scidb.example", "libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example"},
+	  "scholarly": {"contactEmail": "ops@example.com", "googleScholarURL": "https://scholar.example", "mirrors": {"doi-mirror": " https://mirror.example/doi-mirror ", "ipfs-catalog": " https://ipfs-catalog.example ", "doi-viewer": "https://doi-viewer.example", "md5-catalog": "https://md5-catalog.example"}},
   "fetch": {"userAgent": "fixture-agent"},
   "cache": {"ttlSeconds": 77},
   "output": {"maxInlineChars": 321}
@@ -114,20 +114,20 @@ func TestHarvesterSciHubURLRoundTripsWithoutChangingSiblingSettings(t *testing.T
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got.Harvester.Scholarly.SciHubURL != "https://mirror.example/scihub" ||
-		got.Harvester.Scholarly.AnnasURL != "https://annas.example" ||
-		got.Harvester.Scholarly.SciDBURL != "https://scidb.example" ||
-		got.Harvester.Scholarly.LibGenURL != "https://libgen.example" ||
+	if got.Harvester.Scholarly.DOIMirrorURL != "https://mirror.example/doi-mirror" ||
+		got.Harvester.Scholarly.IPFSCatalogURL != "https://ipfs-catalog.example" ||
+		got.Harvester.Scholarly.DOIViewerURL != "https://doi-viewer.example" ||
+		got.Harvester.Scholarly.MD5CatalogURL != "https://md5-catalog.example" ||
 		got.Harvester.Scholarly.GoogleScholarURL != "https://scholar.example" {
-		t.Fatalf("SciHubURL = %q, want trimmed configured URL", got.Harvester.Scholarly.SciHubURL)
+		t.Fatalf("DOIMirrorURL = %q, want trimmed configured URL", got.Harvester.Scholarly.DOIMirrorURL)
 	}
 	if got.Harvester.Search.Enabled || got.Harvester.Search.SearXNGURL != "http://127.0.0.1:8888" ||
 		got.Harvester.Scholarly.ContactEmail != "ops@example.com" || got.Harvester.Fetch.UserAgent != "fixture-agent" ||
 		got.Harvester.Cache.TTL != 77*time.Second || got.Harvester.Output.MaxInlineChars != 321 {
 		t.Fatalf("unrelated settings changed: %+v", got.Harvester)
 	}
-	if got.Source("harvester.scholarly.sciHubURL") != SourceFile {
-		t.Fatalf("SciHub source = %q, want %q", got.Source("harvester.scholarly.sciHubURL"), SourceFile)
+	if got.Source("harvester.scholarly.mirrors") != SourceFile {
+		t.Fatalf("mirrors source = %q, want %q", got.Source("harvester.scholarly.mirrors"), SourceFile)
 	}
 	marshaled, err := MarshalHarvester(got.Harvester, false)
 	if err != nil {
@@ -140,16 +140,11 @@ func TestHarvesterSciHubURLRoundTripsWithoutChangingSiblingSettings(t *testing.T
 	if err := json.Unmarshal(marshaled, &shape); err != nil {
 		t.Fatalf("MarshalHarvester JSON = %v", err)
 	}
-	if shape.Scholarly["sciHubURL"] != "https://mirror.example/scihub" {
-		t.Fatalf("marshaled sciHubURL = %#v", shape.Scholarly["sciHubURL"])
+	if shape.Scholarly["googleScholarURL"] != "https://scholar.example" {
+		t.Fatalf("marshaled googleScholarURL = %#v", shape.Scholarly["googleScholarURL"])
 	}
-	for key, want := range map[string]string{
-		"annasURL": "https://annas.example", "sciDBURL": "https://scidb.example",
-		"libGenURL": "https://libgen.example", "googleScholarURL": "https://scholar.example",
-	} {
-		if shape.Scholarly[key] != want {
-			t.Fatalf("marshaled %s = %#v, want %q", key, shape.Scholarly[key], want)
-		}
+	if _, shown := shape.Scholarly["mirrors"]; shown || strings.Contains(string(marshaled), "mirror.example") {
+		t.Fatalf("marshaled config exposes operator mirror URLs: %s", marshaled)
 	}
 	if shape.Search["searxngURL"] != "http://127.0.0.1:8888" || shape.Search["enabled"] != false {
 		t.Fatalf("marshaled sibling settings changed: %#v", shape.Search)
@@ -167,11 +162,11 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 		"external url path":     {`{"external":{"publicURL":"https://h.example.com/mcp"}}`, 0o600, "without a path"},
 		"searxng query":         {`{"search":{"searxngURL":"http://127.0.0.1:8888/?x=1"}}`, 0o600, "query or fragment"},
 		"searxng scheme":        {`{"search":{"searxngURL":"ftp://127.0.0.1"}}`, 0o600, "http or https"},
-		"scihub scheme":         {`{"scholarly":{"sciHubURL":"ftp://mirror.example"}}`, 0o600, "http or https"},
-		"scihub relative":       {`{"scholarly":{"sciHubURL":"mirror.example/path"}}`, 0o600, "http or https"},
-		"scihub userinfo":       {`{"scholarly":{"sciHubURL":"https://user:pass@mirror.example"}}`, 0o600, "must not carry userinfo"},
-		"scihub query":          {`{"scholarly":{"sciHubURL":"https://mirror.example/?token=x"}}`, 0o600, "query or fragment"},
-		"scihub fragment":       {`{"scholarly":{"sciHubURL":"https://mirror.example/#pdf"}}`, 0o600, "query or fragment"},
+		"doi-mirror scheme":     {`{"scholarly":{"mirrors":{"doi-mirror":"ftp://mirror.example"}}}`, 0o600, "http or https"},
+		"doi-mirror relative":   {`{"scholarly":{"mirrors":{"doi-mirror":"mirror.example/path"}}}`, 0o600, "http or https"},
+		"doi-mirror userinfo":   {`{"scholarly":{"mirrors":{"doi-mirror":"https://user:pass@mirror.example"}}}`, 0o600, "must not carry userinfo"},
+		"doi-mirror query":      {`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/?token=x"}}}`, 0o600, "query or fragment"},
+		"doi-mirror fragment":   {`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/#pdf"}}}`, 0o600, "query or fragment"},
 		"negative ttl":          {`{"cache":{"ttlSeconds":-1}}`, 0o600, "0 or more"},
 		"zero inline":           {`{"output":{"maxInlineChars":0}}`, 0o600, "at least 1"},
 		"relative cache dir":    {`{"cache":{"dir":"cache"}}`, 0o600, "must be absolute"},
@@ -193,7 +188,7 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 }
 
 func TestHarvesterScholarlyProviderURLsRejectUnsafeComponents(t *testing.T) {
-	for _, field := range []string{"annasURL", "sciDBURL", "libGenURL", "googleScholarURL"} {
+	for _, field := range []string{"mirrors.ipfs-catalog", "mirrors.doi-viewer", "mirrors.md5-catalog", "googleScholarURL"} {
 		for name, value := range map[string]string{
 			"scheme":   "ftp://mirror.example",
 			"userinfo": "https://user:pass@mirror.example",
@@ -203,6 +198,9 @@ func TestHarvesterScholarlyProviderURLsRejectUnsafeComponents(t *testing.T) {
 			t.Run(field+"/"+name, func(t *testing.T) {
 				dir := t.TempDir()
 				content := `{"scholarly":{"` + field + `":"` + value + `"}}`
+				if id, ok := strings.CutPrefix(field, "mirrors."); ok {
+					content = `{"scholarly":{"mirrors":{"` + id + `":"` + value + `"}}}`
+				}
 				writeFile(t, filepath.Join(dir, HarvesterFileName), content, 0o600)
 				if _, err := Load(filepath.Join(dir, FileName), filepath.Join(dir, "home"), nil); err == nil {
 					t.Fatalf("Load accepted unsafe %s=%q", field, value)
@@ -212,15 +210,15 @@ func TestHarvesterScholarlyProviderURLsRejectUnsafeComponents(t *testing.T) {
 	}
 }
 
-func TestHarvesterSciHubURLWhitespaceOnlyDisablesFallback(t *testing.T) {
+func TestHarvesterDOIMirrorURLWhitespaceOnlyDisablesFallback(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, HarvesterFileName), `{"scholarly":{"sciHubURL":"   "}}`, 0o600)
+	writeFile(t, filepath.Join(dir, HarvesterFileName), `{"scholarly":{"mirrors":{"doi-mirror":"   "}}}`, 0o600)
 	got, err := Load(filepath.Join(dir, FileName), filepath.Join(dir, "home"), nil)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got.Harvester.Scholarly.SciHubURL != "" {
-		t.Fatalf("SciHubURL = %q, want empty disabled value", got.Harvester.Scholarly.SciHubURL)
+	if got.Harvester.Scholarly.DOIMirrorURL != "" {
+		t.Fatalf("DOIMirrorURL = %q, want empty disabled value", got.Harvester.Scholarly.DOIMirrorURL)
 	}
 }
 

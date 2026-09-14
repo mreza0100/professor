@@ -312,7 +312,7 @@ func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
 	path, _, err := writeHarvestAskReceipt(home, receiptDir, 0, "10.1234/public.boundary", harvest.Result{
 		Source:    "10.1234/public.boundary",
 		Path:      "/private/cache/html/document.md",
-		Method:    "scihub",
+		Method:    "doi-mirror",
 		Rungs:     []string{"direct", "mirror:https://mirror.secret.example"},
 		Error:     "GET https://mirror.secret.example/private: provider internals",
 		ErrorKind: "connect",

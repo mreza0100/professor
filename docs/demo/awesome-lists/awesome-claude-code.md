@@ -79,9 +79,9 @@ Reasoning: Professor spans three things no single narrower category covers — (
 
 - **Display Name:** `Professor`
 - **Category:** `Multi-Purpose`
-- **Link:** `https://github.com/mreza0100/professor`
+- **Link:** `https://github.com/rezzminator/professor`
 - **Author Name:** `rezzminator`
-- **Author Link:** `https://github.com/mreza0100`
+- **Author Link:** `https://github.com/rezzminator`
 - **Description** (single paragraph, no line breaks, no emojis, third person, 1-3 sentences, within 10-500 chars):
 
   > An LLM-harness fleet boost framework for Claude Code, Codex, and OpenCode. Its Go CLI/TUI (pfm) lists and controls every AI coding chat on the machine, including a Limits dashboard and cosmos view, lets chats message each other, and can reload a chat onto another account while keeping its history. It pairs this with a discipline layer of agents, commands, hooks, and rules for Claude Code that also compiles to Codex and OpenCode mirrors, and Harvester, a document fetcher with a multi-rung fallback ladder exposed over MCP.

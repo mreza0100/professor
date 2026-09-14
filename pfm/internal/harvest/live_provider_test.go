@@ -23,27 +23,27 @@ const (
 // These tests are deliberately opt-in. A default run skips them; selecting a
 // provider requires the caller to inspect its status line and does not turn an
 // unavailable mirror into a download pass.
-func TestLiveProviderSciHub(t *testing.T) {
-	runLiveProvider(t, "scihub", liveMirrorURL("scihub"), func(ctx context.Context, h *Harvester) Result {
-		return h.fetchSciHub(ctx, liveRequestedDOI(), FetchOptions{})
+func TestLiveProviderDOIMirror(t *testing.T) {
+	runLiveProvider(t, "doi-mirror", liveMirrorURL("doi-mirror"), func(ctx context.Context, h *Harvester) Result {
+		return h.fetchDOIMirror(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
 
-func TestLiveProviderSciDB(t *testing.T) {
-	runLiveProvider(t, "scidb", liveMirrorURL("scidb"), func(ctx context.Context, h *Harvester) Result {
-		return h.fetchSciDBDOI(ctx, liveRequestedDOI(), FetchOptions{})
+func TestLiveProviderDOIViewer(t *testing.T) {
+	runLiveProvider(t, "doi-viewer", liveMirrorURL("doi-viewer"), func(ctx context.Context, h *Harvester) Result {
+		return h.fetchDOIViewerDOI(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
 
 func TestLiveProviderAnna(t *testing.T) {
-	runLiveProvider(t, "annas", liveMirrorURL("annas"), func(ctx context.Context, h *Harvester) Result {
-		return h.fetchAnnasMD5(ctx, liveRequestedDOI(), liveProviderMD5, FetchOptions{})
+	runLiveProvider(t, "ipfs-catalog", liveMirrorURL("ipfs-catalog"), func(ctx context.Context, h *Harvester) Result {
+		return h.fetchIPFSCatalogMD5(ctx, liveRequestedDOI(), liveProviderMD5, FetchOptions{})
 	})
 }
 
-func TestLiveProviderLibGen(t *testing.T) {
-	runLiveProvider(t, "libgen", liveMirrorURL("libgen"), func(ctx context.Context, h *Harvester) Result {
-		return h.fetchLibGenDOI(ctx, liveRequestedDOI(), FetchOptions{})
+func TestLiveProviderMD5Catalog(t *testing.T) {
+	runLiveProvider(t, "md5-catalog", liveMirrorURL("md5-catalog"), func(ctx context.Context, h *Harvester) Result {
+		return h.fetchMD5CatalogDOI(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
 
@@ -84,10 +84,10 @@ func TestLiveFetchRequestedDOI(t *testing.T) {
 	h, err := New(Options{
 		CacheDir:         cacheDir,
 		Converter:        worker,
-		SciHubURL:        liveMirrorURL("scihub"),
-		AnnasURL:         liveMirrorURL("annas"),
-		SciDBURL:         liveMirrorURL("scidb"),
-		LibGenURL:        liveMirrorURL("libgen"),
+		DOIMirrorURL:     liveMirrorURL("doi-mirror"),
+		IPFSCatalogURL:   liveMirrorURL("ipfs-catalog"),
+		DOIViewerURL:     liveMirrorURL("doi-viewer"),
+		MD5CatalogURL:    liveMirrorURL("md5-catalog"),
 		GoogleScholarURL: "https://scholar.google.com",
 		ContactEmail:     strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT")),
 	})
@@ -155,16 +155,16 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 
 	cacheDir := t.TempDir()
 	worker := &liveWorkerConverter{worker: harvestpy.NewConverter(harvestpy.Runtime{Python: python, Script: script}), dir: t.TempDir()}
-	options := Options{CacheDir: cacheDir, Converter: worker, SciHubURL: "", AnnasURL: "", SciDBURL: "", LibGenURL: "", GoogleScholarURL: "", ContactEmail: strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT"))}
+	options := Options{CacheDir: cacheDir, Converter: worker, DOIMirrorURL: "", IPFSCatalogURL: "", DOIViewerURL: "", MD5CatalogURL: "", GoogleScholarURL: "", ContactEmail: strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT"))}
 	switch name {
-	case "scihub":
-		options.SciHubURL = baseURL
-	case "scidb":
-		options.SciDBURL = baseURL
-	case "annas":
-		options.AnnasURL = baseURL
-	case "libgen":
-		options.LibGenURL = baseURL
+	case "doi-mirror":
+		options.DOIMirrorURL = baseURL
+	case "doi-viewer":
+		options.DOIViewerURL = baseURL
+	case "ipfs-catalog":
+		options.IPFSCatalogURL = baseURL
+	case "md5-catalog":
+		options.MD5CatalogURL = baseURL
 	case "scholar":
 		options.GoogleScholarURL = baseURL
 	}
@@ -205,14 +205,14 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	}
 }
 
-// liveMirrorEnv names the variable carrying each shadow-library mirror's base
+// liveMirrorEnv names the variable carrying each mirror mirror's base
 // URL. Mirror hosts are private configuration — they live in the operator's
 // harvester config, never in tracked source — so a live run supplies them.
 var liveMirrorEnv = map[string]string{
-	"scihub": "HARVESTER_LIVE_SCIHUB_URL",
-	"scidb":  "HARVESTER_LIVE_SCIDB_URL",
-	"annas":  "HARVESTER_LIVE_ANNAS_URL",
-	"libgen": "HARVESTER_LIVE_LIBGEN_URL",
+	"doi-mirror":   "HARVESTER_LIVE_DOI_MIRROR_URL",
+	"doi-viewer":   "HARVESTER_LIVE_DOI_VIEWER_URL",
+	"ipfs-catalog": "HARVESTER_LIVE_IPFS_CATALOG_URL",
+	"md5-catalog":  "HARVESTER_LIVE_MD5_CATALOG_URL",
 }
 
 func liveMirrorURL(name string) string {
@@ -224,7 +224,7 @@ func liveMirrorURL(name string) string {
 // public providers' API hosts.
 func liveProviderSecrets(contact string) []string {
 	secrets := []string{"scholar.google.com", "api.unpaywall.org", "pmc.ncbi.nlm.nih.gov", contact}
-	for _, name := range []string{"scihub", "scidb", "annas", "libgen"} {
+	for _, name := range []string{"doi-mirror", "doi-viewer", "ipfs-catalog", "md5-catalog"} {
 		raw := liveMirrorURL(name)
 		if raw == "" {
 			continue

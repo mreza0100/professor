@@ -198,10 +198,10 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 	service, err := NewConfigured("test", Runtime{
 		Home:             home,
 		CacheDir:         filepath.Join(home, "cache"),
-		SciHubURL:        "https://mirror.example/scihub",
-		AnnasURL:         "https://annas.example",
-		SciDBURL:         "https://scidb.example",
-		LibGenURL:        "https://libgen.example",
+		DOIMirrorURL:     "https://mirror.example/doi-mirror",
+		IPFSCatalogURL:   "https://ipfs-catalog.example",
+		DOIViewerURL:     "https://doi-viewer.example",
+		MD5CatalogURL:    "https://md5-catalog.example",
 		GoogleScholarURL: "https://scholar.example",
 	})
 	if err != nil {
@@ -209,10 +209,10 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 	}
 	defer func() { _ = service.Close() }()
 	for _, tc := range []struct{ name, got, want string }{
-		{"SciHubURL", service.runtime.SciHubURL, "https://mirror.example/scihub"},
-		{"AnnasURL", service.runtime.AnnasURL, "https://annas.example"},
-		{"SciDBURL", service.runtime.SciDBURL, "https://scidb.example"},
-		{"LibGenURL", service.runtime.LibGenURL, "https://libgen.example"},
+		{"DOIMirrorURL", service.runtime.DOIMirrorURL, "https://mirror.example/doi-mirror"},
+		{"IPFSCatalogURL", service.runtime.IPFSCatalogURL, "https://ipfs-catalog.example"},
+		{"DOIViewerURL", service.runtime.DOIViewerURL, "https://doi-viewer.example"},
+		{"MD5CatalogURL", service.runtime.MD5CatalogURL, "https://md5-catalog.example"},
 		{"GoogleScholarURL", service.runtime.GoogleScholarURL, "https://scholar.example"},
 	} {
 		if tc.got != tc.want {
@@ -223,7 +223,7 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 
 // TestSearchCacheMissHintsSearchOnlyWhenAvailable pins the searchCache
 // empty-match hint, the one harvestmcp-side message in the closed
-// `use `search`` list: it must not point at a `search` tool the server does
+// `use `search“ list: it must not point at a `search` tool the server does
 // not advertise.
 func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 	off, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})

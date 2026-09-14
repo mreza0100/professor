@@ -13,12 +13,12 @@ const providerFixtureDOI = "10.1234/provider.fixture"
 
 func TestProviderDownloadLimitRejectsOversizedPartialResponse(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nthis exceeds the configured limit\n%%EOF"), nil
 	})}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, MaxBytes: 16, Converter: &fakeConverter{}})
-	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "scidb", "https://scidb.test/file.pdf", "", "", FetchOptions{}, []string{"scidb"})
+	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "doi-viewer", "https://doi-viewer.test/file.pdf", "", "", FetchOptions{}, []string{"doi-viewer"})
 	if got.Error == "" || got.ErrorKind != "too_large" || got.Content != "" {
 		t.Fatalf("oversized provider response = %#v; want bounded failure", got)
 	}
@@ -26,7 +26,7 @@ func TestProviderDownloadLimitRejectsOversizedPartialResponse(t *testing.T) {
 
 func TestProviderDownloadRejectsShortReadInsteadOfConvertingPartialBody(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -37,7 +37,7 @@ func TestProviderDownloadRejectsShortReadInsteadOfConvertingPartialBody(t *testi
 		}, nil
 	})}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, MaxBytes: 1024, Converter: &fakeConverter{}})
-	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "scidb", "https://scidb.test/file.pdf", "", "", FetchOptions{}, []string{"scidb"})
+	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "doi-viewer", "https://doi-viewer.test/file.pdf", "", "", FetchOptions{}, []string{"doi-viewer"})
 	if got.Error == "" || got.Content != "" || got.Path != "" {
 		t.Fatalf("short provider response was accepted: %#v", got)
 	}
@@ -59,13 +59,13 @@ func (body shortReadBody) Close() error { return nil }
 
 func TestProviderPDFEmptyConversionErrorEscalatesToOCR(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nocr fixture\n%%EOF"), nil
 	})}
 	converter := &emptyPDFThenOCRConverter{}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: converter})
-	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "scidb", "https://scidb.test/file.pdf", "", "", FetchOptions{}, []string{"scidb"})
+	got := h.fetchProviderArtifact(context.Background(), providerFixtureDOI, "doi-viewer", "https://doi-viewer.test/file.pdf", "", "", FetchOptions{}, []string{"doi-viewer"})
 	if got.Error != "" || got.Content != "OCR recovered provider fixture" || !containsProviderString(got.Rungs, "ocr") || converter.ocrCalls != 1 {
 		t.Fatalf("provider OCR recovery = %#v calls=%d", got, converter.ocrCalls)
 	}

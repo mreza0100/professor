@@ -8,7 +8,7 @@ import (
 
 func TestGoogleScholarVersionsPageSuppliesSecondPagePDF(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	var versionRequests int
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Query().Get("cluster") == "123" {
