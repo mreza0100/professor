@@ -146,7 +146,7 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | `chat resolve <target>` → socket/session/id tuple; missing target rc 4 | JAIL+tmux | `chat_command.go`, `resolve/resolve.go` | |
 | `resolve` with a bad kind → rc 2 | JAIL | `resolve/resolve.go:92-93`, `main.go:241-244` | |
 | `whoami` → this process's own tmux session name | JAIL+tmux | `main.go:53`, `resolve/whoami.go:165-213` | |
-| `doctor` → db + jail health | LIVE-READ | `main.go:39-40`; `internal/store/health.go` | |
+| `doctor` → db + jail health; exit 0 clean, 1 warnings-only, 2 usage, 3 at least one failure (a state `pfm install --yes` owns and did not produce, or a required non-harvestpy dependency); `doctor: failures=M` prints only when M>0, `doctor: warnings=N` only when N>0, `doctor: clean` only when both are zero | LIVE-READ | `main.go:39-40`; `internal/store/health.go`; `cmd/pfm/doctor_jail_test.go` (`TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone`) | issue #24 finding 1 |
 | `mcp` → stdio server; any arg → rc 2 | JAIL | `main.go:69-93` | |
 | `internal kill-exit --engine…` → detached finisher; missing flags → rc 2 | JAIL+tmux | `main.go:250-299`, `kill/finisher.go:94-144` | |
 | `internal then …` → steer waiter | JAIL+tmux | `main.go:251-253`, `inject/then.go` | |
@@ -155,29 +155,30 @@ The compiler is one static-binary surface. `build` may write only generated arti
 
 | probe | safety | expected behavior | regression |
 | --- | --- | --- | --- |
-| config load error | JAIL | visible config warning and rc 1 | `config_cli_test.go` |
+| config load error | JAIL | visible config FAILURE, rc 3 | `config_cli_test.go` |
 | disabled MCP daemon | JAIL | no daemon probe or warning | `doctor_jail_test.go` |
 | enabled MCP daemon reachability | JAIL | running is clean; unreachable is a warning and rc 1 | `mcp_serve_test.go` |
 | enabled MCP daemon version | JAIL | matching version is clean; skew is a warning and rc 1 | `mcp_serve_test.go` |
 | canonical `pfm` executable read | JAIL | readable target-HOME binary is clean; unreadable or absent canonical binary is a warning and rc 1 | `doctor_path_test.go` |
 | PATH candidate resolution | JAIL | target-HOME canonical candidate first is clean; no target-HOME candidate or an in-home shadow is a warning and rc 1; host candidates are ignored | `doctor_jail_test.go`, `doctor_path_test.go` |
 | PATH candidate hash | JAIL | matching target-HOME candidates are clean; target-HOME read failure or hash mismatch is a warning and rc 1 | `doctor_jail_test.go`, `doctor_path_test.go` |
-| managed Claude launcher | JAIL | canonical launcher is `ok`; absent is `missing`; a native-updater replacement is `DISPLACED` and rc 1 | `launch_command_test.go`, `internal/installer/launcher_test.go` |
-| host overlay symlinks (`pfm-statusline`, `tmux-title-renudge`) and statusLine wiring | JAIL | a canonical link resolving to the managed copy is `ok`; absent is `missing`, rc 1; not resolving to the managed copy is `DISPLACED`, rc 1; a configured account's `statusLine.command` still naming raw `pfm statusline` is a FAILURE, rc 1 | `cmd/pfm/doctor_host_overlay_test.go`, `internal/installer/installer.go` (`InspectHostOverlays`) |
+| managed Claude launcher | JAIL | canonical launcher is `ok`; absent is `missing`; a native-updater replacement is `DISPLACED` — both a FAILURE, rc 3 | `launch_command_test.go`, `internal/installer/launcher_test.go` |
+| host overlay symlinks (`pfm-statusline`, `tmux-title-renudge`) and statusLine wiring | JAIL | a canonical link resolving to the managed copy is `ok`; absent is `missing`, rc 3; not resolving to the managed copy is `DISPLACED`, rc 3; a configured account's `statusLine.command` still naming raw `pfm statusline` is a FAILURE, rc 3 | `cmd/pfm/doctor_host_overlay_test.go`, `internal/installer/installer.go` (`InspectHostOverlays`) |
 | tmux title ownership per live socket | JAIL+tmux | INFO only, never a warning and never a write: the resolved `tmux.titles` policy is printed with its source, then each live socket is read with `show-options -g set-titles` and reported `pfm-owned` or `host-owned`; an unreadable socket is `unknown` with the reason | `cmd/pfm/tmux_titles_doctor.go`, `cmd/pfm/tmux_titles_doctor_test.go` |
 | external-command registry coverage | JAIL | every production literal exec is registered and routed through `deps.Resolve`; configured engine names and provisioned harvest paths have one owner | `internal/deps/guard_test.go` |
-| dependency resolve/version/minimum | JAIL | fake PATH binaries distinguish ok, below-minimum, garbage, missing, failed execution, and timeout; tmux requires 1.8 | `internal/deps/probe_test.go`, `doctor_external_test.go` |
+| dependency resolve/version/minimum | JAIL | fake PATH binaries distinguish ok, below-minimum, garbage, missing, failed execution, and timeout; tmux requires 1.8; a `Required` dependency the fleet engine cannot run without (e.g. `tmux`) missing/broken/timeout/cancelled is a FAILURE, rc 3 — the opt-in harvestpy sidecar's own `Required` deps (`uv`, the provisioned interpreter) stay warnings, rc 1, since the fleet engine runs without them | `internal/deps/probe_test.go`, `doctor_external_test.go`, `cmd/pfm/doctor_jail_test.go` (`TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone`) |
 | dependency platform and harvest filters | JAIL | Darwin/Linux-only rows say `skipped (not this platform)` off-platform; install-owned harvest rows say provisioned-by-install or `--skip-harvest` without being probed | `internal/deps/probe_test.go` |
 | configured engine self-doctors | JAIL | supported Claude/Codex doctor commands run under their own 30s self-doctor bound (falls back to the probe `Timeout` when `SelfDoctorTimeout` is unset); unsupported or interactive-only surfaces say unavailable; a summary call that outruns its bound stays `ok` and is named `timeout (<duration>)`, never broken; a real non-zero exit still reads broken and quotes the first output line | `internal/deps/probe_test.go`, `doctor_external_test.go` |
-| installer-owned hooks | JAIL | every global/account Claude hook and the Codex clear-kill hook is present, parseable, canonical-binary-pointing, and ledger-owned; missing, broken JSON/stale path, and drift remain distinct warnings | `internal/installer/expected_hooks_test.go`, `doctor_external_test.go` |
-| database open | JAIL | cannot open is a hard failure and rc 1 | `main_test.go:414-424` |
-| database user-version read | JAIL | cannot read is a hard failure and rc 1 | `doctor.go` |
-| database quick-check read | JAIL | cannot read is a hard failure and rc 1 | `doctor.go` |
+| installer-owned hooks | JAIL | every global/account Claude hook and the Codex clear-kill hook is present, parseable, canonical-binary-pointing, and ledger-owned; missing, broken JSON, and stale path are each a FAILURE (rc 3, `ReportHooks` returns `(warnings, failures)`); drift stays a distinct warning, rc 1 | `internal/installer/expected_hooks_test.go` (`TestReportHooksCountsMissingAsFailureAndDriftAsWarning`), `doctor_external_test.go` |
+| global-agents wiring | JAIL | every configured account's registry links match the recorded clone's machine-global agents; `MISSING` and `UNREADABLE` are each a FAILURE, rc 3 (`ReportGlobalAgents` returns `(warnings, failures)`); `CONFLICT`, `NO-SOURCES`, and `UNRESOLVED` stay warnings, rc 1; `NO-CLONE` and `NO-CLAUDE` count neither | `internal/installer/global_fanout_test.go` |
+| database open | JAIL | cannot open is a hard failure, rc 3 | `main_test.go:414-424` |
+| database user-version read | JAIL | cannot read is a hard failure, rc 3 | `doctor.go` |
+| database quick-check read | JAIL | cannot read is a hard failure, rc 3 | `doctor.go` |
 | database schema or integrity mismatch | JAIL | mismatch is a warning and rc 1 | `doctor.go` |
 | shared-store health | JAIL | healthy is clean; degraded shared state is a warning and rc 1 | `doctor.go` |
-| row counts and orphaned hides | JAIL | count query failure is a hard failure; nonzero orphaned hides is a warning and rc 1 | `doctor.go`, `store/hidden_test.go` |
+| row counts and orphaned hides | JAIL | count query failure is a hard failure, rc 3; nonzero orphaned hides is a warning and rc 1 | `doctor.go`, `store/hidden_test.go` |
 | WAL stat | JAIL | absent WAL is clean; other stat failure is a warning and rc 1 | `doctor.go` |
-| busy-warning counters | JAIL | zero counters are clean; nonzero or unreadable counters remain a warning or hard failure | `doctor.go` |
+| busy-warning counters | JAIL | zero counters are clean; nonzero counters are a warning, rc 1; an unreadable counter is a hard failure, rc 3 | `doctor.go` |
 | process-table read | JAIL | readable, including empty, is clean; unreadable is a warning and rc 1 | `doctor.go`, `internal/gather` |
 | configured roots | JAIL | existing directories are clean; missing, non-directory, or unreadable roots are warnings and rc 1 | `doctor.go` |
 | SID crumb directory | JAIL | missing after clean install is empty and clean; readable invalid entries warn; non-directory or unreadable probe remains an error and rc 1 | `doctor_jail_test.go`, `main_test.go:427-502` |
@@ -196,6 +197,20 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | external harvester gateway | JAIL | the daemon's second port serves the harvester only, behind the bearer/OAuth wall (no/wrong token = 401; `/mcp/chat` = 404); an unbindable port is a reported failure on `/status`, never a claimed listener; a credential-free gateway refuses to exist | `cmd/pfm/harvester_gateway_test.go`, `TestRemoteRefusesToExistWithoutCredentials` |
 | local-read confinement fails closed | UNIT | a non-empty root list none of which resolves refuses every read | `internal/harvest/local_confinement_test.go` |
 | spawn-audit classifier: injected, predates-layer, and violation verdicts | UNIT | `--system-prompt-file` or the lean env arm classifies INJECTED only when argv ALSO carries `--settings {"outputStyle":"default"}` — carrying the prompt without it is a VIOLATION only when the process started AT/AFTER the staged prompt layer's mtime; a seat born BEFORE the stamp is PREDATES-LAYER instead (a reload fixes it, not a bug hunt), while an unusable age signal (no birth time, no stamp) or a correctly-flagged seat is never used to excuse or downgrade the verdict; an unreadable environment never clears a flagless seat | `cmd/pfm/spawn_audit_doctor_test.go` (`TestClassifySpawnSeparatesInjectedOldAndBypassed`) |
+
+### A.3 — `pfm update` doctor gate (issue #24 finding 1)
+
+`pfm update` runs a baseline doctor on the CURRENT binary before touching anything, then gates on the CANDIDATE's doctor exit code alone — never on a raw non-zero exit — so pre-existing warnings never roll an update back.
+
+| behavior | safety | expected | regression |
+| --- | --- | --- | --- |
+| baseline doctor, run before any owned binary is replaced | JAIL | records `(warnings, failures)`; a baseline that cannot run, or exits 2 (usage), never blocks — printed and treated as "no baseline" | `cmd/pfm/update_command_test.go` (`stubUpdateBaselineDoctor`, every `TestUpdate*` test that drives a real `runUpdate()`) |
+| candidate doctor exit 0 or 1 (clean or warnings-only) | JAIL | proceeds; prints `doctor after update: warnings=N (before update: M)`; rollback seams are NOT called | `TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings` |
+| candidate doctor exit 3 (failures) | JAIL | rolls back; message names the failure count | `TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure` |
+| candidate doctor exit 2 or a spawn error | JAIL | rolls back — a doctor that cannot run is not a verdict | `update_command.go` (`runUpdateDoctor`/`updateRepository` gate switch) |
+| warning rows the candidate introduced beyond the baseline | JAIL | every candidate row with no normalised (decimal/hex-masked) twin in the baseline output is listed under `new warning rows — read them before the next update:` | `TestUpdateNamesNewWarningRowsIntroducedByTheCandidate` |
+| rollback doctor exit 1 (warnings only) | JAIL | reported, never claimed as residue | `TestUpdateRollbackDoctorWarningsAreNotResidue` |
+| rollback doctor exit 1 from a binary predating M2 (no `doctor: failures=` and no `doctor: clean` in its output) | JAIL | named as an older pfm, never claimed as residue | `TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue` |
 
 | `reap` dry run classifies every socket, changes nothing | JAIL+tmux | `cmd/pfm/reap_jail_test.go:134-189`, `internal/reap/reap.go:139-160` | |
 | `reap` KEEP rules: attached, self, `cc-new-*`, busy, transcript written < 60s | JAIL | `internal/reap/reap_test.go:14-200` | |

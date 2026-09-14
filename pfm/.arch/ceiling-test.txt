@@ -1,5 +1,6 @@
 cmd/pfm/reconcile_codex_panes_jail_test.go 1224
-e2e/install_e2e_test.go 1435
+cmd/pfm/update_command_test.go 1194
+e2e/install_e2e_test.go 1442
 internal/compose/compose_test.go 1121
 internal/harvestpy/harvestpy_test.go 1107
 internal/index/codexstate_test.go 1067

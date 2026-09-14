@@ -82,9 +82,10 @@ func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
-		return nil
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
@@ -177,7 +178,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		}
 		return nil
 	}
-	updateRunDoctor = func(_ context.Context, candidate string, _ commandRuntime, skipHarvest bool, _ io.Writer, _ io.Writer) error {
+	updateRunDoctor = func(_ context.Context, candidate string, _ commandRuntime, skipHarvest bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
 		doctorCalls++
 		if !strings.HasSuffix(candidate, "pfm-a") {
 			t.Fatalf("doctor candidate=%q, want first reproducible build", candidate)
@@ -185,8 +186,9 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		if !skipHarvest {
 			t.Fatal("update did not propagate --skip-harvest to doctor")
 		}
-		return nil
+		return doctorOutcome{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
@@ -250,9 +252,10 @@ func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
-		return nil
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	outside := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -323,6 +326,7 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 		provisionHarvest = options.ProvisionHarvest
 		return installer.Report{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
@@ -372,6 +376,7 @@ func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
 		return installer.Report{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
@@ -427,9 +432,9 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("doctor ran after install failure")
-		return nil
+		return doctorOutcome{}, nil
 	}
 	updateRollbackInstall = func(_ context.Context, candidate, workingDirectory, sourceRepo string, _ commandRuntime, _ bool, _ io.Writer, _ io.Writer) error {
 		if !strings.Contains(candidate, "previous-") {
@@ -446,12 +451,13 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return os.RemoveAll(filepath.Dir(managedMutation))
 	}
-	updateRollbackDoctor = func(_ context.Context, candidate string, _ commandRuntime, _ bool, _ io.Writer, _ io.Writer) error {
+	updateRollbackDoctor = func(_ context.Context, candidate string, _ commandRuntime, _ bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
 		if !strings.Contains(candidate, "previous-") {
 			t.Fatalf("rollback doctor candidate=%q, want preserved previous binary", candidate)
 		}
-		return nil
+		return doctorOutcome{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
@@ -471,6 +477,268 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	}
 	if got := updateGitRevision(t, repo, "HEAD"); got != previousRef {
 		t.Fatalf("source revision after failed update = %q, want unchanged %q", got, previousRef)
+	}
+}
+
+// stubUpdateBaselineDoctor swaps the production updateBaselineDoctor seam
+// (a subprocess of os.Executable()) for a fixed outcome, restored on
+// cleanup. Every test that drives a real runUpdate() to completion needs
+// this: left unstubbed, updateBaselineDoctor would exec the `go test`
+// binary itself with `doctor` as its first argument — a non-flag argument
+// go's testing flag parser leaves untouched, so the binary would run this
+// entire test package a second time as a child process instead of failing
+// fast. Test coverage of the real subprocess baseline path itself is a
+// named gap (see the report); jailTest already sandboxes HOME but not the
+// binary a bare os.Executable() resolves to.
+func stubUpdateBaselineDoctor(t *testing.T, outcome doctorOutcome) {
+	t.Helper()
+	saved := updateBaselineDoctor
+	t.Cleanup(func() { updateBaselineDoctor = saved })
+	updateBaselineDoctor = func(context.Context, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return outcome, nil
+	}
+}
+
+// updateRollbackTestRuntime stages the canonical binary and ownership
+// ledger every doctor-tier rollback-gate test below needs, returning the
+// runtime and the fixture repo.
+func updateRollbackTestRuntime(t *testing.T) (runtime commandRuntime, repo string) {
+	t.Helper()
+	repo = newUpdateGitFixture(t)
+	runtime = updateTestRuntime(t)
+	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
+		t.Fatal(err)
+	}
+	return runtime, repo
+}
+
+// TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings is M2's
+// regression test for issue #24 finding 1 (the headline): a host carrying
+// pre-existing warnings the candidate's install did not introduce must not
+// be rolled back. Unfixed, the only way to express "doctor exited 1" is a
+// non-nil error from the old `error`-returning seam, and that always rolls
+// back — this test is written against the new (doctorOutcome, error) seam,
+// so it does not compile against the unfixed code; that compile failure IS
+// the watched-failing run.
+func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	standingWarnings := doctorOutcome{Exit: 1, Warnings: 5, Output: "doctor: warnings=5\n"}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return standingWarnings, nil
+	}
+	stubUpdateBaselineDoctor(t, standingWarnings)
+	rollbackInstallCalled, rollbackDoctorCalled := false, false
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		rollbackInstallCalled = true
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		rollbackDoctorCalled = true
+		return doctorOutcome{}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runUpdate() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if got, err := os.ReadFile(canonical); err != nil || string(got) != "new\n" {
+		t.Fatalf("canonical binary=%q err=%v, want the candidate bytes", got, err)
+	}
+	if !strings.Contains(stdout.String(), "doctor after update: warnings=5 (before update: 5)") {
+		t.Fatalf("stdout=%q, want the warnings-delta line", stdout.String())
+	}
+	if rollbackInstallCalled || rollbackDoctorCalled {
+		t.Fatalf("rollback ran despite a warnings-only candidate doctor (installCalled=%v doctorCalled=%v)", rollbackInstallCalled, rollbackDoctorCalled)
+	}
+}
+
+// TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure pins the other
+// half of the gate: a candidate doctor exit of 3 (failures) still rolls
+// back, and names the failure count in the reported message.
+func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
+	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("runUpdate() code=0, want the candidate failure to roll back; stdout=%q", stdout.String())
+	}
+	if got, err := os.ReadFile(canonical); err != nil || string(got) != "old\n" {
+		t.Fatalf("canonical after rollback=%q err=%v, want old", got, err)
+	}
+	if !strings.Contains(stderr.String(), "1 failure(s)") {
+		t.Fatalf("stderr=%q, want the failure count in the rollback message", stderr.String())
+	}
+}
+
+// TestUpdateNamesNewWarningRowsIntroducedByTheCandidate pins the delta
+// report: a candidate warning row with no textual twin in the baseline
+// output is named under "new warning rows", while rows the baseline already
+// carried are not repeated.
+func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{
+			Exit: 1, Warnings: 3,
+			Output: "doctor: row=A\ndoctor: row=B\ndoctor: row=C new-warning\ndoctor: warnings=3\n",
+		}, nil
+	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{
+		Exit: 1, Warnings: 2,
+		Output: "doctor: row=A\ndoctor: row=B\ndoctor: warnings=2\n",
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runUpdate() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "new warning rows — read them before the next update:") {
+		t.Fatalf("stdout=%q, want the new-warning-rows header", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "doctor: row=C new-warning") {
+		t.Fatalf("stdout=%q, want the new row C listed", stdout.String())
+	}
+	header := strings.Index(stdout.String(), "new warning rows")
+	if header < 0 || strings.Contains(stdout.String()[header:], "doctor: row=A") || strings.Contains(stdout.String()[header:], "doctor: row=B") {
+		t.Fatalf("stdout=%q, the baseline's own rows A/B must not be repeated as new", stdout.String())
+	}
+}
+
+// TestUpdateRollbackDoctorWarningsAreNotResidue pins the rollback half of
+// the gate: a rollback doctor exiting 1 with a tier-aware output (a
+// `doctor: failures=` line, even at 0) reports its warnings and is never
+// claimed as residue.
+func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return errors.New("injected install failure")
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		t.Fatal("candidate doctor ran after install failure")
+		return doctorOutcome{}, nil
+	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: failures=0\ndoctor: warnings=3\n"}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("runUpdate() code=0, want failure; stdout=%q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "rolled back update-owned changes") {
+		t.Fatalf("stderr=%q, want the no-residue rollback message", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "rollback residue") {
+		t.Fatalf("stderr=%q, a warnings-only rollback doctor must not be claimed as residue", stderr.String())
+	}
+}
+
+// TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue pins
+// the other half: a rollback doctor exiting 1 whose output carries neither
+// `doctor: failures=` nor `doctor: clean` predates M2's failure tiers, and
+// must be named as such rather than reported as rollback residue.
+func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *testing.T) {
+	runtime, repo := updateRollbackTestRuntime(t)
+
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return errors.New("injected install failure")
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		t.Fatal("candidate doctor ran after install failure")
+		return doctorOutcome{}, nil
+	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: warnings=3\n"}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("runUpdate() code=0, want failure; stdout=%q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "an older pfm exits 1 on warnings alone") {
+		t.Fatalf("stderr=%q, want the older-binary diagnostic", stderr.String())
 	}
 }
 
@@ -654,9 +922,10 @@ func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
-		return nil
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("runUpdate() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -860,9 +1129,9 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	t.Cleanup(func() {
 		updateBuildCandidate = saved[0].(func(context.Context, string, string, string) error)
 		updateApplyInstall = saved[1].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
-		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error))
 		updateRollbackInstall = saved[3].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
-		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error))
 	})
 	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
@@ -870,16 +1139,19 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return os.WriteFile(settings, []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal hook-only-the-new-release-knows\"}]}]}\n}\n"), 0o600)
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		between(settings)
-		return errors.New("injected doctor failure")
+		return doctorOutcome{Exit: 3, Failures: 1}, nil
 	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	// The previous release's installer recognises only hooks IT generates, so
 	// it leaves the newer hook alone — exactly the live behaviour.
 	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error { return nil }
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
+	}
 
 	var stdout, stderrBuffer bytes.Buffer
 	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderrBuffer, runtime); code == 0 {

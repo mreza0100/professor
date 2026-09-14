@@ -33,6 +33,19 @@ import (
 	"hostops/pfm/internal/store"
 )
 
+// doctorTally is the two-tier count `runDoctor` threads through every row it
+// prints: warnings are advisory, failures are a state `pfm install --yes` is
+// responsible for and did not produce, or a required dependency the engine
+// cannot run without. Only failures gate `pfm update` (update_command.go);
+// warnings are reported as a delta against the pre-update baseline.
+type doctorTally struct {
+	warnings int
+	failures int
+}
+
+func (t *doctorTally) warn() { t.warnings++ }
+func (t *doctorTally) fail() { t.failures++ }
+
 type harvestDoctor interface {
 	Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error)
 	Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error)
@@ -60,7 +73,7 @@ func runDoctor(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet("doctor", "usage: pfm doctor [--verbose] [--skip-harvest]", stderr)
+	flags := newFlagSet("doctor", "usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures", stderr)
 	verbose := flags.Bool("verbose", false, "write raw dependency probe output under tmp/")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
 	if code, ok := parseFlags(flags, args); !ok {
@@ -71,27 +84,27 @@ func runDoctor(
 		return 2
 	}
 	resolved := runtime.Paths
-	warnings := 0
+	tally := &doctorTally{}
 	if runtime.ConfigError != nil {
 		fmt.Fprintf(stdout, "doctor: config error=%v\n", runtime.ConfigError)
-		warnings++
+		tally.fail()
 	}
 	printDoctorConfig(stdout, runtime)
-	warnings += printHarvesterConfigDoctor(stdout, runtime)
-	warnings += printEngineDoctor(stdout, runtime.Config)
-	warnings += printOpencodeStoreDoctor(context.Background(), stdout, runtime.Config)
-	warnings += printEngineCapabilities(stdout)
-	warnings += printMCPClientCutover(stdout, runtime)
+	tally.warnings += printHarvesterConfigDoctor(stdout, runtime)
+	tally.warnings += printEngineDoctor(stdout, runtime.Config)
+	tally.warnings += printOpencodeStoreDoctor(context.Background(), stdout, runtime.Config)
+	tally.warnings += printEngineCapabilities(stdout)
+	tally.warnings += printMCPClientCutover(stdout, runtime)
 	if mcpConfigured(runtime) {
 		status, daemonErr := mcpDaemonReachability(runtime)
 		if daemonErr != nil {
-			warnings++
+			tally.warn()
 			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)
 		} else {
 			fmt.Fprintf(stdout, "doctor: mcp daemon=running pid=%d since=%s endpoint=%s\n", status.PID, status.StartTime, status.Endpoint)
-			warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
+			tally.warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
 			if status.PFMVersion != version {
-				warnings++
+				tally.warn()
 				fmt.Fprintf(stdout, "doctor: mcp daemon=version-skew daemon=%s client=%s\n", status.PFMVersion, version)
 			}
 		}
@@ -99,7 +112,7 @@ func runDoctor(
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", err)
-		return 1
+		return 3
 	}
 	defer database.Close()
 	ctx := context.Background()
@@ -110,13 +123,13 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: remediation: put %s first on PATH and remove or rebuild stale pfm copies\n", filepath.Join(resolved.Home, ".local", "bin"))
 		}
 	}
-	warnings += len(pathWarnings)
+	tally.warnings += len(pathWarnings)
 	if len(pathWarnings) == 0 {
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
-	warnings += printPrePushDoctor(context.Background(), stdout)
-	warnings += printHarnessPromptDoctor(context.Background(), stdout, resolved.Home, runtime.Config)
-	warnings += printSpawnAuditDoctor(
+	tally.warnings += printPrePushDoctor(context.Background(), stdout)
+	tally.warnings += printHarnessPromptDoctor(context.Background(), stdout, resolved.Home, runtime.Config)
+	tally.warnings += printSpawnAuditDoctor(
 		context.Background(),
 		stdout,
 		resolved,
@@ -127,20 +140,20 @@ func runDoctor(
 	printTmuxTitlesDoctor(context.Background(), stdout, resolved, runtime.Config)
 	launcher, launcherErr := installer.InspectClaudeLauncher(resolved.Home)
 	if launcherErr != nil {
-		warnings++
+		tally.fail()
 		fmt.Fprintf(stdout, "doctor: launcher: unreadable error=%v — run pfm install\n", launcherErr)
 	} else {
 		switch launcher.State {
 		case installer.LauncherOK:
 			fmt.Fprintln(stdout, "doctor: launcher: ok")
 		case installer.LauncherMissing:
-			warnings++
+			tally.fail()
 			fmt.Fprintln(stdout, "doctor: launcher: missing — run pfm install")
 		case installer.LauncherDisplaced:
-			warnings++
+			tally.fail()
 			fmt.Fprintf(stdout, "doctor: launcher: DISPLACED by %s — run pfm install\n", launcher.Target)
 		default:
-			warnings++
+			tally.fail()
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
@@ -148,26 +161,33 @@ func runDoctor(
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
-	depWarnings, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
+	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
-	warnings += depWarnings
-	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
-	warnings += installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts, claudeAbsent)
-	warnings += installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
+	tally.warnings += depWarnings
+	tally.failures += depFailures
+	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
+	tally.warnings += overlayWarnings
+	tally.failures += overlayFailures
+	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts, claudeAbsent)
+	tally.warnings += globalAgentsWarnings
+	tally.failures += globalAgentsFailures
+	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
+	tally.warnings += hookWarnings
+	tally.failures += hookFailures
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy user_version: %v\n", err)
-		return 1
+		return 3
 	}
 	check, err := database.QuickCheck(ctx)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy integrity: %v\n", err)
-		return 1
+		return 3
 	}
 	if version != store.SchemaVersion || check != "ok" {
-		warnings++
+		tally.warn()
 	}
 	fmt.Fprintf(
 		stdout,
@@ -180,7 +200,7 @@ func runDoctor(
 	// Kills live in the fleet's shared database, not this binary's cache.
 	sharedState := "ok"
 	if degraded := database.SharedDegraded(); degraded != nil {
-		warnings++
+		tally.warn()
 		sharedState = degraded.Error()
 	}
 	fmt.Fprintf(
@@ -193,10 +213,10 @@ func runDoctor(
 	counts, err := database.Counts(ctx)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy row counts: %v\n", err)
-		return 1
+		return 3
 	}
 	if counts.OrphanedKills != 0 {
-		warnings++
+		tally.warn()
 	}
 	fmt.Fprintf(
 		stdout,
@@ -212,7 +232,7 @@ func runDoctor(
 	if info, err := os.Stat(database.Path() + "-wal"); err == nil {
 		walBytes = info.Size()
 	} else if !os.IsNotExist(err) {
-		warnings++
+		tally.warn()
 		fmt.Fprintf(stdout, "doctor: warning WAL stat: %v\n", err)
 	}
 	fmt.Fprintf(stdout, "doctor: wal_bytes=%d\n", walBytes)
@@ -220,15 +240,15 @@ func runDoctor(
 	killWarnings, err := metaCounter(ctx, database, "busy_kill_warnings")
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy busy counter: %v\n", err)
-		return 1
+		return 3
 	}
 	unkillWarnings, err := metaCounter(ctx, database, "busy_unkill_warnings")
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy busy counter: %v\n", err)
-		return 1
+		return 3
 	}
 	if killWarnings != 0 || unkillWarnings != 0 {
-		warnings++
+		tally.warn()
 	}
 	fmt.Fprintf(
 		stdout,
@@ -243,24 +263,24 @@ func runDoctor(
 	// proves less than the read does: a /proc that exists but denies the read is
 	// the failure that actually matters.
 	if pids, procErr := gather.NewProcFS(resolved.ProcRoot).PIDs(); procErr != nil {
-		warnings++
+		tally.warn()
 		fmt.Fprintf(stdout, "doctor: warning process_table unreadable: %v\n", procErr)
 	} else {
 		fmt.Fprintf(stdout, "doctor: process_table readable pids=%d\n", len(pids))
 	}
 
-	warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
-	warnings += printProfessorDoctor(stdout, ".", resolved.Home)
+	tally.warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
+	tally.warnings += printProfessorDoctor(stdout, ".", resolved.Home)
 
-	warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
+	tally.warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
 
 	crumbEntries, crumbInvalid, crumbErr := crumbHealth(resolved.SIDDir)
 	if crumbErr != nil {
-		warnings++
+		tally.warn()
 		fmt.Fprintf(stdout, "doctor: warning crumb_dir=%v\n", crumbErr)
 	} else {
 		if crumbInvalid != 0 {
-			warnings++
+			tally.warn()
 		}
 		fmt.Fprintf(
 			stdout,
@@ -272,12 +292,20 @@ func runDoctor(
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
-		warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
+		tally.warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
 	}
-	warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
-	warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
-	if warnings != 0 {
-		fmt.Fprintf(stdout, "doctor: warnings=%d\n", warnings)
+	tally.warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
+	tally.warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
+	if tally.failures > 0 {
+		fmt.Fprintf(stdout, "doctor: failures=%d\n", tally.failures)
+	}
+	if tally.warnings > 0 {
+		fmt.Fprintf(stdout, "doctor: warnings=%d\n", tally.warnings)
+	}
+	switch {
+	case tally.failures > 0:
+		return 3
+	case tally.warnings > 0:
 		return 1
 	}
 	fmt.Fprintln(stdout, "doctor: clean")
@@ -634,11 +662,16 @@ func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, option
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) (int, bool) {
-	warnings := 0
-	claudeAbsent := false
+func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) (warnings, failures int, claudeAbsent bool) {
 	for _, result := range configuredDependencyProbe(ctx, entries, options) {
 		entry := result.Entry
+		// A dependency the fleet engine itself cannot run without (Required,
+		// and not one of the opt-in harvestpy sidecar's own entries) is a
+		// FAILURE; the sidecar's own Required-within-itself deps (uv, the
+		// provisioned interpreter) stay warnings — the fleet engine runs
+		// fine without them, and `pfm install --skip-harvest` is pfm's own
+		// decision not to provision them, not a state it failed to produce.
+		gatesEngine := entry.Required && !entry.Harvest
 		switch result.State {
 		case deps.StateSkipped:
 			platform := strings.Join(entry.Platforms, ",")
@@ -650,7 +683,11 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 			requirement := "optional"
 			if entry.Required {
 				requirement = "required"
-				warnings++
+				if gatesEngine {
+					failures++
+				} else {
+					warnings++
+				}
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=(none) MISSING %s — install: %s\n", entry.Name, requirement, entry.InstallHint)
 		case deps.StateBroken:
@@ -659,7 +696,11 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 				fmt.Fprintf(stdout, "doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n", entry.Name, result.Path)
 				continue
 			} else if entry.Required {
-				warnings++
+				if gatesEngine {
+					failures++
+				} else {
+					warnings++
+				}
 			}
 			raw := deps.FirstLine(result.Raw)
 			if raw != "" && !strings.Contains(result.Error, "raw=") {
@@ -670,21 +711,29 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 		case deps.StateTimeout:
 			// A probe that outran its bound answered nothing; it did not answer
 			// broken. The requirement is still unverified, so a required dep
-			// keeps its warning and preflight still refuses — the arithmetic is
+			// keeps its failure and preflight still refuses — the arithmetic is
 			// unchanged — but the line must never send the reader to reinstall a
 			// tool whose only symptom was being slow. It must also not carry the
 			// word this state is not: doctor output gets grepped, and a line
 			// reading "not broken" is counted by `grep -c broken` as a break.
 			if entry.Required {
-				warnings++
+				if gatesEngine {
+					failures++
+				} else {
+					warnings++
+				}
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s timeout error=%s — the binary resolved and was executed but answered nothing within the bound; unverified, no fault established\n", entry.Name, result.Path, result.Error)
 		case deps.StateCancelled:
 			// The caller stopped the probe before it answered. Keep the required
-			// dependency warning arithmetic unchanged, but name the parent context
+			// dependency failure arithmetic unchanged, but name the parent context
 			// as the cause rather than diagnosing the resolved binary.
 			if entry.Required {
-				warnings++
+				if gatesEngine {
+					failures++
+				} else {
+					warnings++
+				}
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s cancelled error=%s — probe stopped by its caller; unverified, no fault established\n", entry.Name, result.Path, result.Error)
 		case deps.StateOK:
@@ -708,7 +757,7 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 			fmt.Fprintf(stdout, "doctor: dep %s verbose broken error=%s\n", entry.Name, result.VerboseErr)
 		}
 	}
-	return warnings, claudeAbsent
+	return warnings, failures, claudeAbsent
 }
 
 // printHostOverlayDoctor checks the two contracted ~/.local/bin overlay
@@ -720,20 +769,25 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 // overlay renders identically to a healthy plain statusline (issue #14 F1)
 // — the failure is invisible from the prompt itself, so doctor has to be
 // the thing that notices it.
-func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config) int {
-	warnings := 0
+// printHostOverlayDoctor treats every non-clean row — a missing/displaced/
+// unknown overlay symlink and a settings.json statusLine.command still
+// naming the raw `pfm statusline` — as a FAILURE, never a soft warning: a
+// misdirected or absent overlay is invisible from the prompt itself (issue
+// #14 F1), and only a state `pfm install --yes` is responsible for producing
+// is reported here at all.
+func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config) (warnings, failures int) {
 	for _, overlay := range installer.InspectHostOverlays(home) {
 		switch overlay.State {
 		case installer.HostOverlayOK:
 			fmt.Fprintf(stdout, "doctor: host_overlay %s ok\n", overlay.Name)
 		case installer.HostOverlayMissing:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "doctor: host_overlay %s missing — run pfm install --yes\n", overlay.Name)
 		case installer.HostOverlayDisplaced:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "doctor: host_overlay %s DISPLACED by %s — run pfm install --yes\n", overlay.Name, overlay.Target)
 		default:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "doctor: host_overlay %s unknown state=%s — run pfm install --yes\n", overlay.Name, overlay.State)
 		}
 	}
@@ -754,10 +808,10 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 		if command == "" || command == overlayCommand || !installer.RawStatusLineCommand(home, command) {
 			continue
 		}
-		warnings++
+		failures++
 		fmt.Fprintf(stdout, "doctor: host_overlay statusline claude[%d] command=%q, want the overlay — run pfm install --yes\n", account.ID, command)
 	}
-	return warnings
+	return warnings, failures
 }
 
 func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig) int {

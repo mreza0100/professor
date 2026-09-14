@@ -342,19 +342,22 @@ func codexHookTemplate(home string) ExpectedHook {
 var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
 
 // ReportHooks prints one doctor line per expected hook, and returns the
-// warnings they earned. When claudeAbsent, every claude[N] target collapses
-// to ONE named skip line per account instead of nine per-hook MISSING rows,
-// and earns no warning — the installer never wires Claude hooks on a host
-// with no Claude Code binary, so doctor must not fault it for that. Codex
-// targets are reported exactly as before regardless of Claude's presence.
-func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) int {
+// (warnings, failures) it earned. A hook missing/broken/stale is a state
+// `pfm install --yes` owns and did not produce, so it is a FAILURE; a drift
+// row (the ownership ledger naming a hook absent from expectations) is
+// advisory and stays a warning. When claudeAbsent, every claude[N] target
+// collapses to ONE named skip line per account instead of nine per-hook
+// MISSING rows, and earns neither — the installer never wires Claude hooks
+// on a host with no Claude Code binary, so doctor must not fault it for
+// that. Codex targets are reported exactly as before regardless of Claude's
+// presence.
+func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) (warnings, failures int) {
 	var results []HookProbeResult
 	if HookProbeOverride != nil {
 		results = HookProbeOverride(home, machine)
 	} else {
 		results = ProbeExpectedHooks(home, machine)
 	}
-	warnings := 0
 	skipped := map[string]bool{}
 	for _, result := range results {
 		hook := result.Hook
@@ -374,21 +377,21 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claude
 		case "ok":
 			fmt.Fprintln(stdout, prefix+" ok")
 		case "missing":
-			warnings++
+			failures++
 			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
 		case "broken":
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
 		case "drift":
 			warnings++
 			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
 		case "stale":
-			warnings++
+			failures++
 			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
 		default:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
 		}
 	}
-	return warnings
+	return warnings, failures
 }

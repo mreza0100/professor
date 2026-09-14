@@ -2,16 +2,27 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	goRuntime "runtime"
 	"strings"
 	"testing"
 
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/store"
 )
 
-func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
+// buildCleanDoctorHome stages the fixture a healthy target HOME carries —
+// the canonical binary, the Claude launcher, both host overlays, and every
+// PFM_* jail env var — and returns the runtime a clean `pfm doctor` run
+// reads. Shared by TestDoctorFreshTargetHomeIsClean and every M2 tier test
+// that needs a clean baseline to add exactly one defect on top of.
+func buildCleanDoctorHome(t *testing.T) commandRuntime {
+	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	home := t.TempDir()
 	canonicalDir := filepath.Join(home, ".local", "bin")
@@ -84,6 +95,11 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runtime
+}
+
+func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("fresh target HOME doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -91,6 +107,73 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	if !strings.Contains(stdout.String(), "doctor: clean") {
 		t.Fatalf("fresh target HOME doctor output=%q", stdout.String())
 	}
+}
+
+// TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone is
+// M2's regression test for issue #24 finding 1: doctor must distinguish a
+// FAILURE (a required dependency missing) from a WARNING (an advisory row
+// no install step owns), gate the exit code on failures alone, and print
+// `doctor: failures=` only when a failure exists. Unfixed, both cases exit
+// 1 — the second assertion (exit 3, `doctor: failures=1`) fails against the
+// unfixed code.
+func TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone(t *testing.T) {
+	t.Run("a warning-tier row alone exits 1 with no failures line", func(t *testing.T) {
+		runtime := buildCleanDoctorHome(t)
+		database, err := store.Open(store.WithWarningWriter(io.Discard))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// busy_kill_warnings is an advisory meta counter (doctor.go's own table:
+		// "everything else ... busy counters" stays a warning) — the row this
+		// case adds carries no failure.
+		if err := database.SetMeta(context.Background(), "busy_kill_warnings", "1"); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+		database.Close()
+
+		var stdout, stderr bytes.Buffer
+		code := runDoctor(nil, &stdout, &stderr, runtime)
+		if code != 1 {
+			t.Fatalf("warning-only doctor code=%d, want 1\nstdout=%s", code, stdout.String())
+		}
+		if strings.Contains(stdout.String(), "doctor: failures=") {
+			t.Fatalf("warning-only doctor printed a failures= line:\n%s", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "doctor: warnings=") {
+			t.Fatalf("warning-only doctor never printed its warnings= line:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("a required dependency missing exits 3 with failures=1", func(t *testing.T) {
+		runtime := buildCleanDoctorHome(t)
+		saved := dependencyProbeOverride
+		t.Cleanup(func() { dependencyProbeOverride = saved })
+		dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
+			results := make([]deps.Result, 0, len(entries))
+			for _, entry := range entries {
+				if !entry.AppliesTo(goRuntime.GOOS) {
+					results = append(results, deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"})
+					continue
+				}
+				if entry.Name == "tmux" {
+					results = append(results, deps.Result{Entry: entry, State: deps.StateMissing})
+					continue
+				}
+				results = append(results, deps.Result{Entry: entry, State: deps.StateOK, Path: "/test/bin/" + entry.Name, Version: entry.MinVersion})
+			}
+			return results
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runDoctor(nil, &stdout, &stderr, runtime)
+		if code != 3 {
+			t.Fatalf("required-dependency-missing doctor code=%d, want 3\nstdout=%s", code, stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "doctor: failures=1") {
+			t.Fatalf("required-dependency-missing doctor never printed failures=1:\n%s", stdout.String())
+		}
+	})
 }
 
 func TestPFMPathWarningsIgnoreHostShimsOutsideTargetHome(t *testing.T) {

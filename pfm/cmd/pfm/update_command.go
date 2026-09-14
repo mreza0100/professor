@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
@@ -26,9 +28,118 @@ var (
 	updateBuildCandidate  = buildUpdateCandidate
 	updateApplyInstall    = applyUpdateInstall
 	updateRunDoctor       = runUpdateDoctor
+	updateBaselineDoctor  = runUpdateBaselineDoctor
 	updateRollbackInstall = applyUpdateInstall
 	updateRollbackDoctor  = runUpdateDoctor
 )
+
+// doctorOutcome is the verdict a candidate/baseline/rollback doctor run
+// reported — never an error on its own. Exit is the process exit code
+// (doctor.go: 0 clean, 1 warnings, 2 usage, 3 failures); Output is the
+// candidate's full captured stdout, read back to diff new warning rows
+// against a baseline and to detect a pre-M2 rollback binary.
+type doctorOutcome struct {
+	Exit     int
+	Warnings int
+	Failures int
+	Output   string
+}
+
+// doctorExitError carries a doctor subprocess's own exit code and captured
+// output back to the caller as data, not as an opaque "target candidate
+// doctor: exit status N" — runUpdateDoctor/runUpdateBaselineDoctor read it to
+// build a doctorOutcome instead of treating every non-zero doctor exit as a
+// spawn failure. `install`'s error path is unaffected; this type is produced
+// only for the "doctor" subcommand.
+type doctorExitError struct {
+	code   int
+	output string
+}
+
+func (e *doctorExitError) Error() string {
+	if strings.TrimSpace(e.output) != "" {
+		return fmt.Sprintf("doctor exited %d: %s", e.code, strings.TrimSpace(lastLine(e.output)))
+	}
+	return fmt.Sprintf("doctor exited %d", e.code)
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	return lines[len(lines)-1]
+}
+
+var (
+	doctorTallyPattern = regexp.MustCompile(`(?m)^doctor: (warnings|failures)=([0-9]+)$`)
+	doctorHexPattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{8,}\b`)
+	doctorDigitPattern = regexp.MustCompile(`[0-9]+`)
+)
+
+// parseDoctorTally reads the `doctor: warnings=N` / `doctor: failures=M`
+// summary lines doctor.go prints (M2's exit-code table): absent means 0,
+// never "unknown" — the summary is only ever omitted when that tier is zero.
+func parseDoctorTally(output string) (warnings, failures int) {
+	for _, match := range doctorTallyPattern.FindAllStringSubmatch(output, -1) {
+		count, err := strconv.Atoi(match[2])
+		if err != nil {
+			continue
+		}
+		if match[1] == "warnings" {
+			warnings = count
+		} else {
+			failures = count
+		}
+	}
+	return warnings, failures
+}
+
+// normalizeDoctorRow masks decimal runs and hex sequences of 8+ characters
+// (PIDs, byte counts, timestamps, content hashes) so a row that differs from
+// its baseline twin only by one of those numbers is recognised as the SAME
+// row, not a new one.
+func normalizeDoctorRow(line string) string {
+	masked := doctorHexPattern.ReplaceAllString(line, "#")
+	return doctorDigitPattern.ReplaceAllString(masked, "#")
+}
+
+func isDoctorSummaryLine(line string) bool {
+	return strings.HasPrefix(line, "doctor: warnings=") ||
+		strings.HasPrefix(line, "doctor: failures=") ||
+		line == "doctor: clean"
+}
+
+// diffNewDoctorWarningRows returns every candidate output line with no
+// normalised twin in the baseline output, in the candidate's own order —
+// the rows the update itself introduced, read before the next update per the
+// doors table.
+func diffNewDoctorWarningRows(baselineOutput, candidateOutput string) []string {
+	baselineRows := make(map[string]bool)
+	for _, line := range strings.Split(baselineOutput, "\n") {
+		if line == "" {
+			continue
+		}
+		baselineRows[normalizeDoctorRow(line)] = true
+	}
+	var newRows []string
+	for _, line := range strings.Split(candidateOutput, "\n") {
+		if line == "" || isDoctorSummaryLine(line) {
+			continue
+		}
+		if baselineRows[normalizeDoctorRow(line)] {
+			continue
+		}
+		newRows = append(newRows, line)
+	}
+	return newRows
+}
+
+// rollbackDoctorPredatesFailureTiers reports whether a rollback doctor's
+// exit-1 output carries neither the M2 `doctor: failures=` line nor
+// `doctor: clean` — the two markers only a tier-aware doctor ever prints.
+// Such a binary predates this milestone and exits 1 on warnings alone; its
+// rollback is not residue.
+func rollbackDoctorPredatesFailureTiers(output string) bool {
+	return !strings.Contains(output, "doctor: failures=") && !strings.Contains(output, "doctor: clean")
+}
 
 func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
@@ -225,6 +336,21 @@ func updateRepository(
 	if err != nil {
 		return fmt.Errorf("snapshot hook files before install: %w", err)
 	}
+	// Baseline doctor: the CURRENT binary's own health, read before any owned
+	// binary is replaced below — the pre-existing warnings the candidate's
+	// doctor is never blamed for (issue #24 finding 1). A baseline that
+	// cannot run, or answers with a code doctor never treats as a verdict
+	// (usage=2), never blocks the update: it is printed and the delta report
+	// below treats every candidate warning as new.
+	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
+	switch {
+	case baselineErr != nil:
+		fmt.Fprintf(stderr, "pfm update: baseline doctor did not run: %v (no pre-update warning count to compare against)\n", baselineErr)
+		baselineOutcome = doctorOutcome{}
+	case baselineOutcome.Exit == 2:
+		fmt.Fprintln(stderr, "pfm update: baseline doctor exited 2 (usage) — no pre-update warning count to compare against")
+		baselineOutcome = doctorOutcome{}
+	}
 	sourceAdvanced := false
 	if !sourceAlreadyContainsTarget {
 		if err := updateGitRun(ctx, repo, "merge", "--ff-only", "--quiet", target); err != nil {
@@ -250,9 +376,36 @@ func updateRepository(
 			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
-	if err := updateRunDoctor(ctx, candidateA, runtime, skipHarvest, stdout, stderr); err != nil {
+	candidateOutcome, doctorErr := updateRunDoctor(ctx, candidateA, runtime, skipHarvest, stdout, stderr)
+	if doctorErr != nil {
 		return updateFailure(
-			fmt.Errorf("doctor after update: %w", err),
+			fmt.Errorf("doctor after update: %w", doctorErr),
+			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+		)
+	}
+	switch candidateOutcome.Exit {
+	case 3:
+		return updateFailure(
+			fmt.Errorf("doctor after update: %d failure(s) — see the doctor rows above", candidateOutcome.Failures),
+			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+		)
+	case 0, 1:
+		fmt.Fprintf(stdout, "doctor after update: warnings=%d (before update: %d)\n", candidateOutcome.Warnings, baselineOutcome.Warnings)
+		if candidateOutcome.Warnings > baselineOutcome.Warnings {
+			newRows := diffNewDoctorWarningRows(baselineOutcome.Output, candidateOutcome.Output)
+			if len(newRows) != 0 {
+				fmt.Fprintln(stdout, "new warning rows — read them before the next update:")
+				for _, row := range newRows {
+					fmt.Fprintln(stdout, row)
+				}
+			}
+		}
+	default:
+		// A doctor exit code that is not one of doctor.go's own 0/1/3 (its
+		// usage-error 2, or anything a future release adds) answered nothing
+		// this gate can trust — never treated as a clean verdict.
+		return updateFailure(
+			fmt.Errorf("doctor after update: exited %d — a doctor that cannot run is not a verdict", candidateOutcome.Exit),
 			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
@@ -352,8 +505,23 @@ func rollbackUpdateState(
 	if err := updateRollbackInstall(ctx, previousBinary, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr); err != nil {
 		return errors.Join(rollbackErr, fmt.Errorf("reapply previous installer state: %w", err))
 	}
-	if err := updateRollbackDoctor(ctx, previousBinary, runtime, skipHarvest, stdout, stderr); err != nil {
-		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", err))
+	rollbackOutcome, doctorErr := updateRollbackDoctor(ctx, previousBinary, runtime, skipHarvest, stdout, stderr)
+	if doctorErr != nil {
+		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", doctorErr))
+	}
+	switch rollbackOutcome.Exit {
+	case 0:
+		// Clean — nothing to report.
+	case 1:
+		// Warnings alone are never residue; they are reported (via the tee to
+		// stdout above), not claimed as a rollback failure. A rollback to a
+		// binary that predates M2's failure tiers ALSO exits 1 on warnings
+		// alone, so that case is named rather than misreported as residue.
+		if rollbackDoctorPredatesFailureTiers(rollbackOutcome.Output) {
+			return errors.Join(rollbackErr, errors.New("doctor after rollback exited 1 (an older pfm exits 1 on warnings alone; read the rows above before repairing anything)"))
+		}
+	default:
+		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: exited %d — see the doctor rows above", rollbackOutcome.Exit))
 	}
 	return rollbackErr
 }
@@ -590,7 +758,12 @@ func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string,
 	return runUpdateCandidateCommand(ctx, candidate, runtime, repo, sourceRepo, stdout, stderr, "install", args...)
 }
 
-func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) error {
+// runUpdateDoctor runs candidate's `doctor` and turns its exit code and
+// captured stdout into a doctorOutcome. A non-zero doctor exit is a verdict,
+// not a Go error — runUpdateCandidateCommand hands it back as a
+// *doctorExitError precisely so this seam can read it as one; only a genuine
+// spawn failure (candidate never ran at all) returns a non-nil error here.
+func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
 	var args []string
 	if skipHarvest {
 		args = []string{"--skip-harvest"}
@@ -602,14 +775,40 @@ func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRunti
 	// rolling back an otherwise healthy update.
 	doctorDirectory, err := os.MkdirTemp("", "pfm-update-doctor-")
 	if err != nil {
-		return fmt.Errorf("create isolated doctor directory: %w", err)
+		return doctorOutcome{}, fmt.Errorf("create isolated doctor directory: %w", err)
 	}
 	defer func() {
 		if cleanupErr := os.RemoveAll(doctorDirectory); cleanupErr != nil {
 			fmt.Fprintf(stderr, "pfm update: cleanup isolated doctor directory %s: %v\n", doctorDirectory, cleanupErr)
 		}
 	}()
-	return runUpdateCandidateCommand(ctx, candidate, runtime, doctorDirectory, "", stdout, stderr, "doctor", args...)
+	runErr := runUpdateCandidateCommand(ctx, candidate, runtime, doctorDirectory, "", stdout, stderr, "doctor", args...)
+	var exitErr *doctorExitError
+	switch {
+	case runErr == nil:
+		return doctorOutcome{Exit: 0}, nil
+	case errors.As(runErr, &exitErr):
+		warnings, failures := parseDoctorTally(exitErr.output)
+		return doctorOutcome{Exit: exitErr.code, Warnings: warnings, Failures: failures, Output: exitErr.output}, nil
+	default:
+		return doctorOutcome{}, runErr
+	}
+}
+
+// runUpdateBaselineDoctor is updateBaselineDoctor's production seam: it runs
+// the CURRENTLY RUNNING binary's own doctor, in a subprocess, before the
+// update touches anything. It must run before any owned binary is replaced —
+// os.Executable() resolves to a real file path, and a doctor run after
+// replacement would read the NEW candidate, defeating the baseline. A
+// baseline that cannot run is never fatal to the update: the caller treats a
+// non-nil error, or an exit code doctor never returns a verdict on, as "no
+// baseline to compare against."
+func runUpdateBaselineDoctor(ctx context.Context, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
+	}
+	return runUpdateDoctor(ctx, self, runtime, skipHarvest, stdout, stderr)
 }
 
 func runUpdateCandidateCommand(
@@ -633,9 +832,24 @@ func runUpdateCandidateCommand(
 	if sourceRepo != "" {
 		command.Env = updateSourceRepoEnv(sourceRepo)
 	}
-	command.Stdout = stdout
 	command.Stderr = stderr
+	var captured *bytes.Buffer
+	if commandName == "doctor" {
+		// Captured AND still shown live: the operator reads the rows as they
+		// print, and runUpdateDoctor reads them back afterward to classify the
+		// exit and diff against the baseline.
+		captured = &bytes.Buffer{}
+		command.Stdout = io.MultiWriter(stdout, captured)
+	} else {
+		command.Stdout = stdout
+	}
 	if err := command.Run(); err != nil {
+		if commandName == "doctor" {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return &doctorExitError{code: exitErr.ExitCode(), output: captured.String()}
+			}
+		}
 		return fmt.Errorf("target candidate %s: %w", commandName, err)
 	}
 	return nil

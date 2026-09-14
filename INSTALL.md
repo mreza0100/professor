@@ -197,7 +197,7 @@ Each tier has one source of truth and one update mechanism:
 
 | Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. |
+| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. It rolls back only on a `pfm doctor` failure (a required dependency, launcher, hooks, host overlay, global agents, config, or database state); pre-existing warnings never block it, and it reports each warning the update newly introduced. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
 

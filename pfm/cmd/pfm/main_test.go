@@ -489,7 +489,7 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 3 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "doctor: config path=") ||

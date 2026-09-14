@@ -52,8 +52,8 @@ func wireHostOverlaySymlinks(t *testing.T, home, managed string) string {
 func TestHostOverlayDoctorMissingSymlinksAreFailures(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
-	if warnings := printHostOverlayDoctor(&output, home, pfmconfig.Config{}); warnings != 2 {
-		t.Fatalf("warnings=%d, want 2 (both overlays missing)\n%s", warnings, output.String())
+	if warnings, failures := printHostOverlayDoctor(&output, home, pfmconfig.Config{}); warnings != 0 || failures != 2 {
+		t.Fatalf("warnings=%d failures=%d, want 0/2 (both overlays missing)\n%s", warnings, failures, output.String())
 	}
 	for _, wanted := range []string{
 		"doctor: host_overlay pfm-statusline missing — run pfm install --yes",
@@ -83,8 +83,8 @@ func TestHostOverlayDoctorDisplacedSymlinkIsAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if warnings := printHostOverlayDoctor(&output, home, pfmconfig.Config{}); warnings != 1 {
-		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	if warnings, failures := printHostOverlayDoctor(&output, home, pfmconfig.Config{}); warnings != 0 || failures != 1 {
+		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}
 	if !strings.Contains(output.String(), "doctor: host_overlay pfm-statusline DISPLACED by "+filepath.Join(canonical, "pfm-statusline")) {
 		t.Fatalf("output missing displaced pfm-statusline:\n%s", output.String())
@@ -119,8 +119,8 @@ func TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot(t *testin
 	t.Run("bare raw pfm statusline is a failure", func(t *testing.T) {
 		writeSettings(t, "pfm statusline")
 		var output bytes.Buffer
-		if warnings := printHostOverlayDoctor(&output, home, machine); warnings != 1 {
-			t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 1 {
+			t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 		}
 		want := `doctor: host_overlay statusline claude[1] command="pfm statusline", want the overlay — run pfm install --yes`
 		if !strings.Contains(output.String(), want) {
@@ -131,16 +131,16 @@ func TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot(t *testin
 	t.Run("absolute raw pfm statusline is a failure", func(t *testing.T) {
 		writeSettings(t, home+"/.local/bin/pfm statusline")
 		var output bytes.Buffer
-		if warnings := printHostOverlayDoctor(&output, home, machine); warnings != 1 {
-			t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 1 {
+			t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 		}
 	})
 
 	t.Run("the overlay command itself is clean", func(t *testing.T) {
 		writeSettings(t, home+"/.local/bin/pfm-statusline")
 		var output bytes.Buffer
-		if warnings := printHostOverlayDoctor(&output, home, machine); warnings != 0 {
-			t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 0 {
+			t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 		}
 		if strings.Contains(output.String(), "host_overlay statusline") {
 			t.Fatalf("doctor flagged the overlay command itself:\n%s", output.String())
@@ -150,8 +150,8 @@ func TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot(t *testin
 	t.Run("a genuinely custom statusLine command is left alone", func(t *testing.T) {
 		writeSettings(t, "~/bin/my-own-statusline.sh")
 		var output bytes.Buffer
-		if warnings := printHostOverlayDoctor(&output, home, machine); warnings != 0 {
-			t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 0 {
+			t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 		}
 		if strings.Contains(output.String(), "host_overlay statusline") {
 			t.Fatalf("doctor flagged a custom statusLine command:\n%s", output.String())

@@ -307,7 +307,7 @@ func TestDoctorReportsClaudeLauncherMissingDisplacedAndOK(t *testing.T) {
 		return code, stdout.String()
 	}
 	code, output := doctor()
-	if code != 1 || !strings.Contains(output, "doctor: launcher: missing — run pfm install") {
+	if code != 3 || !strings.Contains(output, "doctor: launcher: missing — run pfm install") {
 		t.Fatalf("missing launcher doctor code=%d:\n%s", code, output)
 	}
 
@@ -328,7 +328,7 @@ func TestDoctorReportsClaudeLauncherMissingDisplacedAndOK(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, output = doctor()
-	if code != 1 || !strings.Contains(output, "doctor: launcher: DISPLACED by "+native+" — run pfm install") {
+	if code != 3 || !strings.Contains(output, "doctor: launcher: DISPLACED by "+native+" — run pfm install") {
 		t.Fatalf("displaced launcher doctor code=%d:\n%s", code, output)
 	}
 }

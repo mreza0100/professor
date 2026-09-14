@@ -330,9 +330,9 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 	home, machine := stageExpectedHookFixtures(t)
 	var output bytes.Buffer
-	warnings := ReportHooks(&output, home, machine, true)
-	if warnings != 0 {
-		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	warnings, failures := ReportHooks(&output, home, machine, true)
+	if warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
 	if got := strings.Count(output.String(), "doctor: hook claude[2] skipped (no Claude Code binary installed)"); got != 1 {
 		t.Fatalf("want exactly one skip line for claude[2], got %d:\n%s", got, output.String())
@@ -342,17 +342,17 @@ func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 	}
 }
 
-// TestReportHooksClaudePresentStillWarnsOnAMissingHook pins the other half:
-// with Claude present, a missing hook must still warn exactly as before —
-// the absence skip never masks a genuine installer defect.
-func TestReportHooksClaudePresentStillWarnsOnAMissingHook(t *testing.T) {
+// TestReportHooksClaudePresentStillFailsOnAMissingHook pins the other half:
+// with Claude present, a missing hook must still count as a failure exactly
+// as before — the absence skip never masks a genuine installer defect.
+func TestReportHooksClaudePresentStillFailsOnAMissingHook(t *testing.T) {
 	home, machine := stageExpectedHookFixtures(t)
 	hook := findExpectedHook(t, home, machine, "claude[2]", "usage")
 	removeHookFixture(t, hook)
 	var output bytes.Buffer
-	warnings := ReportHooks(&output, home, machine, false)
-	if warnings == 0 {
-		t.Fatalf("a genuinely missing hook must still warn with Claude present:\n%s", output.String())
+	_, failures := ReportHooks(&output, home, machine, false)
+	if failures == 0 {
+		t.Fatalf("a genuinely missing hook must still fail with Claude present:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), "doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install") {
 		t.Fatalf("missing the expected MISSING row:\n%s", output.String())
@@ -360,8 +360,8 @@ func TestReportHooksClaudePresentStillWarnsOnAMissingHook(t *testing.T) {
 }
 
 // TestReportHooksRowsCountMissingBrokenAndDriftWarnings pins every row shape
-// ReportHooks prints and which states earn a warning — ok is silent, while
-// missing, broken, drift, and stale each count one.
+// ReportHooks prints and its two-tier split — ok is silent; missing, broken,
+// and stale are each a failure (owned by install); drift is a warning.
 func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 	saved := HookProbeOverride
 	t.Cleanup(func() { HookProbeOverride = saved })
@@ -376,8 +376,8 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if warnings := ReportHooks(&output, home, pfmconfig.Config{}, false); warnings != 4 {
-		t.Fatalf("warnings=%d, want 4\n%s", warnings, output.String())
+	if warnings, failures := ReportHooks(&output, home, pfmconfig.Config{}, false); warnings != 1 || failures != 3 {
+		t.Fatalf("warnings=%d failures=%d, want 1/3\n%s", warnings, failures, output.String())
 	}
 	for _, wanted := range []string{
 		"doctor: hook claude[1] settings.json SessionEnd clear-kill ok",
@@ -389,5 +389,32 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 		if !strings.Contains(output.String(), wanted) {
 			t.Errorf("output missing %q:\n%s", wanted, output.String())
 		}
+	}
+}
+
+// TestReportHooksCountsMissingAsFailureAndDriftAsWarning is M2's regression
+// test for issue #24 finding 1: ReportHooks must split into (warnings,
+// failures) so `pfm update` can gate on failures alone while still reporting
+// advisory drift. A missing hook is a state `pfm install --yes` owns and did
+// not produce (failure); a drift row is advisory (warning). Unfixed, ReportHooks
+// returns a single int and this test does not compile — that compile failure
+// IS the watched-failing run.
+func TestReportHooksCountsMissingAsFailureAndDriftAsWarning(t *testing.T) {
+	saved := HookProbeOverride
+	t.Cleanup(func() { HookProbeOverride = saved })
+	home := t.TempDir()
+	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
+		return []HookProbeResult{
+			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
+			{Hook: ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
+		}
+	}
+	var output bytes.Buffer
+	warnings, failures := ReportHooks(&output, home, pfmconfig.Config{}, false)
+	if warnings != 1 {
+		t.Fatalf("warnings=%d, want 1 (the drift row)\n%s", warnings, output.String())
+	}
+	if failures != 1 {
+		t.Fatalf("failures=%d, want 1 (the missing hook)\n%s", failures, output.String())
 	}
 }

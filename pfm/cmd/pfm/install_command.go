@@ -75,7 +75,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
+	_, preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
 		SkipHarvest: *skipHarvest, SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex}, Provisioning: true,
 	})
 	if preflight != 0 && mode == installer.ModeApply {

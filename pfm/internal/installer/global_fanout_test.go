@@ -199,9 +199,9 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1 (account 2 has no global agents)\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 0 || failures != 1 {
+		t.Fatalf("warnings=%d failures=%d, want 0/1 (account 2 has no global agents)\n%s", warnings, failures, output.String())
 	}
 	if !strings.Contains(output.String(), "doctor: global-agents account=1 dir="+filepath.Join(home, ".claude")+" state=linked") {
 		t.Fatalf("account 1 was not reported linked:\n%s", output.String())
@@ -233,9 +233,9 @@ func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 0 {
-		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
 	for _, dir := range []string{first, second} {
 		if !strings.Contains(output.String(), "doctor: global-agents account=") ||
@@ -264,9 +264,9 @@ func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 0 || failures != 1 {
+		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}
 	if !strings.Contains(output.String(), "doctor: global-agents account=2 dir="+second+" state=UNREADABLE error=") {
 		t.Fatalf("an unreadable registry was not reported as UNREADABLE:\n%s", output.String())
@@ -296,9 +296,9 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 1 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
 	want := "doctor: global-agents account=2 dir=" + second + " state=CONFLICT names=rr"
 	if !strings.Contains(output.String(), want) {
@@ -317,9 +317,9 @@ func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 1 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
 	if strings.Contains(output.String(), "state=linked") {
 		t.Fatalf("doctor certified accounts against an empty roster:\n%s", output.String())
@@ -337,9 +337,9 @@ func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
 func TestGlobalAgentsDoctorNoCloneIsNamedNotWarned(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 0 {
-		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
 	if !strings.Contains(output.String(), "state=NO-CLONE") {
 		t.Fatalf("doctor never named the missing clone:\n%s", output.String())
@@ -371,9 +371,9 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if warnings != 1 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 1/0\n%s", warnings, failures, output.String())
 	}
 	if !strings.Contains(output.String(), "state=UNRESOLVED") {
 		t.Fatalf("an unreadable marker was not reported as UNRESOLVED:\n%s", output.String())
@@ -394,9 +394,9 @@ func TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount(t *testing.T) 
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), true)
-	if warnings != 0 {
-		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), true)
+	if warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
 	if strings.Count(output.String(), "state=NO-CLAUDE") != 2 {
 		t.Fatalf("want one NO-CLAUDE line per account:\n%s", output.String())
