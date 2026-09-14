@@ -1,0 +1,2 @@
+ALTER TABLE oc_sessions
+  ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0;

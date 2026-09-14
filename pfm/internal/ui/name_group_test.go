@@ -53,6 +53,40 @@ func TestTwoMembersStillShareOneGroupPanel(t *testing.T) {
 	}
 }
 
+// A resumable namesake must join its live group panel, not render flat next
+// to it: a ↻ resumable SOLO:BUILD sitting outside the SOLO panel its live
+// SOLO:REFINE sibling opened is the isLiveNameGroupRow defect this pins.
+func TestResumableNamesakeJoinsLiveGroupPanel(t *testing.T) {
+	rows := []compose.Row{
+		groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "SOLO:REFINE", "alpha"),
+		groupRow(compose.ResumeCodex, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "SOLO:BUILD", "alpha"),
+	}
+	view := renderedList(t, rows)
+	if !strings.Contains(view, "SOLO (2)") {
+		t.Fatalf("live+resumable SOLO namesakes did not fold into one group of 2:\n%s", view)
+	}
+	if strings.Count(view, "SOLO (") != 1 {
+		t.Fatalf("the SOLO group header was printed more than once:\n%s", view)
+	}
+
+	snapshot := fixtureSnapshot(120)
+	snapshot.Rows = rows
+	snapshot.KilledCount = 0
+	model := NewModel(snapshot)
+	if len(model.order) != 2 {
+		t.Fatalf("model.order = %v, want both rows present", model.order)
+	}
+	if len(model.nameGroups) != 2 {
+		t.Fatalf("model.nameGroups = %#v, want both rows carrying the SOLO group", model.nameGroups)
+	}
+	for _, index := range model.order {
+		group, ok := model.nameGroups[index]
+		if !ok || group.name != "SOLO" || group.count != 2 {
+			t.Fatalf("model.nameGroups[%d] = %#v ok=%v, want SOLO count=2", index, group, ok)
+		}
+	}
+}
+
 // A chat with no colon is not a group of one.
 func TestPlainNameGetsNoGroupPanel(t *testing.T) {
 	view := renderedList(t, []compose.Row{

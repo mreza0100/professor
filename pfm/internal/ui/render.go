@@ -855,7 +855,7 @@ func (model Model) renderGroupedRow(
 	badges := model.rowBadges(row)
 	badges = fixedDisplayColumn(badges, 20)
 	prompts := fmt.Sprintf("%dp", row.PromptCount)
-	size := formatSize(row.Size)
+	size := sizeBadge(row)
 	left := pointer + marker + " " + name + " " + badges + " " +
 		fmt.Sprintf("%4s %6s", prompts, size)
 	age := formatAge(row, model.nowNS)

@@ -866,13 +866,14 @@ func (current *composer) ocSessionRow(session store.OcSession) Row {
 		name = naming.DisplayName("", "", session.FirstPrompt)
 	}
 	return Row{
-		Kind:        ResumeOpencode,
-		ID:          session.ID,
-		Name:        name,
-		Project:     projectName(session.ProjectDir),
-		CWD:         firstNonEmpty(session.Directory, session.ProjectDir),
-		PromptCount: session.PromptCount,
-		ActivityNS:  session.TimeUpdatedMS * int64(time.Millisecond),
+		Kind:           ResumeOpencode,
+		ID:             session.ID,
+		Name:           name,
+		Project:        projectName(session.ProjectDir),
+		CWD:            firstNonEmpty(session.Directory, session.ProjectDir),
+		PromptCount:    session.PromptCount,
+		AssistantCount: session.AssistantCount,
+		ActivityNS:     session.TimeUpdatedMS * int64(time.Millisecond),
 	}
 }
 
@@ -1071,10 +1072,13 @@ func defaultEligible(row Row) bool {
 	}
 	// An OpenCode session has no file size at all — it lives entirely inside
 	// its engine's SQLite store, so the size half of this test would suppress
-	// every one of them forever. Its reality signal is the prompt count: a
-	// session with no admitted input was opened and never used.
+	// every one of them forever. Its reality signal is prompts AND an answer:
+	// a session with no admitted input was opened and never used, and one
+	// with prompts but zero assistant messages was opened and never
+	// answered — exactly as empty as a Claude transcript with no visible
+	// turns. The displayed prompt count is never fudged to fake either case.
 	if row.Kind == ResumeOpencode {
-		return !row.BG && row.PromptCount > 0
+		return !row.BG && row.PromptCount > 0 && row.AssistantCount > 0
 	}
 	return !row.BG && row.Size > 0 && row.PromptCount > 0
 }

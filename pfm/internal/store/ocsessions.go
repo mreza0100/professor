@@ -11,7 +11,7 @@ import (
 
 const ocSessionColumns = `
   id, title, directory, project_dir, parent_id, agent, model,
-  first_prompt, prompt_count, tokens_input, tokens_output,
+  first_prompt, prompt_count, assistant_count, tokens_input, tokens_output,
   cost_millicents, time_created_ms, time_updated_ms, time_archived_ms`
 
 func scanOcSession(row interface{ Scan(...any) error }) (OcSession, error) {
@@ -26,6 +26,7 @@ func scanOcSession(row interface{ Scan(...any) error }) (OcSession, error) {
 		&session.Model,
 		&session.FirstPrompt,
 		&session.PromptCount,
+		&session.AssistantCount,
 		&session.TokensInput,
 		&session.TokensOutput,
 		&session.CostMillicents,
@@ -67,7 +68,7 @@ func (s *Store) ReplaceOcSessions(ctx context.Context, sessions []OcSession) (er
 
 		for _, session := range sessions {
 			_, err := tx.ExecContext(ctx, `
-INSERT INTO oc_sessions (`+ocSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO oc_sessions (`+ocSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   title=excluded.title,
   directory=excluded.directory,
@@ -77,6 +78,7 @@ ON CONFLICT(id) DO UPDATE SET
   model=excluded.model,
   first_prompt=excluded.first_prompt,
   prompt_count=excluded.prompt_count,
+  assistant_count=excluded.assistant_count,
   tokens_input=excluded.tokens_input,
   tokens_output=excluded.tokens_output,
   cost_millicents=excluded.cost_millicents,
@@ -92,6 +94,7 @@ ON CONFLICT(id) DO UPDATE SET
 				session.Model,
 				session.FirstPrompt,
 				session.PromptCount,
+				session.AssistantCount,
 				session.TokensInput,
 				session.TokensOutput,
 				session.CostMillicents,
