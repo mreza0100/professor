@@ -14,10 +14,17 @@ import (
 //
 // ConfigError is set only by LoadDiagnosticRuntime: a diagnostic command runs
 // on defaults over a broken config and must still report the original error.
+//
+// ConfigExplicit records whether the caller named a --config path rather
+// than letting resolveExistingPath pick the default one. An explicit path
+// that turns out not to exist (Config.Exists == false) is a caller error, not
+// a fresh machine — callers that converge host wiring from Config must not
+// treat that combination as "nothing configured yet".
 type Runtime struct {
-	Config      Config
-	Paths       paths.Values
-	ConfigError error
+	Config         Config
+	Paths          paths.Values
+	ConfigError    error
+	ConfigExplicit bool
 }
 
 // LoadRuntime resolves paths, loads the config at configPath (the default
@@ -39,7 +46,7 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	}
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configPath != ""}, nil
 }
 
 // RuntimeOrDefault is the caller's runtime, or the default one loaded now —
@@ -63,7 +70,7 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	if configErr == nil {
 		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-		return Runtime{Config: effective, Paths: resolved}, nil
+		return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configPath != ""}, nil
 	}
 	path := configPath
 	if path == "" {
@@ -74,5 +81,5 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	effective.Exists = true
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configPath != ""}, nil
 }

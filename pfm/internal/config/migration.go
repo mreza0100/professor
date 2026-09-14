@@ -43,7 +43,7 @@ func (migration Migration) rewrites() bool {
 func (migration Migration) Steps() []string {
 	var steps []string
 	if migration.LegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, legacyBackupName))
+		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, LegacyBackupName))
 	}
 	if migration.HarvesterEnabled != nil {
 		steps = append(steps, fmt.Sprintf("move mcp.servers.harvester.enabled=%t → %s", *migration.HarvesterEnabled, migration.harvesterPath))
@@ -55,7 +55,7 @@ func (migration Migration) Steps() []string {
 		steps = append(steps, migration.PortKept)
 	}
 	if migration.StrayLegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, legacyBackupName, migration.Path))
+		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, LegacyBackupName, migration.Path))
 	}
 	return steps
 }
@@ -155,7 +155,7 @@ func ApplyMigration(migration Migration) error {
 	if park == "" {
 		return nil
 	}
-	backup := filepath.Join(filepath.Dir(park), legacyBackupName)
+	backup := filepath.Join(filepath.Dir(park), LegacyBackupName)
 	if exists, err := pathExists(backup); err != nil {
 		return err
 	} else if exists {

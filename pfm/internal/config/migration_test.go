@@ -33,7 +33,7 @@ func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("pre-split file still present: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, legacyBackupName)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, LegacyBackupName)); err != nil {
 		t.Fatalf("pre-split backup missing: %v", err)
 	}
 	after, err := Load("", home, nil)
@@ -117,7 +117,7 @@ func TestInterruptedMigrationLeftoverIsParkedNotIgnored(t *testing.T) {
 	if _, err := os.Stat(stray); !os.IsNotExist(err) {
 		t.Fatalf("leftover still present: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, legacyBackupName)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, LegacyBackupName)); err != nil {
 		t.Fatalf("leftover not parked: %v", err)
 	}
 	if content, err := os.ReadFile(filepath.Join(dir, FileName)); err != nil || string(content) != migrated {
@@ -136,7 +136,7 @@ func TestApplyMigrationParksOverAnIdenticalPreSplitBackup(t *testing.T) {
 	legacy := filepath.Join(dir, LegacyFileName)
 	content := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
 	writeFile(t, legacy, content, 0o600)
-	writeFile(t, filepath.Join(dir, legacyBackupName), content, 0o600)
+	writeFile(t, filepath.Join(dir, LegacyBackupName), content, 0o600)
 	before, err := Load("", home, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestApplyMigrationParksOverAnIdenticalPreSplitBackup(t *testing.T) {
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("pre-split file still present: %v", err)
 	}
-	backupContent, err := os.ReadFile(filepath.Join(dir, legacyBackupName))
+	backupContent, err := os.ReadFile(filepath.Join(dir, LegacyBackupName))
 	if err != nil {
 		t.Fatalf("pre-split backup missing: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestApplyMigrationStillRefusesADifferentPreSplitBackup(t *testing.T) {
 	legacyContent := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
 	backupContent := `{"version":2,"theme":"dracula","mcp":{"http":{"port":8377}}}`
 	writeFile(t, legacy, legacyContent, 0o600)
-	writeFile(t, filepath.Join(dir, legacyBackupName), backupContent, 0o600)
+	writeFile(t, filepath.Join(dir, LegacyBackupName), backupContent, 0o600)
 	before, err := Load("", home, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestApplyMigrationStillRefusesADifferentPreSplitBackup(t *testing.T) {
 	if _, statErr := os.Stat(legacy); statErr != nil {
 		t.Fatalf("pre-split file was moved despite the refusal: %v", statErr)
 	}
-	after, readErr := os.ReadFile(filepath.Join(dir, legacyBackupName))
+	after, readErr := os.ReadFile(filepath.Join(dir, LegacyBackupName))
 	if readErr != nil || string(after) != backupContent {
 		t.Fatalf("pre-split backup was touched despite the refusal: %q %v", after, readErr)
 	}
@@ -209,7 +209,7 @@ func TestApplyMigrationParksAnIdenticalStrayLegacyCopy(t *testing.T) {
 	strayContent := `{"version":2,"mcp":{"http":{"port":8377}}}`
 	stray := filepath.Join(dir, LegacyFileName)
 	writeFile(t, stray, strayContent, 0o600)
-	writeFile(t, filepath.Join(dir, legacyBackupName), strayContent, 0o600)
+	writeFile(t, filepath.Join(dir, LegacyBackupName), strayContent, 0o600)
 	loaded, err := Load("", home, nil)
 	if err != nil {
 		t.Fatal(err)

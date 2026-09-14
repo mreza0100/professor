@@ -409,6 +409,50 @@ func TestInstallApplyContinuesPastAnIdenticalPreSplitBackup(t *testing.T) {
 	}
 }
 
+// TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist is a REGRESSION
+// test for issue #24 findings 3/4's guard (M3 change B): an explicit
+// --config path that does not exist loads as silent defaults (config.go
+// Load), and converging host wiring on those defaults would boot out and
+// delete every MCP service the missing file actually enabled — exactly what
+// stranded the launch agent after a rollback across the v0.74.0 config
+// migration. Apply refuses outright; preview names the skip and continues.
+// Unfixed: apply proceeds on defaults with no refusal.
+func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	installerRan := false
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		installerRan = true
+		return installer.Report{}, nil
+	}
+	home := t.TempDir()
+	absent := filepath.Join(home, "missing-config.json")
+	explicitRuntime := commandRuntime{
+		Paths:          paths.Values{Home: home},
+		Config:         pfmconfig.Config{Path: absent, Exists: false},
+		ConfigExplicit: true,
+	}
+
+	var applyStdout, applyStderr bytes.Buffer
+	if code := runInstall([]string{"--yes", "--skip-harvest"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
+		t.Fatalf("runInstall(apply, missing --config) code=%d stdout=%q stderr=%q, want refusal", code, applyStdout.String(), applyStderr.String())
+	}
+	if !strings.Contains(applyStderr.String(), absent+" does not exist; refusing to converge host wiring on defaults") {
+		t.Fatalf("runInstall(apply) stderr=%q, want the refusal naming the missing path", applyStderr.String())
+	}
+	if installerRan {
+		t.Fatal("runInstall(apply, missing --config) ran the installer despite the refusal")
+	}
+
+	var previewStdout, previewStderr bytes.Buffer
+	if code := runInstall([]string{"--skip-harvest"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
+		t.Fatalf("runInstall(preview, missing --config) code=%d stdout=%q stderr=%q, want 0", code, previewStdout.String(), previewStderr.String())
+	}
+	if !strings.Contains(previewStdout.String(), "skip") || !strings.Contains(previewStdout.String(), absent+" does not exist") {
+		t.Fatalf("runInstall(preview) stdout=%q, want a skip line naming the missing path", previewStdout.String())
+	}
+}
+
 func TestUninstallVerbAcceptsConfigDirAndUsesUninstallMode(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })

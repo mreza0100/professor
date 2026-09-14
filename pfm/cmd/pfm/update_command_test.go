@@ -82,7 +82,7 @@ func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
@@ -178,7 +178,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		}
 		return nil
 	}
-	updateRunDoctor = func(_ context.Context, candidate string, _ commandRuntime, skipHarvest bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(_ context.Context, candidate string, _ commandRuntime, _ string, skipHarvest bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
 		doctorCalls++
 		if !strings.HasSuffix(candidate, "pfm-a") {
 			t.Fatalf("doctor candidate=%q, want first reproducible build", candidate)
@@ -252,7 +252,7 @@ func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
@@ -432,7 +432,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
@@ -451,7 +451,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		}
 		return os.RemoveAll(filepath.Dir(managedMutation))
 	}
-	updateRollbackDoctor = func(_ context.Context, candidate string, _ commandRuntime, _ bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(_ context.Context, candidate string, _ commandRuntime, _ string, _ bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
 		if !strings.Contains(candidate, "previous-") {
 			t.Fatalf("rollback doctor candidate=%q, want preserved previous binary", candidate)
 		}
@@ -544,7 +544,7 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 		return nil
 	}
 	standingWarnings := doctorOutcome{Exit: 1, Warnings: 5, Output: "doctor: warnings=5\n"}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return standingWarnings, nil
 	}
 	stubUpdateBaselineDoctor(t, standingWarnings)
@@ -553,7 +553,7 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 		rollbackInstallCalled = true
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		rollbackDoctorCalled = true
 		return doctorOutcome{}, nil
 	}
@@ -592,14 +592,14 @@ func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 
@@ -632,7 +632,7 @@ func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{
 			Exit: 1, Warnings: 3,
 			Output: "doctor: row=A\ndoctor: row=B\ndoctor: row=C new-warning\ndoctor: warnings=3\n",
@@ -678,7 +678,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("candidate doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
@@ -686,7 +686,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: failures=0\ndoctor: warnings=3\n"}, nil
 	}
 
@@ -721,7 +721,7 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		t.Fatal("candidate doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
@@ -729,7 +729,7 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: warnings=3\n"}, nil
 	}
 
@@ -922,7 +922,7 @@ func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
@@ -1129,9 +1129,9 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	t.Cleanup(func() {
 		updateBuildCandidate = saved[0].(func(context.Context, string, string, string) error)
 		updateApplyInstall = saved[1].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
-		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error))
+		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error))
 		updateRollbackInstall = saved[3].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
-		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error))
+		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error))
 	})
 	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
@@ -1139,7 +1139,7 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return os.WriteFile(settings, []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal hook-only-the-new-release-knows\"}]}]}\n}\n"), 0o600)
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		between(settings)
 		return doctorOutcome{Exit: 3, Failures: 1}, nil
 	}
@@ -1149,7 +1149,7 @@ func updateHookRollbackFixture(t *testing.T, between func(settings string)) (set
 	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 

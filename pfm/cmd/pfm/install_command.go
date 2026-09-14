@@ -67,6 +67,18 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", runtimeErr)
 		return 1
 	}
+	// An explicit --config naming a file that does not exist quietly loads
+	// as defaults (config.go); converging host wiring on that would boot out
+	// and delete every MCP service the missing file actually enabled (issue
+	// #24 finding 3/4). Apply refuses; a preview names the skip and continues.
+	if runtime.ConfigExplicit && !runtime.Config.Exists {
+		refusal := fmt.Sprintf("--config %s does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)", runtime.Config.Path)
+		if mode == installer.ModeApply {
+			fmt.Fprintf(stderr, "pfm install: %s\n", refusal)
+			return 1
+		}
+		fmt.Fprintf(stdout, "  skip    %s\n", refusal)
+	}
 	migrated, migrateCode := migrateMachineConfig(mode, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode

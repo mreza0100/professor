@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -332,7 +330,7 @@ func updateRepository(
 		}
 		replacements = append(replacements, updateReplacement{target: targetPath, backup: backup})
 	}
-	hookSnapshots, err := snapshotUpdateHookFiles(runtime)
+	hookSnapshots, err := snapshotUpdateOwnedFiles(runtime)
 	if err != nil {
 		return fmt.Errorf("snapshot hook files before install: %w", err)
 	}
@@ -376,7 +374,11 @@ func updateRepository(
 			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
-	candidateOutcome, doctorErr := updateRunDoctor(ctx, candidateA, runtime, skipHarvest, stdout, stderr)
+	candidateConfigPath, candidateConfigNote := updateConfigPathAfterInstall(runtime)
+	if candidateConfigNote != "" {
+		fmt.Fprintln(stdout, candidateConfigNote)
+	}
+	candidateOutcome, doctorErr := updateRunDoctor(ctx, candidateA, runtime, candidateConfigPath, skipHarvest, stdout, stderr)
 	if doctorErr != nil {
 		return updateFailure(
 			fmt.Errorf("doctor after update: %w", doctorErr),
@@ -485,7 +487,7 @@ func rollbackUpdateState(
 	repo, installSourceRepo, previousRef string,
 	sourceAdvanced bool,
 	replacements []updateReplacement,
-	hookSnapshots []updateHookSnapshot,
+	hookSnapshots []updateFileSnapshot,
 	runtime commandRuntime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
@@ -505,7 +507,7 @@ func rollbackUpdateState(
 	if err := updateRollbackInstall(ctx, previousBinary, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr); err != nil {
 		return errors.Join(rollbackErr, fmt.Errorf("reapply previous installer state: %w", err))
 	}
-	rollbackOutcome, doctorErr := updateRollbackDoctor(ctx, previousBinary, runtime, skipHarvest, stdout, stderr)
+	rollbackOutcome, doctorErr := updateRollbackDoctor(ctx, previousBinary, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
 	if doctorErr != nil {
 		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", doctorErr))
 	}
@@ -524,114 +526,6 @@ func rollbackUpdateState(
 		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: exited %d — see the doctor rows above", rollbackOutcome.Exit))
 	}
 	return rollbackErr
-}
-
-// updateHookSnapshot is one hook-bearing file captured around the candidate's
-// `install --yes`: its bytes before (the state rollback returns to) and right
-// after (the only state rollback may overwrite).
-type updateHookSnapshot struct {
-	path          string // physical path: a symlinked account settings file is written through, never replaced
-	before        []byte
-	beforeExisted bool
-	beforeMode    fs.FileMode
-	after         []byte
-	afterExisted  bool
-	afterErr      error
-}
-
-// snapshotUpdateHookFiles captures every file whose hooks the installer owns
-// (installer.ExpectedHooks: each account's Claude settings, each Codex hooks
-// file) plus the ownership ledger they reconcile against. That is the class
-// whose rollback residue is acute — a hook naming a subcommand only the newer
-// release implements runs on every prompt against the restored binary.
-func snapshotUpdateHookFiles(runtime commandRuntime) ([]updateHookSnapshot, error) {
-	home := runtime.Paths.Home
-	candidates := []string{filepath.Join(filepath.Dir(installer.SourceRepoPath(home)), "settings-hook-ownership.json")}
-	for _, hook := range installer.ExpectedHooks(home, runtime.Config) {
-		candidates = append(candidates, hook.File)
-	}
-	seen := make(map[string]bool, len(candidates))
-	snapshots := make([]updateHookSnapshot, 0, len(candidates))
-	for _, candidate := range candidates {
-		physical, err := filepath.EvalSymlinks(candidate)
-		if errors.Is(err, fs.ErrNotExist) {
-			physical = filepath.Clean(candidate)
-		} else if err != nil {
-			return nil, fmt.Errorf("resolve hook file %s: %w", candidate, err)
-		}
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		content, mode, existed, err := readUpdateHookFile(physical)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, updateHookSnapshot{path: physical, before: content, beforeExisted: existed, beforeMode: mode})
-	}
-	sort.Slice(snapshots, func(left, right int) bool { return snapshots[left].path < snapshots[right].path })
-	return snapshots, nil
-}
-
-// recordUpdateHookAfter captures each file exactly as the candidate's install
-// left it. A file that cannot be read keeps its error, and restore then
-// refuses to touch it.
-func recordUpdateHookAfter(snapshots []updateHookSnapshot) {
-	for index := range snapshots {
-		snapshot := &snapshots[index]
-		snapshot.after, _, snapshot.afterExisted, snapshot.afterErr = readUpdateHookFile(snapshot.path)
-	}
-}
-
-// restoreUpdateHookFiles returns each hook file to its pre-install bytes, but
-// only while it still holds exactly what the candidate's install left: a file
-// something else rewrote since — a live chat saving its settings — is never
-// clobbered. It is named as residue instead.
-func restoreUpdateHookFiles(snapshots []updateHookSnapshot, stderr io.Writer) error {
-	var residue error
-	for _, snapshot := range snapshots {
-		current, _, existed, err := readUpdateHookFile(snapshot.path)
-		if err != nil {
-			residue = errors.Join(residue, err)
-			continue
-		}
-		if existed == snapshot.beforeExisted && bytes.Equal(current, snapshot.before) {
-			continue
-		}
-		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
-			residue = errors.Join(residue, fmt.Errorf("hook file %s changed after the update's install wrote it; left as is — reconcile it by hand", snapshot.path))
-			continue
-		}
-		if snapshot.beforeExisted {
-			err = atomicfile.Write(snapshot.path, snapshot.before, snapshot.beforeMode)
-		} else {
-			err = os.Remove(snapshot.path)
-		}
-		if err != nil {
-			residue = errors.Join(residue, fmt.Errorf("restore hook file %s: %w", snapshot.path, err))
-			continue
-		}
-		fmt.Fprintf(stderr, "pfm update: restored %s to its pre-update state\n", snapshot.path)
-	}
-	return residue
-}
-
-func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
-	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, 0, false, nil
-	}
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("stat hook file %s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, 0, false, fmt.Errorf("hook file %s is not a regular file", path)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("read hook file %s: %w", path, err)
-	}
-	return content, info.Mode().Perm(), true, nil
 }
 
 func preferredUpdateSourceRepo(home, repo string) string {
@@ -750,12 +644,21 @@ func replaceUpdateFile(source, target string) error {
 	return atomicfile.Write(target, raw, info.Mode().Perm())
 }
 
+// applyUpdateInstall runs a candidate or rollback binary's `install --yes`,
+// forwarding --config only when runtime.Config.Path actually exists — a
+// defaults-only host (nothing to migrate or restore) must not have that
+// forwarded path read as operator-explicit and trip install_command.go's B
+// refusal; a real file is still forwarded so migration/restore keep working.
 func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) error {
 	args := []string{"--yes"}
 	if skipHarvest {
 		args = append(args, "--skip-harvest")
 	}
-	return runUpdateCandidateCommand(ctx, candidate, runtime, repo, sourceRepo, stdout, stderr, "install", args...)
+	configPath := ""
+	if runtime.Config.Exists {
+		configPath = runtime.Config.Path
+	}
+	return runUpdateCandidateCommand(ctx, candidate, configPath, repo, sourceRepo, stdout, stderr, "install", args...)
 }
 
 // runUpdateDoctor runs candidate's `doctor` and turns its exit code and
@@ -763,7 +666,10 @@ func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string,
 // not a Go error — runUpdateCandidateCommand hands it back as a
 // *doctorExitError precisely so this seam can read it as one; only a genuine
 // spawn failure (candidate never ran at all) returns a non-nil error here.
-func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
+// configPath is the caller's explicit choice (updateConfigPathAfterInstall's
+// re-resolved path for the post-install candidate doctor, runtime.Config.Path
+// otherwise) — never derived from runtime here.
+func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRuntime, configPath string, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
 	var args []string
 	if skipHarvest {
 		args = []string{"--skip-harvest"}
@@ -782,7 +688,7 @@ func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRunti
 			fmt.Fprintf(stderr, "pfm update: cleanup isolated doctor directory %s: %v\n", doctorDirectory, cleanupErr)
 		}
 	}()
-	runErr := runUpdateCandidateCommand(ctx, candidate, runtime, doctorDirectory, "", stdout, stderr, "doctor", args...)
+	runErr := runUpdateCandidateCommand(ctx, candidate, configPath, doctorDirectory, "", stdout, stderr, "doctor", args...)
 	var exitErr *doctorExitError
 	switch {
 	case runErr == nil:
@@ -808,13 +714,13 @@ func runUpdateBaselineDoctor(ctx context.Context, runtime commandRuntime, skipHa
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
 	}
-	return runUpdateDoctor(ctx, self, runtime, skipHarvest, stdout, stderr)
+	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
 }
 
 func runUpdateCandidateCommand(
 	ctx context.Context,
 	candidate string,
-	runtime commandRuntime,
+	configPath string,
 	workingDirectory string,
 	sourceRepo string,
 	stdout, stderr io.Writer,
@@ -822,8 +728,8 @@ func runUpdateCandidateCommand(
 	commandArgs ...string,
 ) error {
 	args := make([]string, 0, len(commandArgs)+3)
-	if runtime.Config.Path != "" {
-		args = append(args, "--config", runtime.Config.Path)
+	if configPath != "" {
+		args = append(args, "--config", configPath)
 	}
 	args = append(args, commandName)
 	args = append(args, commandArgs...)

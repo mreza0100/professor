@@ -1146,7 +1146,8 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		for _, relative := range []string{"systemd/pfm-mcp.service", "launchd/com.professor.pfm.mcp.plist"} {
 			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(relative))
 			if _, err := os.Lstat(mcpAsset); err == nil {
-				if err := installer.change("remove "+mcpAsset, func() error { return os.Remove(mcpAsset) }); err != nil {
+				message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", mcpAsset, installer.options.MCPConfigPath)
+				if err := installer.change(message, func() error { return os.Remove(mcpAsset) }); err != nil {
 					return false, err
 				}
 				systemdChanged = systemdChanged || strings.HasPrefix(relative, "systemd/")
