@@ -16,3 +16,9 @@ and `(cost)` on any env / hook / permission / model-config delta.
 - B: pfm — a Harvester JSON response over its byte ceiling is refused by name. Several scholarly lookups read JSON through a path that silently truncated at the ceiling, so an oversize answer failed as "unexpected end of JSON input"; every JSON read now reports that the response exceeded its byte limit.
 - B: pfm — a terminal opened by an app that was itself launched from inside a chat opens the pfm picker again. Such an app (a launcher or window manager a chat relaunched) hands every process it starts the chat's CLAUDECODE / session markers, so each new VS Code terminal looked like a shell inside a chat and auto-open silently stepped aside. The Professor extension's terminal and the fallback PFM profile now drop those markers, and a shell that still inherits them says so on stderr instead of skipping in silence.
 #### → For: an owned VS Code PFM profile upgrades automatically on the next `pfm install`; a hand-edited PFM profile does not — add the null env keys (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `TMUX`, `TMUX_PANE`) yourself.
+- pfm: heal — a wedged/midline projection cursor whose rollout is not canonically ordinalled
+  (a repeated, regressed, or skipped ordinal — the openai/codex#38792 duplicate resume-boundary
+  variant) now reports NONCANONICAL instead of WEDGED, and one whose rollout could not be read end
+  to end reports UNSCANNED; both are new verdicts that are never deleted, report or `--apply`,
+  because a rebuild from zero fails on the same record until Codex >= 0.154.0 (PR #42369) projects
+  past it. No adopter action.
