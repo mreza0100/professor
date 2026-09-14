@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,7 +210,7 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if warnings := printDependencyDoctor(context.Background(), &output, entries, deps.ProbeOptions{}); warnings != 2 {
+	if warnings := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); warnings != 2 {
 		t.Fatalf("warnings=%d, want 2\n%s", warnings, output.String())
 	}
 	want := strings.Join([]string{
@@ -221,6 +222,64 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 	}, "\n")
 	if output.String() != want {
 		t.Fatalf("dependency rows:\n%s\nwant:\n%s", output.String(), want)
+	}
+}
+
+// TestDependencyDoctorClaudeAbsenceIsNamedNotWarned pins the ruling: pfm's own
+// launcher exiting 127 (its "no real Claude binary" contract, assets/bin/claude)
+// is absence — MISSING optional, no warning — while the SAME exit code from a
+// binary that is not pfm's launcher, and pfm's launcher exiting anything else,
+// both stay broken and counted. The identity check is installer.ClaudeAbsent,
+// never a string match on stderr.
+func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
+	saved := dependencyProbeOverride
+	t.Cleanup(func() { dependencyProbeOverride = saved })
+	home := t.TempDir()
+	launcher := filepath.Join(home, ".local", "bin", pfmengine.MustLookup(pfmengine.Claude).Binary)
+	// Required:true here (unlike the real registry's optional claude entry) is
+	// what makes the "still counted" half of this test meaningful: it proves
+	// absence overrides the warning even for a dependency that would
+	// otherwise count one, and that a merely-broken claude still gets it.
+	entry := deps.Entry{Name: "claude", Engine: pfmengine.Claude, Required: true}
+	nonPfm := filepath.Join(home, "opt", "claude")
+
+	cases := []struct {
+		name       string
+		path       string
+		exitCode   int
+		wantMissed bool
+	}{
+		{"pfms launcher absent", launcher, 127, true},
+		{"pfms launcher broken", launcher, 1, false},
+		{"non-pfm claude at 127", nonPfm, 127, false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+				return []deps.Result{{
+					Entry: entry, State: deps.StateBroken, Path: testCase.path,
+					ExitCode: testCase.exitCode, Error: fmt.Sprintf("exit status %d", testCase.exitCode),
+				}}
+			}
+			var output bytes.Buffer
+			warnings := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
+			if testCase.wantMissed {
+				if warnings != 0 {
+					t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+				}
+				want := "doctor: dep claude path=" + testCase.path + " MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n"
+				if output.String() != want {
+					t.Fatalf("output=%q, want %q", output.String(), want)
+				}
+			} else {
+				if warnings != 1 {
+					t.Fatalf("warnings=%d, want 1 (still broken, still counted)\n%s", warnings, output.String())
+				}
+				if !strings.Contains(output.String(), "broken") {
+					t.Fatalf("output never called it broken:\n%s", output.String())
+				}
+			}
+		})
 	}
 }
 
@@ -236,7 +295,7 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	warnings := printDependencyDoctor(context.Background(), &output, entries, deps.ProbeOptions{})
+	warnings := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 — a required timed-out dep still contributes its warning\n%s", warnings, output.String())
 	}
@@ -259,7 +318,7 @@ func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
 		}}
 	}
 	var output bytes.Buffer
-	warnings := printDependencyDoctor(context.Background(), &output, []deps.Entry{entry}, deps.ProbeOptions{})
+	warnings := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 for a required unanswered probe\n%s", warnings, output.String())
 	}

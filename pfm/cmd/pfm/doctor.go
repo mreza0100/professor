@@ -151,7 +151,7 @@ func runDoctor(
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
-	warnings += printDependencyDoctor(ctx, stdout, deps.Registry(deps.Options{
+	warnings += printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
 	warnings += printHookDoctor(stdout, resolved.Home, runtime.Config)
@@ -654,7 +654,7 @@ func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, option
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps.Entry, options deps.ProbeOptions) int {
+func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) int {
 	warnings := 0
 	for _, result := range configuredDependencyProbe(ctx, entries, options) {
 		entry := result.Entry
@@ -673,7 +673,10 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=(none) MISSING %s — install: %s\n", entry.Name, requirement, entry.InstallHint)
 		case deps.StateBroken:
-			if entry.Required {
+			if entry.Engine == pfmengine.Claude && installer.ClaudeAbsent(home, result.Path, result.ExitCode) {
+				fmt.Fprintf(stdout, "doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n", entry.Name, result.Path)
+				continue
+			} else if entry.Required {
 				warnings++
 			}
 			raw := deps.FirstLine(result.Raw)

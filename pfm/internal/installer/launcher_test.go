@@ -164,6 +164,33 @@ func TestRenderedClaudeLauncherChoosesNewestVersionByFreshness(t *testing.T) {
 	}
 }
 
+// TestRenderedClaudeLauncherExits127WithNoRealBinary pins the shim's exit
+// contract: no real Claude binary anywhere (empty PATH, empty HOME) is exit
+// 127 — POSIX "command not found" — never a bare 1, so doctor can tell
+// absence from a real binary's own failure without reading stderr text.
+func TestRenderedClaudeLauncherExits127WithNoRealBinary(t *testing.T) {
+	home := t.TempDir()
+	raw, err := readAsset("bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := renderClaudeLauncherAsset(raw, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(home, "claude")
+	if err := os.WriteFile(launcher, rendered, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(launcher, "--version")
+	command.Env = []string{"HOME=" + home, "PATH=" + filepath.Join(home, "empty-bin")}
+	_, err = command.CombinedOutput()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 127 {
+		t.Fatalf("launcher with no real binary err=%v, want exit 127", err)
+	}
+}
+
 func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 	home := t.TempDir()
 	canonical := canonicalClaudeLauncher(home)
@@ -175,5 +202,39 @@ func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 	}
 	if _, err := InspectClaudeLauncher(home); err == nil || !strings.Contains(err.Error(), "inspect managed Claude launcher") {
 		t.Fatalf("InspectClaudeLauncher broken target error=%v", err)
+	}
+}
+
+func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
+	home := t.TempDir()
+	canonical := canonicalClaudeLauncher(home)
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(managedClaudeLauncher(home)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(home, "elsewhere", "claude")
+	if err := os.MkdirAll(filepath.Dir(elsewhere), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ClaudeAbsent(home, canonical, 127) {
+		t.Fatal("pfm's own launcher at exit 127 was not recognised as absent")
+	}
+	if ClaudeAbsent(home, canonical, 1) {
+		t.Fatal("pfm's own launcher at exit 1 was wrongly treated as absent")
+	}
+	if ClaudeAbsent(home, elsewhere, 127) {
+		t.Fatal("a non-pfm claude at exit 127 was wrongly treated as absent")
 	}
 }

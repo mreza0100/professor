@@ -12,13 +12,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	config "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
+	"hostops/pfm/internal/installer"
 )
 
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
@@ -34,13 +37,18 @@ type harnessCapture struct {
 	CLIVersion    string
 }
 
-var harnessCaptureOverride func(context.Context, config.Config, string) (harnessCapture, error)
+var harnessCaptureOverride func(context.Context, string, config.Config, string) (harnessCapture, error)
 
-func configuredHarnessCapture(ctx context.Context, machine config.Config, model string) (harnessCapture, error) {
+// errClaudeAbsent marks a capture failure as "no Claude Code binary
+// installed" — installer.ClaudeAbsent's verdict — so the doctor row can
+// skip it rather than counting a warning it never earned.
+var errClaudeAbsent = errors.New("no Claude Code binary installed")
+
+func configuredHarnessCapture(ctx context.Context, home string, machine config.Config, model string) (harnessCapture, error) {
 	if harnessCaptureOverride != nil {
-		return harnessCaptureOverride(ctx, machine, model)
+		return harnessCaptureOverride(ctx, home, machine, model)
 	}
-	return captureHarnessPrompt(ctx, machine, model)
+	return captureHarnessPrompt(ctx, home, machine, model)
 }
 
 // harnessBuildStamp is the CLI build stamp inside the billing-header system
@@ -101,6 +109,9 @@ func normalizeHarnessPrompt(prompt string) string {
 // harnessPromptVerdict is the pure comparator: baseline hash + name, the
 // captured prompt, and the capture error map to exactly one doctor line.
 func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr error) (string, bool) {
+	if errors.Is(captureErr, errClaudeAbsent) {
+		return "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare", false
+	}
 	if captureErr != nil {
 		return fmt.Sprintf("doctor: harness-prompt: CHECK FAILED to run (%v) — drift unknown", captureErr), true
 	}
@@ -114,7 +125,7 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 
 // captureHarnessPrompt uses the shared headless runner with the unmodified
 // harness prompt and a local sink that captures the request and returns 400.
-func captureHarnessPrompt(ctx context.Context, machine config.Config, model string) (harnessCapture, error) {
+func captureHarnessPrompt(ctx context.Context, home string, machine config.Config, model string) (harnessCapture, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return harnessCapture{}, fmt.Errorf("open capture sink: %w", err)
@@ -135,6 +146,15 @@ func captureHarnessPrompt(ctx context.Context, machine config.Config, model stri
 	versionRaw, versionErr := versionCmd.Output()
 	versionCancel()
 	if versionErr != nil {
+		resolved := binary
+		if !filepath.IsAbs(resolved) {
+			if looked, lookErr := exec.LookPath(binary); lookErr == nil {
+				resolved = looked
+			}
+		}
+		if installer.ClaudeAbsent(home, resolved, deps.ExitCode(versionErr)) {
+			return harnessCapture{}, errClaudeAbsent
+		}
 		return harnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
 	}
 	_, runErr := headlessrun.Run(ctx, headlessrun.Request{
