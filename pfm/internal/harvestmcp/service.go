@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -241,22 +240,22 @@ func harvestStateRoot(runtime Runtime) (string, error) {
 }
 
 func newHTTPClient(runtime Runtime) (*http.Client, error) {
-	transport := http.DefaultTransport
+	var proxy *url.URL
 	if runtime.ProxyURL != "" {
-		proxy, err := url.Parse(runtime.ProxyURL)
+		parsed, err := url.Parse(runtime.ProxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("parse Harvester proxy URL: %w", err)
 		}
-		base, ok := http.DefaultTransport.(*http.Transport)
-		if !ok {
-			return nil, errors.New("default HTTP transport cannot be configured for proxy")
-		}
-		copyTransport := base.Clone()
-		copyTransport.Proxy = http.ProxyURL(proxy)
-		transport = copyTransport
+		proxy = parsed
 	}
-	transport = userAgentTransport{base: transport, value: runtime.UserAgent}
-	client := &http.Client{Timeout: 60 * time.Second, Transport: transport}
+	// harvest.NewDirectClient pins every dial to the DoH-resolved, SSRF-checked
+	// address (the same guarantee every other Harvester rung has) instead of
+	// the bare http.DefaultTransport clone this resolver client used to dial
+	// through. The runtime User-Agent goes INTO the pinned client: harvest's
+	// inner wrapper stamps its own UA on every request, so an outer wrapper
+	// alone would lose to it on the wire.
+	client := harvest.NewDirectClient(60*time.Second, proxy, runtime.UserAgent, harvest.ResolvePublicHost)
+	client.Transport = userAgentTransport{base: client.Transport, value: runtime.UserAgent}
 	client.CheckRedirect = func(request *http.Request, _ []*http.Request) error {
 		return assertPublicURL(request.URL)
 	}
@@ -990,38 +989,11 @@ func (service *Service) fetchOneImage(ctx context.Context, source string) ImageI
 	return ImageItem{Source: source, Path: result.Path, Bytes: result.Bytes, Error: result.Error}
 }
 
+// assertPublicURL delegates to harvest's own SSRF/scheme chokepoint
+// (AssertFetchable) instead of keeping a second, drifting copy of the
+// private/internal check here — harvest.assertFetchable is the one
+// authority (its suffix list, e.g. .ts.net, is not duplicated in this
+// package).
 func assertPublicURL(parsed *url.URL) error {
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
-	}
-	if parsed.User != nil {
-		return errors.New("URL userinfo is not allowed")
-	}
-	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
-	if host == "" {
-		return errors.New("URL has no host")
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if privateIP(ip) {
-			return fmt.Errorf("refusing private/internal host %s", host)
-		}
-		return nil
-	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" {
-		return fmt.Errorf("refusing private/internal host %s", host)
-	}
-	addresses, err := net.LookupIP(host)
-	if err != nil {
-		return fmt.Errorf("resolve URL host %s: %w", host, err)
-	}
-	for _, address := range addresses {
-		if privateIP(address) {
-			return fmt.Errorf("refusing private/internal host %s", host)
-		}
-	}
-	return nil
-}
-
-func privateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+	return harvest.AssertFetchable(parsed.String())
 }

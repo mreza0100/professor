@@ -330,9 +330,15 @@ func assertFetchable(raw string, strictDNS bool) error {
 	return nil
 }
 
-// lookupIP is the resolver seam; tests stub it to simulate SERVFAIL and
+// lookupIP is the resolver seam behind assertFetchable. Its default is the
+// same DNS-over-HTTPS resolver every dial pins to (ResolvePublicHost): a
+// system resolver the network rewrites must not decide what the pre-check
+// refuses. query (doh.go) bounds its own timeout, so context.Background()
+// here never hangs the pre-check. Tests stub it to simulate SERVFAIL and
 // rebind records without touching the network.
-var lookupIP = net.LookupIP
+var lookupIP = func(host string) ([]net.IP, error) {
+	return ResolvePublicHost(context.Background(), host)
+}
 
 // AssertFetchable is the public SSRF/scheme chokepoint for adapters whose
 // transport dials only the address it validated itself.
