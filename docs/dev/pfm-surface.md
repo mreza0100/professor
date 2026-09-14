@@ -35,7 +35,7 @@ Current operator and integration surface. Legend: **●** established · **◆**
 | ● `statusline` | (stdin JSON from Claude Code) | + `7d-fable` segment and `✦` Fable symbol; account badge from config (unknown → no badge, never 🥇). |
 | ● `usage-hook` | (UserPromptSubmit hook) | OAuth usage fetch; see [usage-hook](#usage-hook) for shared cache and retry behavior. |
 | ● `dream` | `pfm dream …` · `pfm dream hook agent-inject\|nudge\|codex` | Manual memory-organ commands remain available. Automatic Dream/STM injection hooks are paused: install removes prior Claude and Codex hook wiring and does not add it back. |
-| ● `heal` | `pfm heal` | Codex projection heal. Unchanged. |
+| ● `heal` | `pfm heal` | Codex projection heal. A wedged/midline cursor whose rollout is not canonically ordinalled is reported NONCANONICAL, and one whose rollout could not be read end to end is UNSCANNED — neither is ever deleted, since a rebuild from zero fails on the same record until Codex >= 0.154.0 projects past it. |
 | ● `reap` | `pfm reap …` | Unchanged. |
 | ✚ `issues` | `pfm issues [--all] [--json]` | Reads the servicedesk complaint ledger that agents file through `issue_servicedesk`. Default view is open issues only; `--all` includes closed ones. The three states stay visibly distinct: an empty ledger prints `no open issues` and exits 0, a store that could not be read prints the cause on stderr and exits 1 (a failed look is never rendered as an empty one), and `--json` always emits an array so a script reading structured output gets `[]` rather than a prose sentence. |
 | ● `run` | `pfm run …` | Chat-spawn plumbing (backs `chat new`). Unchanged. |

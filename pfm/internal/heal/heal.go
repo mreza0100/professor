@@ -16,11 +16,14 @@
 package heal
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -33,6 +36,12 @@ import (
 
 	"hostops/pfm/internal/sqlitedb"
 )
+
+// CodexProjectsPastAnomalies is the first Codex release whose projector skips a repeated,
+// regressed, or missing rollout ordinal instead of refusing the thread forever
+// (openai/codex PR #42369, first tag rust-v0.154.0-alpha.1). Below it, a NONCANONICAL
+// thread's projection must not be deleted: the rebuild from zero fails on the same record.
+const CodexProjectsPastAnomalies = "0.154.0"
 
 // Verdict is one thread's projection state.
 type Verdict string
@@ -52,11 +61,30 @@ const (
 	// VerdictNoRollout means the thread's rollout file is gone, so there is
 	// nothing to project and nothing to repair.
 	VerdictNoRollout Verdict = "NO_ROLLOUT"
+	// VerdictNoncanonical means the cursor is wedged or midline AND a
+	// full-file scan found the rollout's ordinal sequence is not exactly
+	// 0,1,2,… — a repeated, regressed, or skipped ordinal, a record with no
+	// ordinal, or an unparseable record. A rebuild from zero fails on the
+	// same record on Codex < CodexProjectsPastAnomalies, so the projection
+	// is left alone.
+	VerdictNoncanonical Verdict = "NONCANONICAL"
+	// VerdictUnscanned means the cursor is wedged or midline but the rollout
+	// could not be read end to end while scanning it: "we failed to look" is
+	// not "nothing there", so the projection is left alone and the read
+	// error is the Detail.
+	VerdictUnscanned Verdict = "UNSCANNED"
 )
 
 // Broken reports whether a verdict is one healing fixes.
 func (verdict Verdict) Broken() bool {
 	return verdict == VerdictWedged || verdict == VerdictMidline
+}
+
+// LeftAlone reports whether a verdict is a wedged/midline cursor healing
+// refuses to touch: the rollout itself rules out a safe rebuild, or the scan
+// that would tell us could not run.
+func (verdict Verdict) LeftAlone() bool {
+	return verdict == VerdictNoncanonical || verdict == VerdictUnscanned
 }
 
 // ThreadState is one thread's cursor, its rollout, and the verdict on them.
@@ -78,6 +106,10 @@ type Report struct {
 	Healed      []string
 	SkippedLive []string
 	BackupDir   string
+	// LeftAlone holds the ids of every thread whose verdict is
+	// NONCANONICAL or UNSCANNED. Sweep fills it, not Run, so a report-only
+	// run carries it too.
+	LeftAlone []string
 }
 
 // Stores are the two SQLite files a heal reads: Codex's thread registry and
@@ -191,6 +223,9 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 		)
 		report.Totals[state.Verdict]++
 		report.Threads = append(report.Threads, state)
+		if state.Verdict.LeftAlone() {
+			report.LeftAlone = append(report.LeftAlone, state.ID)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return Report{}, fmt.Errorf("iterate the projection cursors: %w", err)
@@ -198,6 +233,7 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 	sort.Slice(report.Threads, func(left, right int) bool {
 		return report.Threads[left].ID < report.Threads[right].ID
 	})
+	sort.Strings(report.LeftAlone)
 	return report, nil
 }
 
@@ -228,29 +264,29 @@ func classify(
 	if offset > 0 {
 		previous := make([]byte, 1)
 		if _, err := file.ReadAt(previous, offset-1); err != nil {
-			return VerdictMidline,
+			return applyOrdinalScan(rolloutPath, VerdictMidline,
 				fmt.Sprintf("offset %d is unreadable in %d bytes", offset, size),
-				size
+				size)
 		}
 		if previous[0] != '\n' {
-			return VerdictMidline,
+			return applyOrdinalScan(rolloutPath, VerdictMidline,
 				fmt.Sprintf("offset %d sits inside a record of %d bytes", offset, size),
-				size
+				size)
 		}
 	}
 	line, err := readRecordAt(file, offset)
 	if err != nil {
-		return VerdictMidline,
+		return applyOrdinalScan(rolloutPath, VerdictMidline,
 			fmt.Sprintf("no readable record at offset %d", offset),
-			size
+			size)
 	}
 	var record struct {
 		Ordinal *int64 `json:"ordinal"`
 	}
 	if err := json.Unmarshal(line, &record); err != nil {
-		return VerdictMidline,
+		return applyOrdinalScan(rolloutPath, VerdictMidline,
 			fmt.Sprintf("unparseable record at offset %d", offset),
-			size
+			size)
 	}
 	fileOrdinal := int64(-1)
 	if record.Ordinal != nil {
@@ -261,14 +297,154 @@ func classify(
 			fmt.Sprintf("%d/%d ordinal %d", offset, size, ordinal),
 			size
 	}
-	return VerdictWedged,
+	return applyOrdinalScan(rolloutPath, VerdictWedged,
 		fmt.Sprintf(
 			"expects ordinal %d, the file has %d; %.1f MB unprojected",
 			ordinal,
 			fileOrdinal,
 			float64(size-offset)/1e6,
 		),
-		size
+		size)
+}
+
+// unscannedSuffix is the fixed clause classify appends to a WEDGED/MIDLINE
+// Detail when scanOrdinals could not read the rollout end to end. Thread
+// strips it back off to report just the read error.
+const unscannedSuffix = "the rollout could not be scanned: "
+
+// applyOrdinalScan runs the full-file ordinal scan behind a WEDGED/MIDLINE
+// verdict and downgrades it: NONCANONICAL when the rollout's ordinal
+// sequence is not canonical, UNSCANNED when the scan itself could not finish.
+// Neither downgrade is ever deleted — see Verdict.LeftAlone.
+func applyOrdinalScan(
+	rolloutPath string,
+	verdict Verdict,
+	detail string,
+	size int64,
+) (Verdict, string, int64) {
+	found, ok, err := scanOrdinals(rolloutPath)
+	if err != nil {
+		return VerdictUnscanned,
+			fmt.Sprintf("%s; %s%s", detail, unscannedSuffix, err),
+			size
+	}
+	if ok {
+		return VerdictNoncanonical,
+			fmt.Sprintf(
+				"%s; line %d %s ordinal %d at offset %d (%s)",
+				detail, found.Line, found.Kind, found.Ordinal, found.Offset, found.Type,
+			),
+			size
+	}
+	return verdict, detail, size
+}
+
+// anomaly is the first departure scanOrdinals finds from a canonical
+// 0,1,2,… ordinal sequence anywhere in a rollout.
+type anomaly struct {
+	Line     int    // 1-based physical line
+	Offset   int64  // byte offset of the record's first byte
+	Expected int64  // the ordinal a canonical file carries at this line (line-1)
+	Ordinal  int64  // -1 when the record carries none
+	Kind     string // "repeats", "skips to", "carries no ordinal", "is unparseable"
+	Type     string // "event_msg/thread_settings_applied" — record type + payload type
+}
+
+// openRollout opens a rollout for a full-file ordinal scan. It is a package
+// var so a test can inject a reader that fails mid-stream without touching
+// the filesystem.
+var openRollout = func(path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
+
+// scanOrdinals streams a rollout end to end looking for the first record
+// whose ordinal breaks the canonical 0,1,2,… sequence: a repeat, a
+// regression, a gap, a record with no ordinal, or one that will not parse.
+// Records exceed 64 KB, so this reads with bufio.Reader.ReadBytes rather than
+// bufio.Scanner, whose default token buffer would truncate them. Blank lines
+// are not records and not anomalies, matching the projector's own skip; a
+// trailing partial line with no newline is not an anomaly either — Codex
+// leaves it for the next pass.
+func scanOrdinals(path string) (anomaly, bool, error) {
+	source, err := openRollout(path)
+	if err != nil {
+		return anomaly{}, false, fmt.Errorf("open %q to scan ordinals: %w", path, err)
+	}
+	defer source.Close()
+
+	reader := bufio.NewReader(source)
+	var offset int64
+	line := 0
+	expected := int64(0)
+	for {
+		raw, readErr := reader.ReadBytes('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return anomaly{}, false, fmt.Errorf(
+				"scan %q at byte %d: %w", path, offset, readErr,
+			)
+		}
+		if len(raw) == 0 {
+			break
+		}
+		if raw[len(raw)-1] != '\n' {
+			// A trailing partial line: not a record, and not an anomaly.
+			break
+		}
+		lineOffset := offset
+		offset += int64(len(raw))
+		line++
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 {
+			continue
+		}
+		var record struct {
+			Ordinal *int64 `json:"ordinal"`
+			Type    string `json:"type"`
+			Payload struct {
+				Type string `json:"type"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(trimmed, &record); err != nil {
+			return anomaly{
+				Line:     line,
+				Offset:   lineOffset,
+				Expected: expected,
+				Ordinal:  -1,
+				Kind:     "is unparseable",
+			}, true, nil
+		}
+		recordType := record.Type
+		if record.Payload.Type != "" {
+			recordType += "/" + record.Payload.Type
+		}
+		if record.Ordinal == nil {
+			return anomaly{
+				Line:     line,
+				Offset:   lineOffset,
+				Expected: expected,
+				Ordinal:  -1,
+				Kind:     "carries no ordinal",
+				Type:     recordType,
+			}, true, nil
+		}
+		fileOrdinal := *record.Ordinal
+		if fileOrdinal != expected {
+			kind := "skips to"
+			if fileOrdinal < expected {
+				kind = "repeats"
+			}
+			return anomaly{
+				Line:     line,
+				Offset:   lineOffset,
+				Expected: expected,
+				Ordinal:  fileOrdinal,
+				Kind:     kind,
+				Type:     recordType,
+			}, true, nil
+		}
+		expected++
+	}
+	return anomaly{}, false, nil
 }
 
 // readRecordAt returns the one JSONL record starting at offset.
