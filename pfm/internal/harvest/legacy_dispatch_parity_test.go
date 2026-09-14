@@ -171,7 +171,9 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "search") {
+	// SearchAvailable defaults false here, so the recovery hint names findWorks
+	// rather than the unavailable `search` tool — see SearchHint.
+	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "alternative copy") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
 	}
 }

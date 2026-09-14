@@ -94,7 +94,10 @@ func failureMessage(item string, status int, kind string, challenge bool, search
 		))
 	}
 	if challenge {
-		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. Use `search` to find a mirror or alternative copy.", item)
+		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s", item, SearchHint(searchAvailable,
+			"Use `search` to find a mirror or alternative copy.",
+			"Find a mirror or alternative copy with findWorks or another URL.",
+		))
 	}
 	if status >= 400 {
 		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout"}[status]
@@ -105,9 +108,15 @@ func failureMessage(item string, status int, kind string, challenge bool, search
 		if status == 403 || status == 429 || status == 503 {
 			note = " — likely a bot-block or rate limit"
 		}
-		return fmt.Sprintf("%s returned HTTP %d (%s)%s. Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.", item, status, meaning, note)
+		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(searchAvailable,
+			"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+			"Use `findWorks` if it is a scholarly title, or find an alternative copy at another URL.",
+		))
 	}
-	return fmt.Sprintf("Could not download %s — try `search` for an alternative source.", item)
+	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
+		"try `search` for an alternative source.",
+		"try `findWorks` or another URL for an alternative source.",
+	))
 }
 
 // FailureMessage exposes the transport core's canonical terminal diagnostic

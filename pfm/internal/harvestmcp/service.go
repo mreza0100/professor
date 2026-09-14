@@ -819,7 +819,10 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	// this wording is part of the Python scheduler contract.
 	if sizeOnly {
 		if strings.TrimSpace(result.Content) == "" && result.Chars == 0 && result.Bytes == 0 {
-			return fmt.Sprintf("# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.", source, source)
+			return fmt.Sprintf("# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s", source, source, harvest.SearchHint(searchEnabled(service.runtime),
+				"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+				"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+			))
 		}
 		body, err := json.Marshal(map[string]any{"source": source, "size": result.Tokens, "tokens": result.Tokens, "token_count": result.Tokens, "chars": result.Chars, "path": result.Path, "cache_status": result.CacheStatus})
 		if err != nil {
@@ -837,7 +840,10 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 			message = harvest.PublicFailureMessage(result)
 		}
 		if message == "" {
-			message = fmt.Sprintf("Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.", source)
+			message = fmt.Sprintf("Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s", source, harvest.SearchHint(searchEnabled(service.runtime),
+				"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+				"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+			))
 		}
 		return "# " + source + "\nERROR: " + message
 	}

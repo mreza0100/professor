@@ -156,11 +156,6 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 			result: harvest.Result{Content: "tiny", ContentChars: 4, HTTPStatus: 404},
 			want:   []string{"not found", "findWorks"},
 		},
-		{
-			name:   "thin extraction",
-			result: harvest.Result{HTTPStatus: 200},
-			want:   []string{"no readable content", "`search`", "`findWorks`"},
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -171,6 +166,40 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
+// TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
+// the "thin extraction" (JS-rendered/bot-blocked, no readable content)
+// message must recommend `search` only when a backend is actually
+// configured, and fall back to findWorks/another-URL wording when it is not.
+func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
+	result := harvest.Result{HTTPStatus: 200}
+
+	searchOn, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = searchOn.Close() }()
+	got := searchOn.describeFetch("https://fixture.example/source", result, false)
+	for _, want := range []string{"no readable content", "`search`", "`findWorks`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
+		}
+	}
+
+	searchOff, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = searchOff.Close() }()
+	got = searchOff.describeFetch("https://fixture.example/source", result, false)
+	if strings.Contains(got, "`search`") {
+		t.Fatalf("search-off describe receipt names the unavailable `search` tool: %q", got)
+	}
+	if !strings.Contains(got, "`findWorks`") {
+		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
 	}
 }
 
