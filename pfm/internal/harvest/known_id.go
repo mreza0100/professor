@@ -35,37 +35,37 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	if err != nil && kind == IdentifierDOI {
 		resolverFailureKind = doiResolverErrorKind(err)
 	}
-	var sciHubFailure *Result
-	trySciHub := func() (Result, bool) {
-		if kind != IdentifierDOI && kind != IdentifierPMID || h.settings.sciHubURL == "" {
+	var doiMirrorFailure *Result
+	tryDOIMirror := func() (Result, bool) {
+		if kind != IdentifierDOI && kind != IdentifierPMID || h.settings.doiMirrorURL == "" {
 			return Result{}, false
 		}
 		identifier := canonical
 		if kind == IdentifierPMID {
 			identifier = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(source)), "pmid:"))
 		}
-		result := h.fetchSciHub(ctx, identifier, options)
+		result := h.fetchDOIMirror(ctx, identifier, options)
 		if result.Error != "" {
 			copy := result
-			sciHubFailure = &copy
+			doiMirrorFailure = &copy
 			trace = append(trace, result.Rungs...)
 			return result, false
 		}
 		trace = append(trace, result.Rungs...)
 		return h.storeResultAlias(source, canonical, result, trace, options), true
 	}
-	tryShadow := func() (Result, bool) {
+	tryMirrors := func() (Result, bool) {
 		if kind != IdentifierDOI {
 			return Result{}, false
 		}
-		result, attempted := h.fetchDOIShadow(ctx, canonical, options)
+		result, attempted := h.fetchDOIMirrors(ctx, canonical, options)
 		if !attempted {
 			return Result{}, false
 		}
 		trace = append(trace, result.Rungs...)
 		if result.Error != "" {
 			copy := result
-			sciHubFailure = &copy // shared terminal diagnostic slot for all shadow providers
+			doiMirrorFailure = &copy // shared terminal diagnostic slot for all mirror providers
 			return result, false
 		}
 		return h.storeResultAlias(source, canonical, result, trace, options), true
@@ -78,33 +78,33 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		trace = append(trace, result.Rungs...)
 		if result.Error != "" {
 			copy := result
-			sciHubFailure = &copy
+			doiMirrorFailure = &copy
 			return result, false
 		}
 		return h.storeResultAlias(source, canonical, result, trace, options), true
 	}
 	if err != nil {
-		if result, ok := trySciHub(); ok {
+		if result, ok := tryDOIMirror(); ok {
 			return result
 		}
-		if result, ok := tryShadow(); ok {
+		if result, ok := tryMirrors(); ok {
 			return result
 		}
 		if result, ok := tryScholar(); ok {
 			return result
 		}
 		failure := Result{Source: source, Error: err.Error(), ErrorKind: resolverFailureKind, Rungs: trace}
-		if sciHubFailure != nil {
-			failure = mergeResolverFailure(failure, *sciHubFailure)
+		if doiMirrorFailure != nil {
+			failure = mergeResolverFailure(failure, *doiMirrorFailure)
 		}
 		return failure
 	}
 	if len(candidates) == 0 && kind != IdentifierDOI {
-		if result, ok := trySciHub(); ok {
+		if result, ok := tryDOIMirror(); ok {
 			return result
-		} else if sciHubFailure != nil {
-			return Result{Source: source, Error: withRungs(sciHubFailure.Error, sciHubFailure.Rungs), ErrorKind: sciHubFailure.ErrorKind,
-				Challenge: sciHubFailure.Challenge, HTTPStatus: sciHubFailure.HTTPStatus, Rungs: sciHubFailure.Rungs}
+		} else if doiMirrorFailure != nil {
+			return Result{Source: source, Error: withRungs(doiMirrorFailure.Error, doiMirrorFailure.Rungs), ErrorKind: doiMirrorFailure.ErrorKind,
+				Challenge: doiMirrorFailure.Challenge, HTTPStatus: doiMirrorFailure.HTTPStatus, Rungs: doiMirrorFailure.Rungs}
 		}
 		return Result{Source: source, Error: "no legal open-access copy found"}
 	}
@@ -151,12 +151,12 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 	}
 	if kind == IdentifierDOI || kind == IdentifierPMID {
-		if result, ok := trySciHub(); ok {
+		if result, ok := tryDOIMirror(); ok {
 			return result
 		}
 	}
 	if kind == IdentifierDOI {
-		if result, ok := tryShadow(); ok {
+		if result, ok := tryMirrors(); ok {
 			return result
 		}
 		if result, ok := tryScholar(); ok {
@@ -181,34 +181,34 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			checked = "Unpaywall, " + checked
 			skipped = ""
 		}
-		if sciHubFailure != nil {
-			message := fmt.Sprintf("Found DOI %s, but retrieval exhausted the configured open-access and fallback sources (checked %s).%s %s", canonical, checked, skipped, sciHubFailure.Error)
-			return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
-				Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
+		if doiMirrorFailure != nil {
+			message := fmt.Sprintf("Found DOI %s, but retrieval exhausted the configured open-access and fallback sources (checked %s).%s %s", canonical, checked, skipped, doiMirrorFailure.Error)
+			return Result{Source: source, Error: withRungs(message, trace), ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
+				Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure), Rungs: trace}
 		}
 		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — use `search` to find an author preprint or the publisher's page directly.", canonical, checked, skipped)
-		return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
-			Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
+		return Result{Source: source, Error: withRungs(message, trace), ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
+			Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure), Rungs: trace}
 	}
 	message := "all legal open-access candidates failed"
-	if sciHubFailure != nil {
-		message += " " + sciHubFailure.Error
+	if doiMirrorFailure != nil {
+		message += " " + doiMirrorFailure.Error
 	}
-	return Result{Source: source, Error: withRungs(message, trace), Rungs: trace, ErrorKind: sciHubFailureKind(sciHubFailure), Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure)}
+	return Result{Source: source, Error: withRungs(message, trace), Rungs: trace, ErrorKind: doiMirrorFailureKind(doiMirrorFailure), Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure)}
 }
 
-func sciHubFailureKind(result *Result) string {
+func doiMirrorFailureKind(result *Result) string {
 	if result == nil {
 		return ""
 	}
 	return result.ErrorKind
 }
 
-func sciHubFailureChallenge(result *Result) bool {
+func doiMirrorFailureChallenge(result *Result) bool {
 	return result != nil && result.Challenge
 }
 
-func sciHubFailureStatus(result *Result) int {
+func doiMirrorFailureStatus(result *Result) int {
 	if result == nil {
 		return 0
 	}
@@ -221,8 +221,8 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 		metadataFailureKind := doiResolverErrorKind(err)
 		trace := append([]string(nil), rungs...)
 		var last Result
-		if h.settings.sciHubURL != "" {
-			result := h.fetchSciHub(ctx, DOIFrom(doi), options)
+		if h.settings.doiMirrorURL != "" {
+			result := h.fetchDOIMirror(ctx, DOIFrom(doi), options)
 			trace = append(trace, result.Rungs...)
 			if result.Error == "" {
 				result.Rungs = trace
@@ -230,13 +230,13 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 			}
 			last = result
 		}
-		if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
-			trace = append(trace, shadow.Rungs...)
-			if shadow.Error == "" {
-				shadow.Rungs = trace
-				return shadow
+		if mirrored, attempted := h.fetchDOIMirrors(ctx, DOIFrom(doi), options); attempted {
+			trace = append(trace, mirrored.Rungs...)
+			if mirrored.Error == "" {
+				mirrored.Rungs = trace
+				return mirrored
 			}
-			last = shadow
+			last = mirrored
 		}
 		if h.settings.googleScholarURL != "" {
 			scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options)
@@ -258,21 +258,21 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 			return result
 		}
 	}
-	if h.settings.sciHubURL != "" {
-		result := h.fetchSciHub(ctx, DOIFrom(doi), options)
+	if h.settings.doiMirrorURL != "" {
+		result := h.fetchDOIMirror(ctx, DOIFrom(doi), options)
 		if result.Error == "" {
 			result.Rungs = append(trace, result.Rungs...)
 			return result
 		}
 		trace = append(trace, result.Rungs...)
 		lastProvider := result
-		if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
-			trace = append(trace, shadow.Rungs...)
-			if shadow.Error == "" {
-				shadow.Rungs = append([]string(nil), trace...)
-				return shadow
+		if mirrored, attempted := h.fetchDOIMirrors(ctx, DOIFrom(doi), options); attempted {
+			trace = append(trace, mirrored.Rungs...)
+			if mirrored.Error == "" {
+				mirrored.Rungs = append([]string(nil), trace...)
+				return mirrored
 			}
-			lastProvider = shadow
+			lastProvider = mirrored
 		}
 		if h.settings.googleScholarURL != "" {
 			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
@@ -286,14 +286,14 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 		return Result{Source: doi, Error: withRungs("OA chain exhausted: "+lastProvider.Error, trace), ErrorKind: lastProvider.ErrorKind,
 			Challenge: lastProvider.Challenge, HTTPStatus: lastProvider.HTTPStatus, Rungs: trace}
 	}
-	if shadow, attempted := h.fetchDOIShadow(ctx, DOIFrom(doi), options); attempted {
-		if shadow.Error == "" {
-			shadow.Rungs = append(trace, shadow.Rungs...)
-			return shadow
+	if mirrored, attempted := h.fetchDOIMirrors(ctx, DOIFrom(doi), options); attempted {
+		if mirrored.Error == "" {
+			mirrored.Rungs = append(trace, mirrored.Rungs...)
+			return mirrored
 		}
-		trace = append(trace, shadow.Rungs...)
+		trace = append(trace, mirrored.Rungs...)
 		if h.settings.googleScholarURL == "" {
-			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+shadow.Error, trace), ErrorKind: shadow.ErrorKind, Challenge: shadow.Challenge, HTTPStatus: shadow.HTTPStatus, Rungs: trace}
+			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+mirrored.Error, trace), ErrorKind: mirrored.ErrorKind, Challenge: mirrored.Challenge, HTTPStatus: mirrored.HTTPStatus, Rungs: trace}
 		}
 	}
 	if h.settings.googleScholarURL != "" {

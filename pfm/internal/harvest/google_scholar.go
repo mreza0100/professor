@@ -41,7 +41,7 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 	if response.status >= 400 {
 		return nil, fmt.Errorf("Google Scholar returned HTTP %d", response.status)
 	}
-	if sciHubChallenge(response.body, response.status) {
+	if doiMirrorChallenge(response.body, response.status) {
 		return nil, errors.New("Google Scholar returned a challenge page")
 	}
 	rows := parseGoogleScholarRows(response.body, limit, "")

@@ -58,7 +58,7 @@ type Options struct {
 	MaxBytes       int64
 	LocalRoots     []string
 	JinaURL        string
-	SciHubURL      string
+	DOIMirrorURL   string
 	MaxInlineChars int
 	// ProxyURL, when set, is applied to every default transport (direct,
 	// Chrome, binary, Jina, and OA). UserAgent customizes only direct/Jina;
@@ -85,9 +85,9 @@ type Options struct {
 	SemanticScholarAPIKey string
 	SearXNGURL            string
 	BraveAPIKey           string
-	AnnasURL              string
-	SciDBURL              string
-	LibGenURL             string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
 	GoogleScholarURL      string
 	DisableSearch         bool
 }
@@ -101,10 +101,10 @@ type settings struct {
 	semanticScholarKey string
 	searXNGURL         string
 	braveAPIKey        string
-	sciHubURL          string
-	annasURL           string
-	sciDBURL           string
-	libGenURL          string
+	doiMirrorURL       string
+	ipfsCatalogURL     string
+	doiViewerURL       string
+	md5CatalogURL      string
 	googleScholarURL   string
 	disableSearch      bool
 	browser            bool
@@ -187,19 +187,19 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
-	sciHubURL, err := normalizeSciHubURL(options.SciHubURL)
+	doiMirrorURL, err := normalizeDOIMirrorURL(options.DOIMirrorURL)
 	if err != nil {
 		return nil, err
 	}
-	annasURL, err := normalizeProviderBaseURL("Anna's", options.AnnasURL)
+	ipfsCatalogURL, err := normalizeProviderBaseURL("ipfs-catalog", options.IPFSCatalogURL)
 	if err != nil {
 		return nil, err
 	}
-	sciDBURL, err := normalizeProviderBaseURL("SciDB", options.SciDBURL)
+	doiViewerURL, err := normalizeProviderBaseURL("doi-viewer", options.DOIViewerURL)
 	if err != nil {
 		return nil, err
 	}
-	libGenURL, err := normalizeProviderBaseURL("LibGen", options.LibGenURL)
+	md5CatalogURL, err := normalizeProviderBaseURL("md5-catalog", options.MD5CatalogURL)
 	if err != nil {
 		return nil, err
 	}
@@ -214,18 +214,18 @@ func New(options Options) (*Harvester, error) {
 		semanticScholarKey: strings.TrimSpace(options.SemanticScholarAPIKey),
 		searXNGURL:         strings.TrimSpace(options.SearXNGURL),
 		braveAPIKey:        strings.TrimSpace(options.BraveAPIKey),
-		sciHubURL:          sciHubURL,
-		annasURL:           annasURL,
-		sciDBURL:           sciDBURL,
-		libGenURL:          libGenURL,
+		doiMirrorURL:       doiMirrorURL,
+		ipfsCatalogURL:     ipfsCatalogURL,
+		doiViewerURL:       doiViewerURL,
+		md5CatalogURL:      md5CatalogURL,
 		googleScholarURL:   googleScholarURL,
 		disableSearch:      options.DisableSearch,
 		browser:            options.BrowserRung != nil && *options.BrowserRung,
 	}
-	options.SciHubURL = sciHubURL
-	options.AnnasURL = resolved.annasURL
-	options.SciDBURL = resolved.sciDBURL
-	options.LibGenURL = resolved.libGenURL
+	options.DOIMirrorURL = doiMirrorURL
+	options.IPFSCatalogURL = resolved.ipfsCatalogURL
+	options.DOIViewerURL = resolved.doiViewerURL
+	options.MD5CatalogURL = resolved.md5CatalogURL
 	options.GoogleScholarURL = resolved.googleScholarURL
 	if options.CacheDir == "" {
 		dir, err := defaultCacheDir()

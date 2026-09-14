@@ -10,7 +10,7 @@ import (
 
 func TestResolveDOIAndFallbackPreserveMetadataOutage(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	metadataOutage := errors.New("metadata provider outage")
 	failing := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, metadataOutage

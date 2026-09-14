@@ -33,7 +33,7 @@ Servers that live inside a monorepo, linked via a subdirectory path (`/tree/main
 - `- [Agnuxo1/benchclaw-integrations](https://github.com/Agnuxo1/benchclaw-integrations/tree/main/mcp-server) ...` — Research section, line 3263.
 - `- [Embassy-of-the-Free-Mind/sourcelibrary-v2](https://github.com/Embassy-of-the-Free-Mind/sourcelibrary-v2/tree/main/mcp-server) ...` — Research section, line 3272.
 
-Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/main/<subdir>` URL — exactly the pattern Harvester would need (`mreza0100/professor` linking into `pfm/internal/harvestmcp`). No PR was found that was rejected specifically for being a monorepo/subdirectory server; the only "multiple servers" rejections (PR #14270, #8248) were for **one PR proposing two separate, unrelated servers**, not for a single server living in a larger repo. Monorepo placement is not itself a rejection reason on this list.
+Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/main/<subdir>` URL — exactly the pattern Harvester would need (`rezzminator/professor` linking into `pfm/internal/harvestmcp`). No PR was found that was rejected specifically for being a monorepo/subdirectory server; the only "multiple servers" rejections (PR #14270, #8248) were for **one PR proposing two separate, unrelated servers**, not for a single server living in a larger repo. Monorepo placement is not itself a rejection reason on this list.
 
 ## 3. Section and exact insertion point
 
@@ -45,7 +45,7 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 - **Harvester's line goes here.**
 - Line immediately **after** (line 3284): `- [musharna/data-aggregator-mcp](https://github.com/musharna/data-aggregator-mcp) [![musharna/data-aggregator-mcp MCP server](https://glama.ai/mcp/servers/musharna/data-aggregator-mcp/badges/score.svg)](https://glama.ai/mcp/servers/musharna/data-aggregator-mcp) 🐍 🏠 🍎 🪟 🐧 - Search and fetch research datasets across Zenodo, DataCite (Dryad/Figshare/Dataverse/OSF), NCBI omics (GEO/SRA/BioProject), and literature (PubMed/OpenAIRE) behind one normalized model — DOI deduplication, NCBI-Taxonomy synonym expansion, paper→data linking, and checksum-verified download. \`uvx data-aggregator-mcp\`.`
 
-(`mnemox-ai` < `mreza0100` < `musharna` — correct sort position.)
+(STALE after the rename: this slot was computed for the old owner `mreza0100`, in the `m` cluster. As `rezzminator/professor` the line sorts in the `r` cluster — re-derive the neighbours from the live README before submitting.)
 
 ## 4. What others did — 10 recent add-server PRs sampled
 
@@ -77,7 +77,7 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 ### Entry (verbatim, to insert at the point in §3)
 
 ```
-- [mreza0100/professor](https://github.com/mreza0100/professor/tree/main/pfm/internal/harvestmcp) 🏎️ 🏠 - Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus web search, image fetch, cache search, and archive browsing. Tools: `fetch`, `findWorks`, `search`, `fetchImage`, `searchCache`, `archive`. Runs locally; MIT; lives at `pfm/internal/harvest(mcp)` inside the Professor monorepo.
+- [rezzminator/professor](https://github.com/rezzminator/professor/tree/main/pfm/internal/harvestmcp) 🏎️ 🏠 - Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus web search, image fetch, cache search, and archive browsing. Tools: `fetch`, `findWorks`, `search`, `fetchImage`, `searchCache`, `archive`. Runs locally; MIT; lives at `pfm/internal/harvest(mcp)` inside the Professor monorepo.
 ```
 
 - No Glama badge included — Harvester has no Glama listing today (see §6, Risks). CI will flag `missing-glama` and the maintainer will likely nag for one before merge, per §4 patterns.
@@ -85,25 +85,25 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 ### Branch name (per CONTRIBUTING.md's `add-new-server`/`fix-typo` convention)
 
 ```
-add-mreza0100-professor-harvester
+add-rezzminator-professor-harvester
 ```
 
 ### Commit message (per CONTRIBUTING.md's "Add new XYZ server" example)
 
 ```
-Add mreza0100/professor (Harvester) to Research
+Add rezzminator/professor (Harvester) to Research
 ```
 
 ### PR title (per the sampled convention "Add owner/repo to Category", optionally 🤖🤖🤖-tagged for the agent fast-track)
 
 ```
-Add mreza0100/professor (Harvester) to Research
+Add rezzminator/professor (Harvester) to Research
 ```
 
 or, if submitted by/as an automated agent and opting into the fast-track described in CONTRIBUTING.md:
 
 ```
-Add mreza0100/professor (Harvester) to Research 🤖🤖🤖
+Add rezzminator/professor (Harvester) to Research 🤖🤖🤖
 ```
 
 ### PR body (no `.github/PULL_REQUEST_TEMPLATE.md` exists in this repo — none to fill; body format follows the sampled merged PRs, e.g. #14154's "Summary" style)
@@ -111,9 +111,9 @@ Add mreza0100/professor (Harvester) to Research 🤖🤖🤖
 ```
 ### Summary
 
-This PR adds [mreza0100/professor](https://github.com/mreza0100/professor) (Harvester) to the **Research** category.
+This PR adds [rezzminator/professor](https://github.com/rezzminator/professor) (Harvester) to the **Research** category.
 
-- **Repository:** https://github.com/mreza0100/professor
+- **Repository:** https://github.com/rezzminator/professor
 - **Server location:** `pfm/internal/harvest` + `pfm/internal/harvestmcp` (one of two MCP servers in this monorepo)
 - **Language / Runtime:** Go, MIT license
 - **Capabilities:** Public-document retrieval — fetch a URL/DOI/ISBN/PMID/PMCID/local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR), open-access paper resolvers, web search, image fetch, cache search, and archive browsing. Tools: `fetch`, `findWorks`, `search`, `fetchImage`, `searchCache`, `archive`.
@@ -129,7 +129,7 @@ Not established with confidence in this research pass (out of the boundary set f
 ## 6. Risks
 
 - **No Glama listing found for Harvester.** In this sample, every merged PR ended up with a Glama score badge, and the maintainer directly blocked 3 of 5 merges pending one. Harvester would need to be submitted, claimed, and scored at <https://glama.ai/mcp/servers> before or during review to avoid a stalled PR — this is real setup work, not just a form field, and Glama needs the server to actually start and respond to MCP introspection.
-- **Monorepo, not a dedicated repo.** Not a rejection reason found in precedent (§2 shows two accepted monorepo entries), but it does mean the `owner/repo` name shown in the list (`mreza0100/professor`) doesn't describe what "Harvester" is — a reviewer unfamiliar with the repo may ask for clarification on scope/what's actually being installed, and the entry necessarily under-names the specific tool.
+- **Monorepo, not a dedicated repo.** Not a rejection reason found in precedent (§2 shows two accepted monorepo entries), but it does mean the `owner/repo` name shown in the list (`rezzminator/professor`) doesn't describe what "Harvester" is — a reviewer unfamiliar with the repo may ask for clarification on scope/what's actually being installed, and the entry necessarily under-names the specific tool.
 - **~4 stars, created 2026-04-25 (very new, low traction).** No PR in the sample was rejected purely for low star count or age, but "maintenance signal" was explicitly cited as a merge-quality factor by one contributor (#12340: cut a release + added CI/tests "so the maintenance signal should look healthier"). A near-zero-star, ~4.5-month-old monorepo entry may draw the same kind of nudge.
 - **Two MCP servers in one repo.** The "one server per PR" rule (enforced twice in-sample) applies to one PR proposing multiple *different* servers — it should not block Harvester alone, but the repo's second (chat-fleet) server would need its own, separate PR/entry if ever proposed, not bundled into this one.
 - **CI's owner/repo link-text rule** and its expectation of a `/tree/main/<subpath>` for a monorepo entry (matching the two precedent lines in §2) must be followed exactly, or the automated name-check will flag and comment on the PR.

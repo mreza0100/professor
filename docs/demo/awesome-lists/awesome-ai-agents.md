@@ -70,7 +70,7 @@ Insert the new `## [Professor](...)` block between the closing `</details>` of t
 **Entry to insert** (README.md, between line 2344 and 2346, formatted per §1):
 
 ```markdown
-## [Professor](https://github.com/mreza0100/professor)
+## [Professor](https://github.com/rezzminator/professor)
 An LLM-harness fleet boost framework for Claude Code, Codex & OpenCode
 
 <details>
@@ -86,7 +86,7 @@ Professor turns your AI coding agents into a disciplined engineering team you ca
 - Harvester: a document fetcher with a multi-rung fallback ladder, exposed over MCP
 
 ### Links
-- [GitHub](https://github.com/mreza0100/professor)
+- [GitHub](https://github.com/rezzminator/professor)
 
 </details>
 ```

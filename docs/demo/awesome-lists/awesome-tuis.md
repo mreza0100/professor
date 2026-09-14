@@ -85,7 +85,7 @@ Alphabetical slot: `pfm` (p-f-m) sorts after `otel-tui` (o-t-e) and before `Plan
 **Entry (verbatim, to insert between `otel-tui` and `Planor` in the Dashboards section of `README.md`):**
 
 ```
-- [pfm](https://github.com/mreza0100/professor) A fleet dashboard for every AI coding chat on your machine (Claude Code, Codex, OpenCode) — fuzzy chat picker, Stats/Limits tabs, a cosmos star-map of chats and messages, cross-chat messaging, and account-preserving reload.
+- [pfm](https://github.com/rezzminator/professor) A fleet dashboard for every AI coding chat on your machine (Claude Code, Codex, OpenCode) — fuzzy chat picker, Stats/Limits tabs, a cosmos star-map of chats and messages, cross-chat messaging, and account-preserving reload.
 ```
 
 **Branch name:** `add-pfm-dashboards`
@@ -105,7 +105,7 @@ messaging, and account-preserving reload. MIT licensed.
 
 ## 5. Risks
 
-- **Blocking risk — repo age gate:** pfm's repo (`mreza0100/professor`) was created 2026-04-25. Today is 2026-09-14 (~4.7 months old). The automated `readme_pr_repo_first_commit.yml` check computes a first-commit cutoff of "6 calendar months before today" = **2026-03-14**. pfm's first commit (2026-04-25) is **after** that cutoff, so the bot will mark it ⛔ `too_young` and **auto-close the PR** on open, per the exact mechanism observed in PRs #890, #872, #871, #865, #864, #863, #862, #860, #856, #855. This is a near-certain rejection today — not a judgment call, a mechanized gate reading the GitHub API's first-commit date.
+- **Blocking risk — repo age gate:** pfm's repo (`rezzminator/professor`) was created 2026-04-25. Today is 2026-09-14 (~4.7 months old). The automated `readme_pr_repo_first_commit.yml` check computes a first-commit cutoff of "6 calendar months before today" = **2026-03-14**. pfm's first commit (2026-04-25) is **after** that cutoff, so the bot will mark it ⛔ `too_young` and **auto-close the PR** on open, per the exact mechanism observed in PRs #890, #872, #871, #865, #864, #863, #862, #860, #856, #855. This is a near-certain rejection today — not a judgment call, a mechanized gate reading the GitHub API's first-commit date.
   - Earliest safe reopen date: on/after **2026-10-25** (6 months from 2026-04-25).
 - Section fit is a judgment call: pfm could arguably also fit "Development" or "Miscellaneous" given its focus on AI coding chats rather than classic system/infra dashboards (compare `gh-dash`, `damon`) — Dashboards was chosen as the closest existing category, but a maintainer could redirect it.
 - No CONTRIBUTING.md beyond the PR template; all other criteria (uniqueness, non-wrapper, interactive/redraw) appear satisfied by pfm's description, but are maintainer-judged with no automation covering them, so no certainty here — noted, not verified beyond the text of the entry itself.

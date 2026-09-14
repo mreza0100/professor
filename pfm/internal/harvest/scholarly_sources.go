@@ -23,12 +23,12 @@ const (
 )
 
 var (
-	sciDBViewerFileRe = regexp.MustCompile(`(?i)viewer\.html\?file=([^"'&\s]+)`)
-	sciDBPDFRe        = regexp.MustCompile(`(?i)https?://[^\s"'<>]+\.pdf[^\s"'<>]*`)
-	libGenGetRe       = regexp.MustCompile(`(?i)get\.php\?md5=([0-9a-f]{32})&(?:amp;)?key=([A-Za-z0-9]+)`)
-	md5Re             = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
-	providerMD5Re     = regexp.MustCompile(`(?i)/md5/([0-9a-f]{32})(?:$|[/?#"'\s])`)
-	scholarYearRe     = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
+	doiViewerViewerFileRe = regexp.MustCompile(`(?i)viewer\.html\?file=([^"'&\s]+)`)
+	doiViewerPDFRe        = regexp.MustCompile(`(?i)https?://[^\s"'<>]+\.pdf[^\s"'<>]*`)
+	md5CatalogGetRe       = regexp.MustCompile(`(?i)get\.php\?md5=([0-9a-f]{32})&(?:amp;)?key=([A-Za-z0-9]+)`)
+	md5Re                 = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
+	providerMD5Re         = regexp.MustCompile(`(?i)/md5/([0-9a-f]{32})(?:$|[/?#"'\s])`)
+	scholarYearRe         = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
 )
 
 type providerLookupError struct {
@@ -52,14 +52,14 @@ func providerLookupFailure(source, provider string, err error, rungs []string) R
 }
 
 func providerChallenge(body []byte, status int) bool {
-	return sciHubChallenge(body, status)
+	return doiMirrorChallenge(body, status)
 }
 
 type providerCookieJarKey struct{}
 
-func isShadowProviderMethod(method string) bool {
+func isMirrorProviderMethod(method string) bool {
 	switch method {
-	case "scihub", "scidb", "libgen", "annas", "google-scholar":
+	case "doi-mirror", "doi-viewer", "md5-catalog", "ipfs-catalog", "google-scholar":
 		return true
 	default:
 		return false
@@ -67,7 +67,7 @@ func isShadowProviderMethod(method string) bool {
 }
 
 func hasProviderDiagnostic(message string) bool {
-	for _, provider := range []string{"SciHub:", "scidb:", "libgen:", "annas:", "google-scholar:"} {
+	for _, provider := range []string{"doi-mirror:", "doi-viewer:", "md5-catalog:", "ipfs-catalog:", "google-scholar:"} {
 		if strings.Contains(message, provider) {
 			return true
 		}
@@ -80,7 +80,7 @@ func normalizeProviderBaseURL(name, raw string) (string, error) {
 	if trimmed == "" {
 		return "", nil
 	}
-	base, err := normalizeSciHubURL(trimmed)
+	base, err := normalizeDOIMirrorURL(trimmed)
 	if err != nil {
 		return "", fmt.Errorf("invalid %s URL: %w", name, err)
 	}
@@ -115,11 +115,11 @@ func (h *Harvester) providerGet(ctx context.Context, rawURL string, headers http
 			return providerResponse{}, fmt.Errorf("create provider cookie jar: %w", err)
 		}
 	}
-	resp, err := sciHubClient(h.binaryDirectOrClient(), jar).Do(req)
+	resp, err := doiMirrorClient(h.binaryDirectOrClient(), jar).Do(req)
 	if err != nil {
 		return providerResponse{}, err
 	}
-	body, status, contentType, err := readSciHubResponse(resp, max)
+	body, status, contentType, err := readDOIMirrorResponse(resp, max)
 	if err != nil {
 		return providerResponse{status: status, contentType: contentType}, err
 	}
@@ -164,12 +164,12 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 	if referer != "" {
 		headers.Set("Referer", referer)
 	}
-	response, err := h.providerGet(ctx, fileURL, headers, sciHubMaxBytes(h))
+	response, err := h.providerGet(ctx, fileURL, headers, doiMirrorMaxBytes(h))
 	if err != nil {
 		return providerResult(source, provider, "download failed: "+err.Error(), errorKind(err), 0, false, rungs)
 	}
 	if response.status >= 400 {
-		challenge := sciHubChallenge(response.body, response.status)
+		challenge := doiMirrorChallenge(response.body, response.status)
 		kind := "http"
 		if challenge {
 			kind = "challenge"
@@ -177,7 +177,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 		return providerResult(source, provider, fmt.Sprintf("download returned HTTP %d", response.status), kind, response.status, challenge, rungs)
 	}
 	isPDF := bytes.HasPrefix(response.body, []byte("%PDF-"))
-	if sciHubChallenge(response.body, response.status) && !isPDF {
+	if doiMirrorChallenge(response.body, response.status) && !isPDF {
 		return providerResult(source, provider, "download returned a challenge page", "challenge", response.status, true, rungs)
 	}
 	if requirePDF && !isPDF {
@@ -252,12 +252,12 @@ func (r *Resolver) configuredProviderBase(provider string) string {
 		return ""
 	}
 	switch provider {
-	case "annas":
-		return strings.TrimRight(strings.TrimSpace(r.AnnasURL), "/")
-	case "scidb":
-		return strings.TrimRight(strings.TrimSpace(r.SciDBURL), "/")
-	case "libgen":
-		return strings.TrimRight(strings.TrimSpace(r.LibGenURL), "/")
+	case "ipfs-catalog":
+		return strings.TrimRight(strings.TrimSpace(r.IPFSCatalogURL), "/")
+	case "doi-viewer":
+		return strings.TrimRight(strings.TrimSpace(r.DOIViewerURL), "/")
+	case "md5-catalog":
+		return strings.TrimRight(strings.TrimSpace(r.MD5CatalogURL), "/")
 	}
 	return ""
 }

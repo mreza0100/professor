@@ -15,36 +15,36 @@ import (
 	"golang.org/x/net/html"
 )
 
-const sciHubTimeout = 45 * time.Second
+const doiMirrorTimeout = 45 * time.Second
 
-// normalizeSciHubURL validates the configured mirror once at startup. The
+// normalizeDOIMirrorURL validates the configured mirror once at startup. The
 // value is copied into settings by New, so a running Harvester never consults
 // mutable configuration or process environment while a fetch is in flight.
-func normalizeSciHubURL(raw string) (string, error) {
+func normalizeDOIMirrorURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("invalid SciHub URL %q: expected an http(s) URL", raw)
+		return "", fmt.Errorf("invalid doi-mirror URL %q: expected an http(s) URL", raw)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("invalid SciHub URL %q: scheme must be http or https", raw)
+		return "", fmt.Errorf("invalid doi-mirror URL %q: scheme must be http or https", raw)
 	}
 	if parsed.User != nil {
-		return "", fmt.Errorf("invalid SciHub URL %q: URL userinfo is not allowed", raw)
+		return "", fmt.Errorf("invalid doi-mirror URL %q: URL userinfo is not allowed", raw)
 	}
 	if parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(raw, "#") {
-		return "", fmt.Errorf("invalid SciHub URL %q: query and fragment are not allowed", raw)
+		return "", fmt.Errorf("invalid doi-mirror URL %q: query and fragment are not allowed", raw)
 	}
 	if err := assertFetchable(raw, false); err != nil {
-		return "", fmt.Errorf("invalid SciHub URL %q: %w", raw, err)
+		return "", fmt.Errorf("invalid doi-mirror URL %q: %w", raw, err)
 	}
 	return raw, nil
 }
 
-type sciHubLookup struct {
+type doiMirrorLookup struct {
 	body      []byte
 	pdfURL    string
 	pageURL   string
@@ -52,19 +52,19 @@ type sciHubLookup struct {
 	directPDF bool
 }
 
-type sciHubFailure struct {
+type doiMirrorFailure struct {
 	message   string
 	kind      string
 	challenge bool
 	status    int
 }
 
-func (f sciHubFailure) result(identifier string, rungs []string) Result {
-	return Result{Source: identifier, Error: "SciHub: " + f.message, ErrorKind: f.kind,
+func (f doiMirrorFailure) result(identifier string, rungs []string) Result {
+	return Result{Source: identifier, Error: "doi-mirror: " + f.message, ErrorKind: f.kind,
 		Challenge: f.challenge, HTTPStatus: f.status, Rungs: append([]string(nil), rungs...)}
 }
 
-func sciHubClient(base *http.Client, jar http.CookieJar) *http.Client {
+func doiMirrorClient(base *http.Client, jar http.CookieJar) *http.Client {
 	clone := &http.Client{Jar: jar}
 	var existingRedirect func(*http.Request, []*http.Request) error
 	if base != nil {
@@ -75,7 +75,7 @@ func sciHubClient(base *http.Client, jar http.CookieJar) *http.Client {
 	}
 	clone.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return errors.New("SciHub redirect limit exceeded")
+			return errors.New("doi-mirror redirect limit exceeded")
 		}
 		if err := assertFetchable(next.URL.String(), false); err != nil {
 			return err
@@ -88,21 +88,21 @@ func sciHubClient(base *http.Client, jar http.CookieJar) *http.Client {
 	return clone
 }
 
-func sciHubMaxBytes(h *Harvester) int64 {
+func doiMirrorMaxBytes(h *Harvester) int64 {
 	if h != nil && h.options.MaxBytes > 0 {
 		return h.options.MaxBytes
 	}
 	return 50 * 1024 * 1024
 }
 
-func readSciHubResponse(resp *http.Response, max int64) ([]byte, int, string, error) {
+func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string, error) {
 	if resp == nil {
-		return nil, 0, "", errors.New("SciHub returned no HTTP response")
+		return nil, 0, "", errors.New("doi-mirror returned no HTTP response")
 	}
 	status := resp.StatusCode
 	contentType := resp.Header.Get("Content-Type")
 	if resp.Body == nil {
-		return nil, status, contentType, errors.New("SciHub returned an empty response body")
+		return nil, status, contentType, errors.New("doi-mirror returned an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
 	if err != nil {
@@ -119,28 +119,28 @@ func readSciHubResponse(resp *http.Response, max int64) ([]byte, int, string, er
 	return body, status, contentType, nil
 }
 
-func (h *Harvester) sciHubLookup(ctx context.Context, identifier string, jar http.CookieJar) (sciHubLookup, sciHubFailure) {
-	base := h.settings.sciHubURL
+func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar http.CookieJar) (doiMirrorLookup, doiMirrorFailure) {
+	base := h.settings.doiMirrorURL
 	if base == "" {
-		return sciHubLookup{}, sciHubFailure{message: "provider is disabled", kind: "disabled"}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "provider is disabled", kind: "disabled"}
 	}
 	if err := assertFetchable(base, false); err != nil {
-		return sciHubLookup{}, sciHubFailure{message: "lookup URL refused: " + err.Error(), kind: errorKind(err)}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup URL refused: " + err.Error(), kind: errorKind(err)}
 	}
 	form := url.Values{"request": {identifier}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base, strings.NewReader(form.Encode()))
 	if err != nil {
-		return sciHubLookup{}, sciHubFailure{message: "could not build lookup request: " + err.Error(), kind: "invalid"}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "could not build lookup request: " + err.Error(), kind: "invalid"}
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8")
 	req.Header.Set("User-Agent", h.userAgent)
-	client := sciHubClient(h.client, jar)
+	client := doiMirrorClient(h.client, jar)
 	resp, err := client.Do(req)
 	if err != nil {
-		return sciHubLookup{}, sciHubFailure{message: "lookup request failed: " + err.Error(), kind: errorKind(err)}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: errorKind(err)}
 	}
-	body, status, _, err := readSciHubResponse(resp, sciHubMaxBytes(h))
+	body, status, _, err := readDOIMirrorResponse(resp, doiMirrorMaxBytes(h))
 	pageURL := base
 	if resp.Request != nil && resp.Request.URL != nil {
 		pageURL = resp.Request.URL.String()
@@ -150,63 +150,63 @@ func (h *Harvester) sciHubLookup(ctx context.Context, identifier string, jar htt
 		if strings.Contains(err.Error(), "exceeds") {
 			kind = "too_large"
 		}
-		return sciHubLookup{}, sciHubFailure{message: "lookup response failed: " + err.Error(), kind: kind, status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup response failed: " + err.Error(), kind: kind, status: status}
 	}
 	if status < 400 && bytes.HasPrefix(body, []byte("%PDF-")) {
-		return sciHubLookup{body: body, pageURL: pageURL, status: status, directPDF: true}, sciHubFailure{}
+		return doiMirrorLookup{body: body, pageURL: pageURL, status: status, directPDF: true}, doiMirrorFailure{}
 	}
-	if sciHubChallenge(body, status) {
-		return sciHubLookup{}, sciHubFailure{message: fmt.Sprintf("lookup returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
+	if doiMirrorChallenge(body, status) {
+		return doiMirrorLookup{}, doiMirrorFailure{message: fmt.Sprintf("lookup returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
 	}
 	if status >= 400 {
-		return sciHubLookup{}, sciHubFailure{message: fmt.Sprintf("lookup returned HTTP %d", status), kind: "http", status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{message: fmt.Sprintf("lookup returned HTTP %d", status), kind: "http", status: status}
 	}
-	pdfURL, err := sciHubPDFLink(body, pageURL)
+	pdfURL, err := doiMirrorPDFLink(body, pageURL)
 	if err != nil {
-		return sciHubLookup{}, sciHubFailure{message: err.Error(), kind: "missing_pdf", status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{message: err.Error(), kind: "missing_pdf", status: status}
 	}
-	return sciHubLookup{pdfURL: pdfURL, pageURL: pageURL, status: status}, sciHubFailure{}
+	return doiMirrorLookup{pdfURL: pdfURL, pageURL: pageURL, status: status}, doiMirrorFailure{}
 }
 
-func (h *Harvester) sciHubDownload(ctx context.Context, lookup sciHubLookup, jar http.CookieJar, rungs *[]string) ([]byte, int, sciHubFailure) {
+func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLookup, jar http.CookieJar, rungs *[]string) ([]byte, int, doiMirrorFailure) {
 	if lookup.pdfURL == "" {
-		return nil, lookup.status, sciHubFailure{message: "lookup contained no supported PDF URL", kind: "missing_pdf", status: lookup.status}
+		return nil, lookup.status, doiMirrorFailure{message: "lookup contained no supported PDF URL", kind: "missing_pdf", status: lookup.status}
 	}
-	var first *sciHubFailure
+	var first *doiMirrorFailure
 	for attempt, base := range []*http.Client{h.binaryDirectOrClient(), h.binaryChromeOrChrome()} {
 		if attempt == 1 {
-			*rungs = append(*rungs, "scihub:chrome")
+			*rungs = append(*rungs, "doi-mirror:chrome")
 		}
 		if err := assertFetchable(lookup.pdfURL, false); err != nil {
-			failure := sciHubFailure{message: "PDF URL refused: " + err.Error(), kind: errorKind(err)}
+			failure := doiMirrorFailure{message: "PDF URL refused: " + err.Error(), kind: errorKind(err)}
 			if attempt == 0 {
 				return nil, 0, failure
 			}
-			return nil, 0, mergeSciHubFailures(first, failure)
+			return nil, 0, mergeDOIMirrorFailures(first, failure)
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, lookup.pdfURL, nil)
 		if err != nil {
-			failure := sciHubFailure{message: "could not build PDF request: " + err.Error(), kind: "invalid"}
+			failure := doiMirrorFailure{message: "could not build PDF request: " + err.Error(), kind: "invalid"}
 			if attempt == 0 {
 				return nil, 0, failure
 			}
-			return nil, 0, mergeSciHubFailures(first, failure)
+			return nil, 0, mergeDOIMirrorFailures(first, failure)
 		}
 		req.Header.Set("Accept", "application/pdf,application/octet-stream;q=0.9,*/*;q=0.5")
 		req.Header.Set("User-Agent", h.userAgent)
 		req.Header.Set("Referer", lookup.pageURL)
-		resp, err := sciHubClient(base, jar).Do(req)
+		resp, err := doiMirrorClient(base, jar).Do(req)
 		if err != nil {
-			failure := sciHubFailure{message: "PDF request failed: " + err.Error(), kind: errorKind(err)}
+			failure := doiMirrorFailure{message: "PDF request failed: " + err.Error(), kind: errorKind(err)}
 			if attempt == 0 {
 				first = &failure
 				continue
 			}
-			return nil, 0, mergeSciHubFailures(first, failure)
+			return nil, 0, mergeDOIMirrorFailures(first, failure)
 		}
-		body, status, _, readErr := readSciHubResponse(resp, sciHubMaxBytes(h))
+		body, status, _, readErr := readDOIMirrorResponse(resp, doiMirrorMaxBytes(h))
 		if readErr != nil {
-			failure := sciHubFailure{message: "PDF response failed: " + readErr.Error(), kind: errorKind(readErr), status: status}
+			failure := doiMirrorFailure{message: "PDF response failed: " + readErr.Error(), kind: errorKind(readErr), status: status}
 			if strings.Contains(readErr.Error(), "exceeds") {
 				failure.kind = "too_large"
 				return nil, status, failure
@@ -215,40 +215,40 @@ func (h *Harvester) sciHubDownload(ctx context.Context, lookup sciHubLookup, jar
 				first = &failure
 				continue
 			}
-			return nil, status, mergeSciHubFailures(first, failure)
+			return nil, status, mergeDOIMirrorFailures(first, failure)
 		}
 		if status < 400 && bytes.HasPrefix(body, []byte("%PDF-")) {
-			return body, status, sciHubFailure{}
+			return body, status, doiMirrorFailure{}
 		}
-		if sciHubChallenge(body, status) {
-			failure := sciHubFailure{message: fmt.Sprintf("PDF request returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
+		if doiMirrorChallenge(body, status) {
+			failure := doiMirrorFailure{message: fmt.Sprintf("PDF request returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
 			if attempt == 0 {
 				first = &failure
 				continue
 			}
-			return nil, status, mergeSciHubFailures(first, failure)
+			return nil, status, mergeDOIMirrorFailures(first, failure)
 		}
 		if status >= 400 {
-			failure := sciHubFailure{message: fmt.Sprintf("PDF request returned HTTP %d", status), kind: "http", status: status}
+			failure := doiMirrorFailure{message: fmt.Sprintf("PDF request returned HTTP %d", status), kind: "http", status: status}
 			if attempt == 0 {
 				first = &failure
 				continue
 			}
-			return nil, status, mergeSciHubFailures(first, failure)
+			return nil, status, mergeDOIMirrorFailures(first, failure)
 		}
 		if !bytes.HasPrefix(body, []byte("%PDF-")) {
-			failure := sciHubFailure{message: "PDF URL returned non-PDF content", kind: "missing_pdf", status: status}
+			failure := doiMirrorFailure{message: "PDF URL returned non-PDF content", kind: "missing_pdf", status: status}
 			if first != nil {
-				failure = mergeSciHubFailures(first, failure)
+				failure = mergeDOIMirrorFailures(first, failure)
 			}
 			return nil, status, failure
 		}
-		return body, status, sciHubFailure{}
+		return body, status, doiMirrorFailure{}
 	}
-	return nil, 0, sciHubFailure{message: "PDF download failed", kind: "connect"}
+	return nil, 0, doiMirrorFailure{message: "PDF download failed", kind: "connect"}
 }
 
-func mergeSciHubFailures(first *sciHubFailure, last sciHubFailure) sciHubFailure {
+func mergeDOIMirrorFailures(first *doiMirrorFailure, last doiMirrorFailure) doiMirrorFailure {
 	if first == nil {
 		return last
 	}
@@ -260,18 +260,18 @@ func mergeSciHubFailures(first *sciHubFailure, last sciHubFailure) sciHubFailure
 	return last
 }
 
-func (h *Harvester) fetchSciHub(ctx context.Context, identifier string, options FetchOptions) Result {
-	if h == nil || h.settings.sciHubURL == "" {
-		return Result{Source: identifier, Error: "SciHub provider is disabled", ErrorKind: "disabled"}
+func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, options FetchOptions) Result {
+	if h == nil || h.settings.doiMirrorURL == "" {
+		return Result{Source: identifier, Error: "doi-mirror provider is disabled", ErrorKind: "disabled"}
 	}
-	attemptCtx, cancel := context.WithTimeout(ctx, sciHubTimeout)
+	attemptCtx, cancel := context.WithTimeout(ctx, doiMirrorTimeout)
 	defer cancel()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		return sciHubFailure{message: "could not create cookie jar: " + err.Error(), kind: "connect"}.result(identifier, []string{"scihub"})
+		return doiMirrorFailure{message: "could not create cookie jar: " + err.Error(), kind: "connect"}.result(identifier, []string{"doi-mirror"})
 	}
-	rungs := []string{"scihub"}
-	lookup, failure := h.sciHubLookup(attemptCtx, identifier, jar)
+	rungs := []string{"doi-mirror"}
+	lookup, failure := h.doiMirrorLookup(attemptCtx, identifier, jar)
 	if failure.message != "" {
 		return failure.result(identifier, rungs)
 	}
@@ -279,34 +279,34 @@ func (h *Harvester) fetchSciHub(ctx context.Context, identifier string, options 
 	pdfStatus := lookup.status
 	pdfSource := lookup.pageURL
 	if !lookup.directPDF {
-		pdfBody, pdfStatus, failure = h.sciHubDownload(attemptCtx, lookup, jar, &rungs)
+		pdfBody, pdfStatus, failure = h.doiMirrorDownload(attemptCtx, lookup, jar, &rungs)
 		if failure.message != "" {
 			return failure.result(identifier, rungs)
 		}
 		pdfSource = lookup.pdfURL
 	}
 	if !bytes.HasPrefix(pdfBody, []byte("%PDF-")) {
-		return sciHubFailure{message: "provider returned non-PDF content", kind: "missing_pdf", status: pdfStatus}.result(identifier, rungs)
+		return doiMirrorFailure{message: "provider returned non-PDF content", kind: "missing_pdf", status: pdfStatus}.result(identifier, rungs)
 	}
 	converted, err := h.convert(attemptCtx, "pdf", pdfSource, pdfBody)
 	if err != nil {
-		return sciHubFailure{message: "PDF conversion failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
+		return doiMirrorFailure{message: "PDF conversion failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
 	}
 	if strings.TrimSpace(converted) == "" {
 		ocrConverter, ok := h.options.Converter.(OCRConverter)
 		if !ok {
-			return sciHubFailure{message: "PDF conversion produced empty text and OCR is unavailable", kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{message: "PDF conversion produced empty text and OCR is unavailable", kind: "convert", status: pdfStatus}.result(identifier, rungs)
 		}
 		rungs = append(rungs, "ocr")
 		converted, err = ocrConverter.ConvertOCR(attemptCtx, "pdf", pdfSource, pdfBody)
 		if err != nil {
-			return sciHubFailure{message: "PDF conversion produced empty text and OCR failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{message: "PDF conversion produced empty text and OCR failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
 		}
 		if !usableContent(converted, "pdf") {
-			return sciHubFailure{message: "PDF conversion and OCR produced empty text", kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{message: "PDF conversion and OCR produced empty text", kind: "convert", status: pdfStatus}.result(identifier, rungs)
 		}
 	}
-	stored := h.storeResult(pdfSource, "pdf", "scihub", converted, int64(len(pdfBody)), pdfStatus, rungs, options)
+	stored := h.storeResult(pdfSource, "pdf", "doi-mirror", converted, int64(len(pdfBody)), pdfStatus, rungs, options)
 	if stored.Error != "" {
 		return stored
 	}
@@ -314,7 +314,7 @@ func (h *Harvester) fetchSciHub(ctx context.Context, identifier string, options 
 	return stored
 }
 
-func sciHubChallenge(body []byte, status int) bool {
+func doiMirrorChallenge(body []byte, status int) bool {
 	if isChallenge(body, status) {
 		return true
 	}
@@ -327,14 +327,14 @@ func sciHubChallenge(body []byte, status int) bool {
 	return false
 }
 
-func sciHubPDFLink(body []byte, finalURL string) (string, error) {
+func doiMirrorPDFLink(body []byte, finalURL string) (string, error) {
 	base, err := url.Parse(finalURL)
 	if err != nil || base.Scheme == "" || base.Host == "" {
-		return "", fmt.Errorf("SciHub final page URL is invalid")
+		return "", fmt.Errorf("doi-mirror final page URL is invalid")
 	}
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("SciHub page could not be parsed: %w", err)
+		return "", fmt.Errorf("doi-mirror page could not be parsed: %w", err)
 	}
 	var link string
 	var walk func(*html.Node, bool)
@@ -362,15 +362,15 @@ func sciHubPDFLink(body []byte, finalURL string) (string, error) {
 	}
 	walk(doc, false)
 	if strings.TrimSpace(link) == "" {
-		return "", fmt.Errorf("SciHub page contained no supported PDF link")
+		return "", fmt.Errorf("doi-mirror page contained no supported PDF link")
 	}
 	resolved, err := base.Parse(strings.TrimSpace(link))
 	if err != nil || resolved.Scheme == "" || resolved.Host == "" {
-		return "", fmt.Errorf("SciHub PDF link is invalid")
+		return "", fmt.Errorf("doi-mirror PDF link is invalid")
 	}
 	resolved.Fragment = ""
 	if err := assertFetchable(resolved.String(), false); err != nil {
-		return "", fmt.Errorf("SciHub PDF link refused: %w", err)
+		return "", fmt.Errorf("doi-mirror PDF link refused: %w", err)
 	}
 	return resolved.String(), nil
 }

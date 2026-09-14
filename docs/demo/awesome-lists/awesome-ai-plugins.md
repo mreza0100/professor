@@ -34,7 +34,7 @@ None of these are demonstrably `.claude-plugin/plugin.json` marketplace bundles;
 
 **One counter-precedent worth flagging (§4, PR #276, closed/not merged):** "Coddy" was rejected not for being unpackaged, but for (a) centralized scan score 49/100 (well under the 80 threshold, with 50 high-severity findings) and (b) the submitter's own pushback that the scanner's plugin-detector had misfired on an OpenCode rules-wrapper file. The rejection reason was security-scan score, not "not a plugin."
 
-**Net:** Professor qualifies structurally as-is for "Development & Workflow." The one real gate to clear before submitting is the **HOL centralized scanner score** — Professor's public repo would need to score ≥80/100 with no critical/high findings when scanned (repo `github.com/mreza0100/professor` has not been scanned by this research since that would require opening a PR; this is a gap, not a finding).
+**Net:** Professor qualifies structurally as-is for "Development & Workflow." The one real gate to clear before submitting is the **HOL centralized scanner score** — Professor's public repo would need to score ≥80/100 with no critical/high findings when scanned (repo `github.com/rezzminator/professor` has not been scanned by this research since that would require opening a PR; this is a gap, not a finding).
 
 ## 3. Section and exact insertion point
 
@@ -85,7 +85,7 @@ None of these are demonstrably `.claude-plugin/plugin.json` marketplace bundles;
 **Verbatim entry** (fits the `- [Name](url) - one sentence.` format, under ~1 sentence per CONTRIBUTING.md; using the given pitch, trimmed to one sentence and repo URL as given):
 
 ```
-- [Professor](https://github.com/mreza0100/professor) - LLM-harness fleet framework that turns Claude Code, Codex, and OpenCode into a disciplined engineering team you can see, message, and hold to the rules, shipping compiled Codex/OpenCode mirrors, a Go fleet CLI/TUI (pfm), and MCP servers.
+- [Professor](https://github.com/rezzminator/professor) - LLM-harness fleet framework that turns Claude Code, Codex, and OpenCode into a disciplined engineering team you can see, message, and hold to the rules, shipping compiled Codex/OpenCode mirrors, a Go fleet CLI/TUI (pfm), and MCP servers.
 ```
 
 **Branch name** (repo convention not documented in CONTRIBUTING.md; inferred from no stated scheme — no branch-name examples appear in the sampled PRs' titles/refs available via `gh pr view`): use a descriptive slug, e.g. `add-professor-dev-workflow`.
@@ -100,16 +100,16 @@ Add Professor to Development & Workflow
 
 ```
 - Extension: Professor — LLM-harness fleet boost framework for Claude Code, Codex & OpenCode.
-- Repo: https://github.com/mreza0100/professor
+- Repo: https://github.com/rezzminator/professor
 - Section: Community Plugins → Development & Workflow (alphabetical, between "Praxis" and "Project Autopilot")
 - Verification: MIT-licensed, active daily commits, ships Claude Code agents/commands/skills/hooks plus compiled Codex and OpenCode mirrors and a Go fleet CLI/TUI (pfm) and MCP servers; installed and exercised locally.
 ```
 
-**Before submitting, close this gap:** run (or have HOL's PR-time bot run) the centralized `plugin-scanner` against `mreza0100/professor` and confirm it clears **≥80/100 with no critical/high findings** — this research did not execute the scanner (out of scope: read-only, no PR opened) and cannot state Professor's actual score. If it self-hosts the SHA-pinned `hol-guard`/`ai-plugin-scanner-action` workflow per SCANNER_GUIDE.md ahead of submission, it avoids the 10% trust-score reduction and gives reviewers a reproducible source-repo result, matching the pattern reviewers rewarded in PR #278 and #282.
+**Before submitting, close this gap:** run (or have HOL's PR-time bot run) the centralized `plugin-scanner` against `rezzminator/professor` and confirm it clears **≥80/100 with no critical/high findings** — this research did not execute the scanner (out of scope: read-only, no PR opened) and cannot state Professor's actual score. If it self-hosts the SHA-pinned `hol-guard`/`ai-plugin-scanner-action` workflow per SCANNER_GUIDE.md ahead of submission, it avoids the 10% trust-score reduction and gives reviewers a reproducible source-repo result, matching the pattern reviewers rewarded in PR #278 and #282.
 
 ## Gaps
 
-- Did not execute `plugin-scanner` / `hol-guard` against `mreza0100/professor` (would require running third-party scanning tooling against the candidate repo, orthogonal to "read GitHub read-only" and not requested) — actual trust score/pass-fail for Professor is unknown.
+- Did not execute `plugin-scanner` / `hol-guard` against `rezzminator/professor` (would require running third-party scanning tooling against the candidate repo, orthogonal to "read GitHub read-only" and not requested) — actual trust score/pass-fail for Professor is unknown.
 - No PR-template file exists in `.github/` to quote verbatim; the PR body above is synthesized from CONTRIBUTING.md's stated checklist, not copied from a template.
 - Branch-naming convention is not documented anywhere in CONTRIBUTING.md/SCANNER_GUIDE.md and PR head-branch names were not retrievable via the `gh pr view --json files` calls used (only base README diffs were inspected); the suggested branch name is a reasonable inference, not an observed fact.
 

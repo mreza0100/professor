@@ -4,19 +4,15 @@ Harvester reads `harvester.config.json` beside `pfm.config.json`. CLI fetches an
 
 ## Scholarly providers
 
-Open-access resolution runs first. Optional library mirrors extend retrieval when that chain cannot supply a readable document. Empty or omitted mirror URLs disable the corresponding provider.
+Open-access resolution runs first.
 
 | Configuration | Retrieval and discovery |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `scholarly.contactEmail` | Enables the existing Unpaywall DOI API with the operator's real contact email. |
-| `scholarly.sciHubURL` | SciHubEVA-compatible DOI/PMID lookup, HTML PDF extraction, and PDF download. |
-| `scholarly.sciDBURL` | SciDB DOI pages and their embedded PDF viewer links. |
-| `scholarly.annasURL` | Anna's Archive catalog search and MD5 records with keyless IPFS copies. |
-| `scholarly.libGenURL` | LibGen catalog discovery, exact DOI records, MD5 lookup, and download-page resolution. |
 | `scholarly.googleScholarURL` | Google Scholar discovery, including linked document copies. |
 | No extra setting | PubMed Central resolution through NCBI ID conversion, OA PDF links, and Europe PMC. |
 
-Mirror settings are absolute HTTP(S) base URLs without credentials, query, or fragment. Public-network checks cover requests, redirects, and discovered file hosts. TLS verification remains enabled. HTML parsing and downloads have size and time limits; MD5-addressed copies are checked against their record digest.
+Provider URLs are absolute HTTP(S) base URLs without credentials, query, or fragment. Public-network checks cover requests, redirects, and discovered file hosts. TLS verification remains enabled. HTML parsing and downloads have size and time limits; MD5-addressed copies are checked against their record digest.
 
 Mirror availability and document coverage vary. A successful homepage response is insufficient: the selected record, download host, and conversion must all work. HTTP errors, malformed responses, challenges, and conversion failures remain failures. Interactive CAPTCHAs are not solved. A missing Unpaywall contact email disables its requests; no substitute identity is generated.
 
@@ -42,9 +38,6 @@ Harvester adapts the request protocols into its Go transport; it does not launch
 
 | Provider | Inspected implementation |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sci-Hub | [leovan/SciHubEVA](https://github.com/leovan/SciHubEVA) |
-| Anna's Archive / SciDB | [CannonCoPilot/AnnasTools](https://github.com/CannonCoPilot/AnnasTools), [jmrplens/libgen-mcp](https://github.com/jmrplens/libgen-mcp) |
-| LibGen | [harrison-broadbent/libgen-api](https://github.com/harrison-broadbent/libgen-api), [jmrplens/libgen-mcp](https://github.com/jmrplens/libgen-mcp) |
 | Unpaywall | [ourresearch/unpaywall-extension](https://github.com/ourresearch/unpaywall-extension), [ourresearch/oadoi](https://github.com/ourresearch/oadoi), [unpywall/unpywall](https://github.com/unpywall/unpywall) |
 | Google Scholar | [scholarly-python-package/scholarly](https://github.com/scholarly-python-package/scholarly) |
 | PubMed Central | [Bio.Entrez](https://github.com/biopython/biopython/tree/master/Bio/Entrez) |
