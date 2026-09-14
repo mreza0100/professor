@@ -66,7 +66,7 @@ func runHeal(args []string, stdout, stderr io.Writer) int {
 
 func printHealReport(report heal.Report, apply bool, stdout io.Writer) {
 	for _, thread := range report.Threads {
-		if !thread.Verdict.Broken() {
+		if !thread.Verdict.Broken() && !thread.Verdict.LeftAlone() {
 			continue
 		}
 		fmt.Fprintf(
@@ -87,6 +87,23 @@ func printHealReport(report heal.Report, apply bool, stdout io.Writer) {
 		line += fmt.Sprintf(" %s=%d", verdict, report.Totals[heal.Verdict(verdict)])
 	}
 	fmt.Fprintln(stdout, line)
+	if report.Totals[heal.VerdictNoncanonical] > 0 {
+		fmt.Fprintf(
+			stdout,
+			"NONCANONICAL threads are never rebuilt: the rebuild from zero fails on the "+
+				"same record on Codex < %s — upgrade Codex to >= %s and resume the thread; "+
+				"its projector skips the record.\n",
+			heal.CodexProjectsPastAnomalies,
+			heal.CodexProjectsPastAnomalies,
+		)
+	}
+	if report.Totals[heal.VerdictUnscanned] > 0 {
+		fmt.Fprintln(
+			stdout,
+			"UNSCANNED threads are never rebuilt: the rollout could not be read end to "+
+				"end — fix the read error and re-run.",
+		)
+	}
 	if !apply {
 		if report.Totals[heal.VerdictWedged]+report.Totals[heal.VerdictMidline] > 0 {
 			fmt.Fprintln(
@@ -101,9 +118,10 @@ func printHealReport(report heal.Report, apply bool, stdout io.Writer) {
 	}
 	fmt.Fprintf(
 		stdout,
-		"healed=%d skipped_live=%d — healed threads rebuild at their next resume\n",
+		"healed=%d skipped_live=%d left_alone=%d — healed threads rebuild at their next resume\n",
 		len(report.Healed),
 		len(report.SkippedLive),
+		len(report.LeftAlone),
 	)
 	for _, id := range report.SkippedLive {
 		fmt.Fprintf(stdout, "SKIP live thread %s\n", id)

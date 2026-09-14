@@ -148,6 +148,44 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 	}
 }
 
+// TestResolverHathitrustRefusesOversizeBodyByName is the representative
+// regression for task 2: hathitrust() previously read its response through
+// getBody (oversizeTruncate: true), so an over-ceiling JSON response was
+// silently truncated and then failed json.Unmarshal — indistinguishable from
+// "malformed JSON" when the real story is the byte ceiling. Routed through
+// getJSONBody (oversizeTruncate: false), the failure must name the ceiling.
+func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
+	oversize := strings.Repeat("a", 10<<20+1<<20)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(r, `{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=`+oversize+`"}]}`), nil
+	})}
+	resolver := &Resolver{}
+	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
+	if got != nil {
+		t.Fatalf("hathitrust(oversize) candidates = %#v, want nil", got)
+	}
+	// hathitrust treats every lookup failure (outage AND oversize alike) as
+	// "no copy" rather than bubbling an error — TestResolverHathitrustTreats
+	// FailedLookupAsNoCopyNotAbsence pins that contract. The byte-ceiling
+	// proof therefore lives at the shared helper directly: it fails outright,
+	// and its error must name the ceiling rather than describe a decode
+	// failure, whichever caller reaches it.
+	if err != nil {
+		t.Fatalf("hathitrust(oversize) error = %v, want nil (outage semantics)", err)
+	}
+	var data any
+	getErr := getJSONBody(context.Background(), client, "https://catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json", defaultUA, nil, 10<<20, &data)
+	if getErr == nil {
+		t.Fatal("getJSONBody(oversize) error = nil, want an oversize refusal")
+	}
+	if strings.Contains(getErr.Error(), "unexpected end of JSON input") || strings.Contains(getErr.Error(), "decode JSON") {
+		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling rather than a decode failure", getErr)
+	}
+	if !strings.Contains(getErr.Error(), "exceeds") {
+		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling", getErr)
+	}
+}
+
 func TestResolverHathitrustSkipsNonISBNQueries(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("hathitrust must not make a network call for a non-ISBN query, requested %s", r.URL)

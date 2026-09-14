@@ -176,7 +176,7 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		{name: "Codex survives", environ: []string{"PFM_AUTO_OPEN=cx"}, want: []string{"create cx-", "codex", "launch "}},
 		{name: "unknown is never evaluated", environ: []string{"PFM_AUTO_OPEN=rm -rf /"}, want: []string{"picker"}, absent: []string{"EVALUATED"}},
 		{name: "unset", absent: []string{"picker", "create ", "launch "}},
-		{name: "inside chat", environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1"}, absent: []string{"picker", "create ", "launch "}},
+		{name: "app launched from a chat", environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1", "TMUX=/private/tmp/chat,1,0"}, want: []string{"picker"}},
 	}
 
 	for _, testCase := range cases {
@@ -208,6 +208,64 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		`print -r -- "leaked=${PFM_AUTO_OPEN-no}${CC_AUTO_OPEN-no}${VSCODE_AUTO_CC-no}" >> "$SHIM_AUTO_LOG"`+"\n")
 	if !strings.Contains(inherited, "leaked=nonono") {
 		t.Fatalf("auto-open left its variables in the environment: %q", inherited)
+	}
+
+	// An app launched from inside a chat hands its terminals the chat's identity; the shell
+	// clears exactly the keys the VS Code profile nulls, so the picker never sees a chat's tmux.
+	log = filepath.Join(home, "chat-env-log")
+	writeShimFile(t, log, "")
+	cleared := runAutoOpenShell(t, zsh, shimPath, home, fakeBin, log,
+		[]string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_CHILD_SESSION=1", "TMUX=/private/tmp/chat,1,0", "TMUX_PANE=%0"},
+		`print -r -- "chat=${CLAUDECODE-no}${CLAUDE_CODE_SESSION_ID-no}${CLAUDE_CODE_CHILD_SESSION-no}${TMUX-no}${TMUX_PANE-no}" >> "$SHIM_AUTO_LOG"`+"\n")
+	if !strings.Contains(cleared, "chat=nonononono") {
+		t.Fatalf("auto-open kept the chat environment its app inherited: %q", cleared)
+	}
+}
+
+// TestShimAutoOpenClearsAnInheritedChatEnvAndSaysSoOnAnInteractiveTTY pins
+// the VS-Code-relaunched-from-a-chat case: PFM_AUTO_OPEN set AND CLAUDECODE
+// set AND a real tty on stderr (via testjail.PTYCommand, the only way this repo
+// drives [[ -t 2 ]] true) must print the named stderr line. A script run under
+// `zsh -fi` never draws a prompt, so the precmd hook cannot fire here; the
+// "app launched from a chat" case of
+// TestShimAutoOpenDefersDisarmsAndMapsLegacyValuesToPicker pins that the
+// picker still opens — the old skip left every new terminal at a dead prompt.
+func TestShimAutoOpenClearsAnInheritedChatEnvAndSaysSoOnAnInteractiveTTY(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skip("script is not installed")
+	}
+	shimPath := embeddedShimPath(t)
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeShimFile(t, filepath.Join(binDir, "pfm"), `#!/bin/sh
+printf 'PICKER-LAUNCHED\n'
+`)
+	driver := filepath.Join(home, "driver.zsh")
+	writeShimFile(t, driver, "source "+quoteZsh(shimPath)+"\n")
+
+	command := testjail.PTYCommand(zsh, "-fi", driver)
+	command.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH="+binDir+":/usr/bin:/bin",
+		"TERM=dumb",
+		"PFM_AUTO_OPEN=pfm",
+		"CLAUDECODE=1",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run auto-open shell on a pty: %v: %s", err, output)
+	}
+	got := string(output)
+	want := "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app — relaunch the app outside any chat to stop it"
+	if !strings.Contains(got, want) {
+		t.Fatalf("interactive tty with inherited CLAUDECODE did not report the clear:\n%q", got)
 	}
 }
 

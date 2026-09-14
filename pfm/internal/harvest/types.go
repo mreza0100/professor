@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +68,10 @@ type Options struct {
 	ProxyURL  string
 	UserAgent string
 	// ResolvePublic is called once for each production dial. It is injectable
-	// for deterministic DNS-rebinding tests; nil uses net.LookupIP.
+	// for deterministic DNS-rebinding tests; nil installs the DNS-over-HTTPS
+	// resolver (doh.go), because a consumer ISP's resolver can answer a source
+	// host with its own block address and no rung can tell that from the real
+	// one. The SSRF guard runs on whatever this returns, unchanged.
 	ResolvePublic func(context.Context, string) ([]net.IP, error)
 	// BrowserRung opts the real-browser rung in (harvester.config.json
 	// fetch.browser). The rung is OFF by default: nil or false never starts
@@ -254,6 +258,14 @@ func New(options Options) (*Harvester, error) {
 	if options.JinaURL == "" {
 		options.JinaURL = "https://r.jina.ai/"
 	}
+	// Every client below is built with options.ResolvePublic, and that resolver
+	// reaches the dialer through pinnedDialContext/publicIPs — so installing the
+	// DoH resolver here is the ONE place that moves all six transports (direct,
+	// chrome, both binary tiers, jina, oa) off a resolver the network can
+	// rewrite. A caller that supplied its own resolver keeps it.
+	if options.ResolvePublic == nil {
+		options.ResolvePublic = ResolvePublicHost
+	}
 	client := options.Client
 	customClient := client != nil
 	if client == nil {
@@ -324,4 +336,47 @@ func (h *Harvester) Fetch(ctx context.Context, source string) Result {
 // exposing its transport internals. A nil resolver uses the system resolver.
 func NewChromeClient(resolve func(context.Context, string) ([]net.IP, error)) *http.Client {
 	return safeHTTPClient(true, resolve)
+}
+
+// NewDirectClient is the pinned direct (non-Chrome) client for an adapter
+// that needs its own timeout, proxy, or User-Agent but must still dial only
+// the addresses the DoH resolver returned. proxy may be nil. An empty ua
+// keeps the harvester default; otherwise it is the User-Agent on the wire —
+// the transport's own wrapper stamps it on every request, so an adapter's
+// outer wrapper cannot lose to it. A nil resolve installs the
+// DNS-over-HTTPS resolver (ResolvePublicHost).
+func NewDirectClient(timeout time.Duration, proxy *url.URL, ua string, resolve func(context.Context, string) ([]net.IP, error)) *http.Client {
+	if resolve == nil {
+		resolve = ResolvePublicHost
+	}
+	client := safeHTTPClientTimeoutWithResolver(false, timeout, resolve)
+	setUserAgent(client, ua)
+	if proxy != nil {
+		if wrapped, ok := client.Transport.(*userAgentTransport); ok {
+			if transport, ok := wrapped.base.(*http.Transport); ok {
+				transport.Proxy = http.ProxyURL(proxy)
+			}
+		}
+	}
+	return client
+}
+
+// IsPinnedClient reports whether client's transport is harvest's own pinned
+// direct dialer — userAgentTransport wrapping a *http.Transport whose
+// DialContext is pinnedDialContext — rather than a bare, unpinned transport.
+// It lets an adapter package (harvestmcp) assert its client was built via
+// NewDirectClient without reaching into harvest's unexported transport types.
+func IsPinnedClient(client *http.Client) bool {
+	if client == nil {
+		return false
+	}
+	wrapped, ok := client.Transport.(*userAgentTransport)
+	if !ok || wrapped.chrome {
+		return false
+	}
+	transport, ok := wrapped.base.(*http.Transport)
+	if !ok {
+		return false
+	}
+	return transport.DialContext != nil
 }

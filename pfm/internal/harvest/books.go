@@ -2,7 +2,6 @@ package harvest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,8 +29,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		UUID string `json:"uuid"`
 		Name string `json:"name"`
 	}
-	if body, status, _, fetchErr := getBody(ctx, client, "https://library.oapen.org/rest/search?query="+url.QueryEscape(search)+"&limit=5", defaultUA, 10<<20); fetchErr == nil && status < 400 {
-		_ = json.Unmarshal(body, &oapen)
+	// getJSON, not getBody: a JSON-decoding path refuses an over-ceiling body
+	// by name rather than truncating it into a decode failure.
+	if err := getJSON(ctx, client, "https://library.oapen.org/rest/search?query="+url.QueryEscape(search)+"&limit=5", &oapen); err == nil {
 		for _, item := range oapen {
 			if item.UUID == "" {
 				continue
@@ -292,14 +292,12 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 		} `json:"items"`
 	}
 	endpoint := "https://catalog.hathitrust.org/api/volumes/brief/isbn/" + url.PathEscape(isbn) + ".json"
-	body, status, _, err := getBody(ctx, client, endpoint, defaultUA, 10<<20)
-	if err != nil || status >= 400 {
-		// A failed LOOKUP is an outage, not evidence of absence — say so loudly.
-		log.Printf("harvest: hathitrust %s lookup FAILED (status %d, err %v) — treated as no-copy, not as 'no full-view volume exists'", isbn, status, err)
-		return nil, nil
-	}
-	if err := json.Unmarshal(body, &data); err != nil {
-		log.Printf("harvest: hathitrust %s returned malformed JSON: %v", isbn, err)
+	// getJSON, not getBody: a JSON-decoding path refuses an over-ceiling body
+	// by name rather than truncating it into a decode failure.
+	if err := getJSON(ctx, client, endpoint, &data); err != nil {
+		// A failed LOOKUP (transport, HTTP status, or decode) is an outage, not
+		// evidence of absence — say so loudly.
+		log.Printf("harvest: hathitrust %s lookup FAILED (err %v) — treated as no-copy, not as 'no full-view volume exists'", isbn, err)
 		return nil, nil
 	}
 	out := []Candidate{}

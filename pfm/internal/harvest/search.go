@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -234,27 +233,23 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 	if o.Engines != "" {
 		u += "&engines=" + url.QueryEscape(o.Engines)
 	}
-	req, e := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if e != nil {
-		return nil, 0, fmt.Errorf("build request: %w", e)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", searchUA)
-	resp, e := client.Do(req)
-	if e != nil {
-		return nil, 0, e
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
+	// Through the fetch gateway, like every other harvester egress. A search
+	// API answers JSON or nothing, so escalation would buy nothing here.
 	const maxSearchBody = 10 * 1024 * 1024
-	body, e := io.ReadAll(io.LimitReader(resp.Body, maxSearchBody+1))
+	response, e := gatewayAttempt(ctx, gatewayRequest{
+		url: u, client: client, ua: searchUA,
+		headers:       http.Header{"Accept": {"application/json"}},
+		max:           maxSearchBody,
+		trustedOrigin: true, // the operator's own SearXNG, which may be on loopback
+	})
+	body, status := response.body, response.status
 	if e != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read response: %w", e)
+		// status is what the gateway observed before failing (0 when no response
+		// arrived) — backendCause classifies from it, so it must survive.
+		return nil, status, e
 	}
-	if len(body) > maxSearchBody {
-		return nil, resp.StatusCode, fmt.Errorf("response exceeds %d bytes", maxSearchBody)
+	if status >= 400 {
+		return nil, status, fmt.Errorf("HTTP %d", status)
 	}
 	var data struct {
 		Results []struct {
@@ -264,7 +259,7 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 		} `json:"results"`
 	}
 	if e = json.Unmarshal(body, &data); e != nil {
-		return nil, resp.StatusCode, fmt.Errorf("decode SearXNG JSON (is format=json enabled in its settings.yml?): %w", e)
+		return nil, status, fmt.Errorf("decode SearXNG JSON (is format=json enabled in its settings.yml?): %w", e)
 	}
 	out := []SearchResult{}
 	for _, r := range data.Results {
@@ -279,7 +274,7 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 	if len(out) > o.Count {
 		out = out[:o.Count]
 	}
-	return out, resp.StatusCode, nil
+	return out, status, nil
 }
 
 // searchBrave's int return is the HTTP status actually observed, matching
@@ -294,28 +289,37 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 		query.Set("search_lang", o.Lang)
 	}
 	reqURL := "https://api.search.brave.com/res/v1/web/search?" + query.Encode()
-	req, e := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	// Through the fetch gateway, like every other harvester egress. The
+	// subscription token rides a header, so this request must never escalate to
+	// a browser rung that would render it somewhere else. This is a
+	// JSON-decoding path, so oversizeTruncate is OFF like every other JSON
+	// caller: a body over the ceiling is refused with an error naming the
+	// ceiling, not silently truncated into a decode failure.
+	response, e := gatewayAttempt(ctx, gatewayRequest{
+		url:    reqURL,
+		client: client,
+		ua:     searchUA,
+		headers: http.Header{
+			"Accept":               {"application/json"},
+			"X-Subscription-Token": {o.BraveAPIKey},
+		},
+		max:              10 * 1024 * 1024,
+		oversizeTruncate: false,
+	})
+	body, status := response.body, response.status
 	if e != nil {
-		return nil, 0, e
+		return nil, status, e
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", searchUA)
-	req.Header.Set("X-Subscription-Token", o.BraveAPIKey)
-	resp, e := client.Do(req)
-	if e != nil {
-		return nil, 0, e
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
+	if status >= 400 {
+		return nil, status, fmt.Errorf("HTTP %d", status)
 	}
 	var data struct {
 		Web struct {
 			Results []struct{ Title, URL, Description string } `json:"results"`
 		} `json:"web"`
 	}
-	if e = json.NewDecoder(resp.Body).Decode(&data); e != nil {
-		return nil, resp.StatusCode, e
+	if e = json.Unmarshal(body, &data); e != nil {
+		return nil, status, e
 	}
 	out := []SearchResult{}
 	for _, r := range data.Web.Results {
@@ -323,7 +327,7 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 			out = append(out, SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateRunes(r.Description, 300), Engine: "brave"})
 		}
 	}
-	return out, resp.StatusCode, nil
+	return out, status, nil
 }
 
 func truncateRunes(value string, max int) string {
@@ -371,19 +375,21 @@ func ProbeSearch(ctx context.Context, options SearchOptions, client *http.Client
 		if client == nil {
 			client = &http.Client{Timeout: 5 * time.Second}
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(options.SearXNGURL, "/")+"/healthz", nil)
+		// Through the fetch gateway like every other egress; a trusted origin,
+		// because the operator's own SearXNG may sit on loopback.
+		response, err := gatewayAttempt(ctx, gatewayRequest{
+			url: strings.TrimRight(options.SearXNGURL, "/") + "/healthz", client: client, ua: searchUA,
+			max:              64 * 1024,
+			trustedOrigin:    true,
+			oversizeTruncate: true,
+		})
 		if err != nil {
-			return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (invalid URL: %v)", err), Warning: true}
+			return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", response.status, err)), Warning: true}
 		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", 0, err)), Warning: true}
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
+		if response.status == http.StatusOK {
 			return SearchProbe{State: SearchProbeReachable, Backend: "searxng", Detail: "reachable (health only — the json format is not probed)"}
 		}
-		return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", resp.StatusCode, nil)), Warning: true}
+		return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", response.status, nil)), Warning: true}
 	}
 	return SearchProbe{State: SearchProbeConfigured, Backend: "brave", Detail: "configured (key set, not probed — every probe spends quota)"}
 }

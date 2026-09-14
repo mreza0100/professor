@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -699,5 +700,116 @@ func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t
 			`"terminal.integrated.defaultProfile.linux": "`+title+`"`, 1))
 		value, profiles = run(false)
 		assertSettingsProfileDefault("ordinary install over an owned "+title+" default", value, profiles)
+	}
+}
+
+// vscodeExtensionDriverJS stubs the 'vscode' module (Module._load
+// interception, the documented way to inject a require-time fake with no
+// package on disk) and drives the real embedded extension.js through
+// activate() -> registerTerminalProfileProvider -> provideTerminalProfile(),
+// the same call chain VS Code itself makes when a Professor terminal opens.
+const vscodeExtensionDriverJS = `
+const Module = require('module');
+const extensionPath = process.argv[2];
+
+const defaults = {
+  shellPath: '/bin/zsh',
+  shellArgs: ['-l'],
+  env: { PFM_AUTO_OPEN: 'pfm' },
+  icons: ['rocket'],
+  colors: ['terminal.ansiRed'],
+};
+
+let provider;
+const vscodeStub = {
+  workspace: {
+    getConfiguration() {
+      return { get: (key) => defaults[key] };
+    },
+  },
+  window: {
+    onDidOpenTerminal: () => ({ dispose() {} }),
+    registerTerminalProfileProvider: (id, terminalProvider) => {
+      provider = terminalProvider;
+      return { dispose() {} };
+    },
+    createTerminal: () => ({ show() {} }),
+  },
+  commands: { registerCommand: () => ({ dispose() {} }) },
+  ThemeIcon: function (id) { this.id = id; },
+  ThemeColor: function (id) { this.id = id; },
+  TerminalProfile: function (options) { return options; },
+};
+
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === 'vscode') return vscodeStub;
+  return originalLoad.apply(this, arguments);
+};
+
+const extension = require(extensionPath);
+const store = {};
+const context = {
+  subscriptions: [],
+  globalState: {
+    get: (key, def) => (key in store ? store[key] : def),
+    update: (key, value) => { store[key] = value; },
+  },
+};
+extension.activate(context);
+process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
+`
+
+// TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv runs the embedded
+// extension.js under Node with a stubbed 'vscode' module and asserts
+// nextTerminal's env carries PFM_AUTO_OPEN, a PROFESSOR_TERMINAL marker, and
+// a JSON null for every chat-identity variable a launcher app could have
+// inherited (see the comment beside nextTerminal's env in extension.js).
+func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
+	}
+
+	extensionPath, err := filepath.Abs(filepath.Join("assets", "vscode", "professor", "extension.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(extensionPath); statErr != nil {
+		t.Fatalf("embedded extension asset %s: %v", extensionPath, statErr)
+	}
+
+	driverPath := filepath.Join(t.TempDir(), "driver.js")
+	if err := os.WriteFile(driverPath, []byte(vscodeExtensionDriverJS), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := exec.Command(node, driverPath, extensionPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run extension.js under node: %v: %s", err, output)
+	}
+
+	var profile struct {
+		Env map[string]any `json:"env"`
+	}
+	if err := json.Unmarshal(output, &profile); err != nil {
+		t.Fatalf("decode terminal profile JSON: %v: %s", err, output)
+	}
+
+	if profile.Env["PFM_AUTO_OPEN"] != "pfm" {
+		t.Fatalf("terminal profile env missing PFM_AUTO_OPEN=pfm: %v", profile.Env)
+	}
+	marker, ok := profile.Env["PROFESSOR_TERMINAL"].(string)
+	if !ok || marker == "" {
+		t.Fatalf("terminal profile env missing a PROFESSOR_TERMINAL marker: %v", profile.Env)
+	}
+	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
+		value, present := profile.Env[key]
+		if !present {
+			t.Fatalf("terminal profile env dropped %s entirely instead of nulling it: %v", key, profile.Env)
+		}
+		if value != nil {
+			t.Fatalf("terminal profile env[%s] = %v, want JSON null (VS Code deletes the inherited var)", key, value)
+		}
 	}
 }

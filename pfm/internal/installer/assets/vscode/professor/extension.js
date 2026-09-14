@@ -24,7 +24,22 @@ function nextTerminal(context) {
   return {
     shellPath: cfg.get('shellPath'),
     shellArgs: cfg.get('shellArgs'),
-    env: { ...cfg.get('env'), PROFESSOR_TERMINAL: marker },
+    // A terminal app launched FROM inside a chat (VS Code relaunched by a chat's `code .`, a
+    // window manager a chat spawned, …) inherits that chat's own environment, so every terminal
+    // it then opens would look like a shell running INSIDE the chat that never existed —
+    // CC_SESSION_UNSET in pfm.zsh (~line 56) is the canonical list of those chat-identity
+    // markers, plus the TMUX pair that names its tmux server. A terminal this extension opens is
+    // an app surface, not a nested chat, so it must not carry them. `null` is how VS Code deletes
+    // an inherited env var rather than merely leaving it unset here.
+    env: {
+      ...cfg.get('env'),
+      CLAUDECODE: null,
+      CLAUDE_CODE_SESSION_ID: null,
+      CLAUDE_CODE_CHILD_SESSION: null,
+      TMUX: null,
+      TMUX_PANE: null,
+      PROFESSOR_TERMINAL: marker,
+    },
     iconPath: new vscode.ThemeIcon(icons[n % icons.length]),
     color: new vscode.ThemeColor(colors[n % colors.length]),
   };

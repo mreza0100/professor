@@ -8,7 +8,8 @@ hidden by Patchright.
 
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
-  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,"timeout_ms":45000}
+  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,
+                   "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000}
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -19,9 +20,14 @@ Protocol (JSON lines over stdin/stdout), one request serialized at a time:
                   {"ok":false,"error":"patchright not installed"}
 
 SSRF: Go owns the fetchable decision (harvest.AssertFetchable) — the route
-guard below ASKS for every URL Chrome touches (initial navigation, every
-redirect, every subresource, every XHR via context.route("**/*", …)) and
-aborts blocked targets BEFORE Chrome ever connects.
+guards below ASK for every URL Chrome touches: navigation, every redirect,
+every subresource, every XHR/fetch via context.route("**/*", …), and every
+WebSocket connection via context.route_web_socket("**/*", …), since
+context.route() alone never sees WebSocket traffic. Service workers are
+blocked at context creation (service_workers="block") — a page's own SW
+fetches would otherwise bypass the route interceptor entirely. Every path
+aborts (or closes, for WebSocket) blocked targets BEFORE Chrome ever
+connects.
 """
 
 import asyncio
@@ -66,15 +72,80 @@ def browser_route_guard(ask_fetchable):
             allowed, reason = await ask_fetchable(target)
         except Exception as e:  # noqa: BLE001 — a broken ask channel must ABORT, never continue
             print(f"browser route guard RAISED for {redact(target)}: {e}", file=sys.stderr)
-            await route.abort("guard-error")
+            await abort_request(route, redact(target))
             return
         if not allowed:
             print(f"browser route refused (ssrf) {redact(target)}: {reason}", file=sys.stderr)
-            await route.abort("blocked")
+            await abort_request(route, redact(target))
             return
         await route.continue_()
 
     return _ssrf_route_guard
+
+
+def browser_websocket_guard(ask_fetchable):
+    """The SSRF chokepoint for WebSocket connections, as a Patchright
+    route_web_socket handler. context.route() does NOT intercept WebSocket
+    traffic — a page's `new WebSocket(url)` reaches the network unless it is
+    routed separately. Same fail-closed contract as browser_route_guard: the
+    ask runs BEFORE the socket ever connects to the real server, and a denied
+    or raising ask closes the routed (page-side) socket instead of forwarding
+    it."""
+    async def _ssrf_websocket_guard(ws) -> None:
+        target = str(ws.url)
+        try:
+            allowed, reason = await ask_fetchable(target)
+        except Exception as e:  # noqa: BLE001 — a broken ask channel must CLOSE, never connect
+            print(f"browser websocket guard RAISED for {redact(target)}: {e}", file=sys.stderr)
+            await ws.close(code=1011, reason="ssrf guard error")
+            return
+        if not allowed:
+            print(f"browser websocket refused (ssrf) {redact(target)}: {reason}", file=sys.stderr)
+            await ws.close(code=1008, reason=reason or "refused by ssrf guard")
+            return
+        # connect_to_server() is synchronous — it returns the server-side
+        # WebSocketRoute and wires automatic message forwarding both ways.
+        ws.connect_to_server()
+
+    return _ssrf_websocket_guard
+
+
+# service_workers="block" is a BrowserContext.new_context() option, not a
+# route: a page's Service Worker can issue its own fetch()es that never pass
+# through context.route() at all. Blocking SW registration outright is the
+# only way the route guard sees every request the page causes.
+CONTEXT_OPTIONS = {"service_workers": "block"}
+
+
+async def install_route_guards(context, guarded_ask):
+    """Register both SSRF chokepoints on *context*, at CONTEXT scope (every
+    page the context opens, not just the first). Extracted from fetch_browser
+    so a regression — page-scope registration, a narrower glob than "**/*",
+    or a dropped registration entirely — fails a test instead of shipping
+    silently."""
+    await context.route("**/*", browser_route_guard(guarded_ask))
+    await context.route_web_socket("**/*", browser_websocket_guard(guarded_ask))
+
+
+# Route.abort validates its argument against the fixed CDP Network.ErrorReason
+# enum. An invented code ("blocked", "guard-error") raises inside the route
+# handler INSTEAD of aborting, which leaves the intercepted request's fate
+# unresolved — on the refusal branch, the one path that must deterministically
+# stop a request the SSRF guard rejected.
+ABORT_REASON = "blockedbyclient"
+
+
+async def abort_request(route, redacted_target):
+    """Abort one intercepted request. Route.abort() itself failing (e.g. the
+    request already finished) is reported rather than swallowed — but note
+    that even then the request never proceeds: Chrome's paused (CDP
+    Fetch-intercepted) request has no fallback path to the network, so a
+    failed abort leaves it hanging until the caller's own timeout_ms, not
+    silently let through. Fails closed either way."""
+    try:
+        await route.abort(ABORT_REASON)
+    except Exception as e:  # noqa: BLE001 — a guard that cannot abort must SAY so
+        print(f"browser route guard could not abort {redacted_target} (will hang until timeout, not proceed): {e}", file=sys.stderr)
 
 
 def redact(url):
@@ -102,7 +173,8 @@ def serialized_ask(raw_ask):
     return guarded_ask
 
 
-async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True):
+async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
+                        host_resolver_rules=None):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
 
     Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
@@ -112,9 +184,12 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     ("", None, False, "patchright not installed") and the ladder falls through, never raises.
 
     SSRF: the fetchable decision runs on the initial URL AND on EVERY request the page
-    makes — a context.route() interceptor re-checks each request/redirect/subresource and
-    aborts any that Go refuses (a public URL 302ing to 169.254.169.254 must die at the
-    route layer; a one-shot pre-check alone would let Chrome walk straight past it).
+    makes — a context.route() interceptor re-checks each navigation/redirect/subresource/
+    XHR/fetch and aborts any that Go refuses (a public URL 302ing to 169.254.169.254 must
+    die at the route layer; a one-shot pre-check alone would let Chrome walk straight past
+    it), a context.route_web_socket() interceptor re-checks every WebSocket the same way
+    before it connects, and service workers are blocked at context creation so a page
+    cannot route around either interceptor via its own SW-originated fetches.
     """
     try:
         from patchright.async_api import async_playwright  # type: ignore[import-not-found]
@@ -135,12 +210,22 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
 
     proxy = {"server": proxy_url} if proxy_url else None
 
+    # Chrome resolves DNS itself, with no pinning hop. On a network that
+    # rewrites DNS answers that would send the browser rung to a block page
+    # while every HTTP rung reached the real host. Go resolves over HTTPS and
+    # hands us the validated address as a "MAP host ip" rule; an absent rule
+    # leaves Chrome's own resolution in place.
+    launch_args = []
+    if host_resolver_rules:
+        launch_args.append(f"--host-resolver-rules={host_resolver_rules}")
+
     async def _render(headless: bool):
         async with async_playwright() as p:  # type: ignore[attr-defined]
-            browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy)
+            browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
+                                              args=launch_args)
             try:
-                context = await browser.new_context()
-                await context.route("**/*", browser_route_guard(guarded_ask))
+                context = await browser.new_context(**CONTEXT_OPTIONS)
+                await install_route_guards(context, guarded_ask)
 
                 page = await context.new_page()
                 resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
@@ -190,6 +275,7 @@ async def handle_fetch(request):
         proxy_url=request.get("proxy"),
         timeout_ms=int(request.get("timeout_ms") or 45_000),
         headless=bool(request.get("headless", True)),
+        host_resolver_rules=request.get("host_resolver_rules") or None,
     )
     if error is not None and not html:
         return {"ok": False, "error": error}

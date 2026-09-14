@@ -3,6 +3,7 @@ package heal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -142,5 +143,36 @@ func Thread(ctx context.Context, codexRoot, threadID string) string {
 			)
 		}
 	}
+	for _, thread := range report.Threads {
+		if thread.ID != threadID || !thread.Verdict.LeftAlone() {
+			continue
+		}
+		clause := anomalyClause(thread.Detail)
+		if thread.Verdict == VerdictUnscanned {
+			return fmt.Sprintf(
+				"pfm: %s projection is wedged but its rollout could not be scanned (%s) — left alone",
+				threadID,
+				strings.TrimPrefix(clause, unscannedSuffix),
+			)
+		}
+		return fmt.Sprintf(
+			"pfm: %s has a noncanonical rollout (%s) — projection left alone; "+
+				"Codex >= %s projects past it at this resume, older Codex shows the chat short",
+			threadID,
+			clause,
+			CodexProjectsPastAnomalies,
+		)
+	}
 	return ""
+}
+
+// anomalyClause returns the part of a Detail message appended by the ordinal
+// scan — the segment after the LAST "; ", which classify always appends as
+// the final piece when it downgrades a WEDGED/MIDLINE verdict to
+// NONCANONICAL or UNSCANNED.
+func anomalyClause(detail string) string {
+	if index := strings.LastIndex(detail, "; "); index >= 0 {
+		return detail[index+2:]
+	}
+	return detail
 }

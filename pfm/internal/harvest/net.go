@@ -273,34 +273,9 @@ func setUserAgent(client *http.Client, ua string) {
 	}
 }
 
-type userAgentTransport struct {
-	base   http.RoundTripper
-	ua     string
-	chrome bool
-}
-
-func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := assertFetchable(req.URL.String(), false); err != nil {
-		return nil, err
-	}
-	clone := req.Clone(req.Context())
-	clone.Header.Set("User-Agent", t.ua)
-	if t.chrome {
-		clone.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-		clone.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
-		clone.Header.Set("Accept-Language", "en-US,en;q=0.9")
-		clone.Header.Set("Priority", "u=0, i")
-		clone.Header.Set("Sec-Fetch-Dest", "document")
-		clone.Header.Set("Sec-Fetch-Mode", "navigate")
-		clone.Header.Set("Sec-Fetch-Site", "none")
-		clone.Header.Set("Sec-Fetch-User", "?1")
-		clone.Header.Set("Upgrade-Insecure-Requests", "1")
-		clone.Header.Set("Sec-CH-UA", `"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"`)
-		clone.Header.Set("Sec-CH-UA-Mobile", "?0")
-		clone.Header.Set("Sec-CH-UA-Platform", `"macOS"`)
-	}
-	return t.base.RoundTrip(clone)
-}
+// userAgentTransport's type and RoundTrip method live in
+// net_ua_transport.go — transport-internal, below the fetch gateway, like
+// net_chrome_transport.go. This file only builds and reads it.
 
 func assertFetchable(raw string, strictDNS bool) error {
 	u, err := url.Parse(raw)
@@ -355,9 +330,15 @@ func assertFetchable(raw string, strictDNS bool) error {
 	return nil
 }
 
-// lookupIP is the resolver seam; tests stub it to simulate SERVFAIL and
+// lookupIP is the resolver seam behind assertFetchable. Its default is the
+// same DNS-over-HTTPS resolver every dial pins to (ResolvePublicHost): a
+// system resolver the network rewrites must not decide what the pre-check
+// refuses. query (doh.go) bounds its own timeout, so context.Background()
+// here never hangs the pre-check. Tests stub it to simulate SERVFAIL and
 // rebind records without touching the network.
-var lookupIP = net.LookupIP
+var lookupIP = func(host string) ([]net.IP, error) {
+	return ResolvePublicHost(context.Background(), host)
+}
 
 // AssertFetchable is the public SSRF/scheme chokepoint for adapters whose
 // transport dials only the address it validated itself.
@@ -454,43 +435,27 @@ func getBody(ctx context.Context, client *http.Client, rawURL, ua string, max in
 	return getBodyWithHeaders(ctx, client, rawURL, ua, nil, max)
 }
 
+// getBodyWithHeaders is the generic web ladder's egress. It runs through the
+// SAME gateway as every scholarly provider call (gateway.go), with escalation
+// OFF: this ladder owns an explicit rung sequence of its own (direct, chrome,
+// jina, defuddle, browser), so the gateway must perform exactly the one request
+// it was asked for and leave the sequencing to the caller. Oversize truncates
+// here — the oracle's streaming cap keeps the permitted prefix and lets the
+// converter judge whether it is usable.
 func getBodyWithHeaders(ctx context.Context, client *http.Client, rawURL, ua string, headers map[string]string, max int64) ([]byte, int, string, error) {
-	if err := assertFetchable(rawURL, false); err != nil {
-		return nil, 0, "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, 0, "", fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("User-Agent", ua)
+	header := make(http.Header, len(headers))
 	for key, value := range headers {
-		req.Header.Set(key, value)
+		header.Set(key, value)
 	}
-	// Do not trust a caller-supplied client to validate redirect hops. Clone it
-	// per request so every 3xx target re-enters the SSRF chokepoint without
-	// mutating shared client state.
-	requestClient := *client
-	requestClient.CheckRedirect = func(next *http.Request, _ []*http.Request) error { return assertFetchable(next.URL.String(), false) }
-	resp, err := requestClient.Do(req)
-	if err != nil {
-		return nil, 0, "", err
-	}
-	decoded, closeBody, decodeErr := decodedResponseBody(resp)
-	if decodeErr != nil {
-		return nil, resp.StatusCode, resp.Header.Get("Content-Type"), decodeErr
-	}
-	defer closeBody()
-	limit := io.LimitReader(decoded, max+1)
-	body, err := io.ReadAll(limit)
-	if err != nil {
-		return nil, resp.StatusCode, resp.Header.Get("Content-Type"), fmt.Errorf("read response: %w", err)
-	}
-	if int64(len(body)) > max {
-		// Match the oracle's streaming cap: retain exactly the permitted prefix
-		// and let the caller's kind/converter decide whether truncation is usable.
-		body = body[:max]
-	}
-	return body, resp.StatusCode, resp.Header.Get("Content-Type"), nil
+	response, err := gatewayAttempt(ctx, gatewayRequest{
+		url:              rawURL,
+		client:           client,
+		ua:               ua,
+		headers:          header,
+		max:              max,
+		oversizeTruncate: true,
+	})
+	return response.body, response.status, response.contentType, err
 }
 
 // decodedResponseBody keeps the Chrome fingerprint's advertised encodings

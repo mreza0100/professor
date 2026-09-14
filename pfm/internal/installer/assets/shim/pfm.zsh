@@ -184,7 +184,17 @@ _pfm_selfswitch() {
 
 # Launch once at the first prompt, after the complete shell startup. Legacy
 # terminal-profile variables are consumed without reviving retired commands.
-if [[ -o interactive && -z "${CLAUDECODE:-}" && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:-}" ]]; then
+if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:-}" ]]; then
+  if [[ -n "${CLAUDECODE:-}" ]]; then
+    # Only a terminal profile sets these variables, and they are unset before arming, so they never
+    # reach a chat's own shells (which are never interactive anyway). Both markers together mean
+    # the APP that opened this terminal was itself launched from inside a chat (VS Code relaunched
+    # by a chat's `code .`, for one) and handed the chat's identity to every terminal it opens.
+    # Skipping here turned every new terminal into a dead prompt; clear what the app leaked — the
+    # same keys the VS Code profile nulls — and open as normal. Say so on a real tty only.
+    [[ -t 2 ]] && print -u2 -- "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app — relaunch the app outside any chat to stop it"
+    unset CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION TMUX TMUX_PANE
+  fi
   # Read the value, then unset BEFORE arming, both spellings. The variable is exported by the
   # terminal profile, so it is inherited: a shell opened inside the chat would open a chat
   # inside the chat.
