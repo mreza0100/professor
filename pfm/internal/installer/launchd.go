@@ -31,6 +31,32 @@ const launchdAsset = "launchd/" + launchdLabel + ".plist"
 
 const mcpLaunchdAsset = "launchd/" + mcpLaunchdLabel + ".plist"
 
+// launchdLogDir is where both agents' StandardOutPath/StandardErrorPath
+// point: __PFM_HOME__/Library/Logs/pfm. launchd starts an agent with whatever
+// ancestor directories already exist — it never creates one for a log path —
+// so a fresh install without this directory would set the paths only for the
+// daemon to silently drop every line of stdout/stderr.
+func (installer *engine) launchdLogDir() string {
+	return filepath.Join(installer.options.Home, "Library", "Logs", "pfm")
+}
+
+// ensureLaunchdLogDir stages ~/Library/Logs/pfm before either launch agent is
+// loaded, reported the same way every other planned installer step is: "ok"
+// when it already exists, a "change" (created only in apply mode, planned in
+// dry run) when it does not.
+func (installer *engine) ensureLaunchdLogDir() error {
+	path := installer.launchdLogDir()
+	if _, err := os.Stat(path); err == nil {
+		installer.ok(path)
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat launchd log dir %s: %w", path, err)
+	}
+	return installer.change("create "+path, func() error {
+		return os.MkdirAll(path, 0o755)
+	})
+}
+
 // launchAgentPath returns where macOS expects a per-user agent to live.
 func (installer *engine) launchAgentPath() string {
 	return filepath.Join(

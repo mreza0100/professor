@@ -171,7 +171,9 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "search") {
+	// SearchAvailable defaults false here, so the recovery hint names findWorks
+	// rather than the unavailable `search` tool — see SearchHint.
+	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "alternative copy") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
 	}
 }
@@ -341,7 +343,7 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return jsonResponse(request, `{}`), nil
 		})
-		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
+		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, SearchAvailable: true, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
 			return "", nil
 		})})
 		result := h.Fetch(context.Background(), "10.1234/paywalled")

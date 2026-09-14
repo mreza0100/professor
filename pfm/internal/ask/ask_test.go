@@ -25,15 +25,15 @@ type fakeTranscriptAdapter struct{}
 
 func (fakeTranscriptAdapter) Prepare() (AskInput, Evidence) {
 	return AskInput{
-		ContentFiles: []string{"prepared-transcript.md"},
-		SourceLabels: []string{"session fixture#turns 1-14"},
-		Prompt:       "find the visible answer",
-	}, Evidence{
-		File:  "prepared-transcript.md",
-		Label: "session fixture#turns 1-14",
-		Span:  SourceSpan{Kind: "turns", Start: 1, End: 14},
-		Quote: "visible answer",
-	}
+			ContentFiles: []string{"prepared-transcript.md"},
+			SourceLabels: []string{"session fixture#turns 1-14"},
+			Prompt:       "find the visible answer",
+		}, Evidence{
+			File:  "prepared-transcript.md",
+			Label: "session fixture#turns 1-14",
+			Span:  SourceSpan{Kind: "turns", Start: 1, End: 14},
+			Quote: "visible answer",
+		}
 }
 
 func (fakeTranscriptAdapter) WantSpanKind() string { return "turns" }
@@ -42,15 +42,15 @@ type fakeHarvesterAdapter struct{}
 
 func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
 	return AskInput{
-		ContentFiles: []string{"prepared-source.md"},
-		SourceLabels: []string{"https://fixture.invalid/source"},
-		Prompt:       "find the source claim",
-	}, Evidence{
-		File:  "prepared-source.md",
-		Label: "https://fixture.invalid/source",
-		Span:  SourceSpan{Kind: "lines", Start: 4, End: 9},
-		Quote: "source claim",
-	}
+			ContentFiles: []string{"prepared-source.md"},
+			SourceLabels: []string{"https://fixture.invalid/source"},
+			Prompt:       "find the source claim",
+		}, Evidence{
+			File:  "prepared-source.md",
+			Label: "https://fixture.invalid/source",
+			Span:  SourceSpan{Kind: "lines", Start: 4, End: 9},
+			Quote: "source claim",
+		}
 }
 
 func (fakeHarvesterAdapter) WantSpanKind() string { return "lines" }

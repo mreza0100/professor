@@ -93,6 +93,12 @@ type Options struct {
 	MD5CatalogURL         string
 	GoogleScholarURL      string
 	DisableSearch         bool
+	// SearchAvailable tells the ladder's own failure messages whether the
+	// `search` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
+	// verdict, not re-derived here: the adapter already resolved
+	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
+	// way is how a hint drifts from the tool it names.
+	SearchAvailable bool
 }
 
 // settings is the resolved scholarly/search/browser configuration New takes
@@ -110,6 +116,7 @@ type settings struct {
 	md5CatalogURL      string
 	googleScholarURL   string
 	disableSearch      bool
+	searchAvailable    bool
 	browser            bool
 }
 
@@ -223,6 +230,7 @@ func New(options Options) (*Harvester, error) {
 		md5CatalogURL:      md5CatalogURL,
 		googleScholarURL:   googleScholarURL,
 		disableSearch:      options.DisableSearch,
+		searchAvailable:    options.SearchAvailable,
 		browser:            options.BrowserRung != nil && *options.BrowserRung,
 	}
 	options.DOIMirrorURL = doiMirrorURL
