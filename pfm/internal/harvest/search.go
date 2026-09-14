@@ -240,7 +240,6 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 		url: u, client: client, ua: searchUA,
 		headers:       http.Header{"Accept": {"application/json"}},
 		max:           maxSearchBody,
-		policy:        gatewayNoEscalate,
 		trustedOrigin: true, // the operator's own SearXNG, which may be on loopback
 	})
 	body, status := response.body, response.status
@@ -292,11 +291,22 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 	reqURL := "https://api.search.brave.com/res/v1/web/search?" + query.Encode()
 	// Through the fetch gateway, like every other harvester egress. The
 	// subscription token rides a header, so this request must never escalate to
-	// a browser rung that would render it somewhere else.
-	body, status, _, e := getBodyWithHeaders(ctx, client, reqURL, searchUA, map[string]string{
-		"Accept":               "application/json",
-		"X-Subscription-Token": o.BraveAPIKey,
-	}, 10*1024*1024)
+	// a browser rung that would render it somewhere else. This is a
+	// JSON-decoding path, so oversizeTruncate is OFF like every other JSON
+	// caller: a body over the ceiling is refused with an error naming the
+	// ceiling, not silently truncated into a decode failure.
+	response, e := gatewayAttempt(ctx, gatewayRequest{
+		url:    reqURL,
+		client: client,
+		ua:     searchUA,
+		headers: http.Header{
+			"Accept":               {"application/json"},
+			"X-Subscription-Token": {o.BraveAPIKey},
+		},
+		max:              10 * 1024 * 1024,
+		oversizeTruncate: false,
+	})
+	body, status := response.body, response.status
 	if e != nil {
 		return nil, status, e
 	}
@@ -370,7 +380,6 @@ func ProbeSearch(ctx context.Context, options SearchOptions, client *http.Client
 		response, err := gatewayAttempt(ctx, gatewayRequest{
 			url: strings.TrimRight(options.SearXNGURL, "/") + "/healthz", client: client, ua: searchUA,
 			max:              64 * 1024,
-			policy:           gatewayNoEscalate,
 			trustedOrigin:    true,
 			oversizeTruncate: true,
 		})

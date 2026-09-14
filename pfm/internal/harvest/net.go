@@ -273,34 +273,9 @@ func setUserAgent(client *http.Client, ua string) {
 	}
 }
 
-type userAgentTransport struct {
-	base   http.RoundTripper
-	ua     string
-	chrome bool
-}
-
-func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := assertFetchable(req.URL.String(), false); err != nil {
-		return nil, err
-	}
-	clone := req.Clone(req.Context())
-	clone.Header.Set("User-Agent", t.ua)
-	if t.chrome {
-		clone.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-		clone.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
-		clone.Header.Set("Accept-Language", "en-US,en;q=0.9")
-		clone.Header.Set("Priority", "u=0, i")
-		clone.Header.Set("Sec-Fetch-Dest", "document")
-		clone.Header.Set("Sec-Fetch-Mode", "navigate")
-		clone.Header.Set("Sec-Fetch-Site", "none")
-		clone.Header.Set("Sec-Fetch-User", "?1")
-		clone.Header.Set("Upgrade-Insecure-Requests", "1")
-		clone.Header.Set("Sec-CH-UA", `"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"`)
-		clone.Header.Set("Sec-CH-UA-Mobile", "?0")
-		clone.Header.Set("Sec-CH-UA-Platform", `"macOS"`)
-	}
-	return t.base.RoundTrip(clone)
-}
+// userAgentTransport's type and RoundTrip method live in
+// net_ua_transport.go — transport-internal, below the fetch gateway, like
+// net_chrome_transport.go. This file only builds and reads it.
 
 func assertFetchable(raw string, strictDNS bool) error {
 	u, err := url.Parse(raw)
@@ -472,7 +447,6 @@ func getBodyWithHeaders(ctx context.Context, client *http.Client, rawURL, ua str
 		ua:               ua,
 		headers:          header,
 		max:              max,
-		policy:           gatewayNoEscalate,
 		oversizeTruncate: true,
 	})
 	return response.body, response.status, response.contentType, err

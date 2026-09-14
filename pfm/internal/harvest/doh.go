@@ -3,6 +3,7 @@ package harvest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -221,6 +222,16 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	if err == nil && len(ips) > 0 {
 		return ips, nil
 	}
+	var nxdomain *dohNXDomainError
+	if errors.As(err, &nxdomain) {
+		// NXDOMAIN is an ANSWER, not an outage: the resolver looked and the
+		// name does not exist. Falling back to the system resolver here is
+		// exactly the bug this authoritative check exists to close — it would
+		// let a poisoned system resolver override a real "no such host" with
+		// its own address, and it would warn about a "failure" that never
+		// happened.
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
 	if err == nil {
 		err = fmt.Errorf("DoH returned no addresses for %s", host)
 	}
@@ -282,6 +293,22 @@ func (r *dohResolver) store(host string, ips []net.IP, ttl time.Duration) {
 	r.cache[host] = dohEntry{ips: append([]net.IP(nil), ips...), expires: time.Now().Add(ttl)}
 }
 
+// dohNXDomainError marks a DoH answer of Status 3 (NXDOMAIN): the resolver
+// was reached and answered "this name does not exist". It is a distinct type
+// so LookupIP can tell it apart from a transport failure or any other DNS
+// status, all of which keep the system-resolver fallback.
+type dohNXDomainError struct {
+	host  string
+	qtype string
+}
+
+func (e *dohNXDomainError) Error() string {
+	if e.qtype == "" {
+		return fmt.Sprintf("DoH query for %s returned NXDOMAIN", e.host)
+	}
+	return fmt.Sprintf("DoH %s query for %s returned NXDOMAIN", e.qtype, e.host)
+}
+
 // dohAnswer is the RFC 8484 JSON response shape (application/dns-json).
 type dohAnswer struct {
 	Status int `json:"Status"`
@@ -319,19 +346,32 @@ func (r *dohResolver) query(ctx context.Context, host string) ([]net.IP, error) 
 	var all []net.IP
 	ttl := dohMaxTTL
 	var firstErr error
+	allNXDomain := true
 	for _, res := range results {
 		if res.err != nil {
 			if firstErr == nil {
 				firstErr = res.err
 			}
+			var nxdomain *dohNXDomainError
+			if !errors.As(res.err, &nxdomain) {
+				allNXDomain = false
+			}
 			continue
 		}
+		allNXDomain = false
 		all = append(all, res.ips...)
 		if len(res.ips) > 0 && res.ttl < ttl {
 			ttl = res.ttl
 		}
 	}
 	if len(all) == 0 {
+		// Only when EVERY query type came back NXDOMAIN is the name itself
+		// answered as not existing; a mix of NXDOMAIN and a transport failure
+		// or SERVFAIL is still an outage, not an authoritative answer, and
+		// keeps today's system-resolver fallback.
+		if allNXDomain && firstErr != nil {
+			return nil, &dohNXDomainError{host: host}
+		}
 		if firstErr != nil {
 			return nil, firstErr
 		}
@@ -373,7 +413,12 @@ func (r *dohResolver) queryType(ctx context.Context, host, qtype string) ([]net.
 		return nil, 0, fmt.Errorf("decode DoH %s response for %s: %w", qtype, host, err)
 	}
 	// Status 0 is NOERROR; 3 is NXDOMAIN, a real answer meaning the name does
-	// not exist. Both are answers — only a transport failure is an outage.
+	// not exist — tagged with dohNXDomainError so LookupIP can treat it as
+	// authoritative rather than folding it into the generic fallback path
+	// below with SERVFAIL and every other non-zero status.
+	if answer.Status == 3 {
+		return nil, 0, &dohNXDomainError{host: host, qtype: qtype}
+	}
 	if answer.Status != 0 {
 		return nil, 0, fmt.Errorf("DoH %s query for %s returned DNS status %d", qtype, host, answer.Status)
 	}

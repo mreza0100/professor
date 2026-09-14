@@ -2,7 +2,6 @@ package harvest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,19 +24,14 @@ func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver)
 		client = safeHTTPClientTimeout(false, 15*time.Second)
 	}
 	raw := r.withContact("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(id)+"&format=json&tool=harvester-mcp", "email")
-	body, status, _, err := getBody(ctx, client, raw, r.scholarlyUA(), 1<<20)
-	if err != nil {
-		return "", err
-	}
-	if status >= 400 {
-		return "", fmt.Errorf("HTTP %d", status)
-	}
 	var data struct {
 		Records []struct {
 			PMCID string `json:"pmcid"`
 		} `json:"records"`
 	}
-	if err := json.Unmarshal(body, &data); err != nil {
+	// getJSONBody, not getBody: a JSON-decoding path refuses an over-ceiling
+	// body by name rather than truncating it into a decode failure.
+	if err := getJSONBody(ctx, client, raw, r.scholarlyUA(), nil, 1<<20, &data); err != nil {
 		return "", err
 	}
 	if len(data.Records) == 0 || data.Records[0].PMCID == "" {
@@ -109,13 +103,6 @@ func WaybackRawURL(ctx context.Context, client *http.Client, source string) (str
 	if client == nil {
 		client = safeHTTPClientTimeout(false, 15*time.Second)
 	}
-	body, status, _, err := getBody(ctx, client, "https://archive.org/wayback/available?url="+url.QueryEscape(source), defaultUA, 1<<20)
-	if err != nil {
-		return "", err
-	}
-	if status >= 400 {
-		return "", fmt.Errorf("HTTP %d", status)
-	}
 	var data struct {
 		Snapshots struct {
 			Closest struct {
@@ -124,7 +111,9 @@ func WaybackRawURL(ctx context.Context, client *http.Client, source string) (str
 			} `json:"closest"`
 		} `json:"archived_snapshots"`
 	}
-	if err := json.Unmarshal(body, &data); err != nil {
+	// getJSONBody, not getBody: a JSON-decoding path refuses an over-ceiling
+	// body by name rather than truncating it into a decode failure.
+	if err := getJSONBody(ctx, client, "https://archive.org/wayback/available?url="+url.QueryEscape(source), defaultUA, nil, 1<<20, &data); err != nil {
 		return "", err
 	}
 	if !data.Snapshots.Closest.Available || data.Snapshots.Closest.Timestamp == "" {

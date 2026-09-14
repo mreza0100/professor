@@ -120,6 +120,29 @@ func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
 	}
 }
 
+// TestDOHResolverTreatsNXDOMAINAsAuthoritative: Status 3 is a real DNS
+// answer meaning the name does not exist, not a resolver outage. Falling
+// back to the system resolver on NXDOMAIN — as query()'s own comment always
+// said it should not — lets a poisoned system resolver override a correct
+// "no such host" answer with its own block address, and warns about a
+// failure that never happened.
+func TestDOHResolverTreatsNXDOMAINAsAuthoritative(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"Status":3,"Answer":[]}`))
+	}))
+	defer server.Close()
+
+	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
+	_, err := resolver.LookupIP(context.Background(), "nonexistent.example.com")
+	if err == nil {
+		t.Fatal("LookupIP error = nil, want a not-found error for an NXDOMAIN answer")
+	}
+	var dnsErr *net.DNSError
+	if !errors.As(err, &dnsErr) || !dnsErr.IsNotFound {
+		t.Fatalf("LookupIP error = %v (%#v), want a *net.DNSError with IsNotFound = true", err, err)
+	}
+}
+
 // TestDOHResolverCachesWithinTTL keeps a burst of rungs against one host from
 // re-querying the resolver for every dial.
 func TestDOHResolverCachesWithinTTL(t *testing.T) {
@@ -143,6 +166,42 @@ func TestDOHResolverCachesWithinTTL(t *testing.T) {
 	// One A + one AAAA query for the first lookup; the rest come from cache.
 	if queries > 2 {
 		t.Fatalf("resolver queries = %d, want the TTL cache to serve repeat lookups", queries)
+	}
+}
+
+// TestDOHResolverRequeriesAfterTTLExpires is the other half of the TTL
+// contract: TestDOHResolverCachesWithinTTL alone never proves expiry, since a
+// resolver that cached forever would pass it too. An entry already past its
+// expires time must be re-queried, not served stale.
+func TestDOHResolverRequeriesAfterTTLExpires(t *testing.T) {
+	queries := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries++
+		if r.URL.Query().Get("type") != "A" {
+			_, _ = w.Write([]byte(`{"Status":0,"Answer":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"Status":0,"Answer":[{"type":1,"TTL":300,"data":"198.51.100.7"}]}`))
+	}))
+	defer server.Close()
+
+	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
+	resolver.store("mirror.example.com", []net.IP{net.ParseIP("203.0.113.99")}, dohMinTTL)
+	resolver.mu.Lock()
+	expired := resolver.cache["mirror.example.com"]
+	expired.expires = time.Now().Add(-time.Second)
+	resolver.cache["mirror.example.com"] = expired
+	resolver.mu.Unlock()
+
+	ips, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	if err != nil {
+		t.Fatalf("LookupIP error = %v", err)
+	}
+	if queries == 0 {
+		t.Fatal("resolver queries = 0, want an expired cache entry to trigger a fresh query")
+	}
+	if len(ips) != 1 || ips[0].String() != "198.51.100.7" {
+		t.Fatalf("LookupIP = %v, want the freshly queried answer, not the expired cached one", ips)
 	}
 }
 

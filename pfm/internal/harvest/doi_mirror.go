@@ -101,14 +101,19 @@ func doiMirrorMaxBytes(h *Harvester) int64 {
 	return 50 * 1024 * 1024
 }
 
+// readDOIMirrorResponse is gatewayReadBody's non-truncating branch — every
+// gateway caller that refuses an oversize body (postJSON, getJSONWithHeaders,
+// searchBrave, the doi-mirror provider itself) reads its response through
+// here, so its error strings name the gateway generically rather than the
+// one caller ("doi-mirror") this function happened to be written for first.
 func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string, error) {
 	if resp == nil {
-		return nil, 0, "", errors.New("doi-mirror returned no HTTP response")
+		return nil, 0, "", errors.New("gateway received no HTTP response")
 	}
 	status := resp.StatusCode
 	contentType := resp.Header.Get("Content-Type")
 	if resp.Body == nil {
-		return nil, status, contentType, errors.New("doi-mirror returned an empty response body")
+		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
 	if err != nil {
@@ -164,7 +169,14 @@ func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar 
 		if strings.Contains(err.Error(), "exceeds") {
 			kind = "too_large"
 		}
-		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: kind, status: status}
+		// status == 0 means no response ever arrived (a transport failure);
+		// a non-zero status means the server answered and the RESPONSE
+		// itself then failed to read/decode/fit the ceiling. Collapsing the
+		// two into one message hides which side of the wire broke.
+		if status == 0 {
+			return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: kind, status: status}
+		}
+		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup response failed: " + err.Error(), kind: kind, status: status}
 	}
 	if status < 400 && bytes.HasPrefix(body, []byte("%PDF-")) {
 		return doiMirrorLookup{body: body, pageURL: pageURL, status: status, directPDF: true}, doiMirrorFailure{}
@@ -211,7 +223,6 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			},
 			max:    doiMirrorMaxBytes(h),
 			jar:    jar,
-			policy: gatewayNoEscalate,
 			binary: true,
 		})
 		body, status, readErr := response.body, response.status, error(nil)

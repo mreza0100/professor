@@ -3,6 +3,7 @@ package harvest
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -187,4 +188,28 @@ func TestSearchBackendErrorNamesBackendAndSafeCause(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSearchBraveRefusesOversizeBodyByName: searchBrave previously ran
+// through getBodyWithHeaders (oversizeTruncate: true), so an over-ceiling
+// Brave response was silently truncated and then failed JSON decode with
+// "unexpected end of JSON input" — reading as a malformed Brave response
+// when the real story is the byte ceiling.
+func TestSearchBraveRefusesOversizeBodyByName(t *testing.T) {
+	withPublicDNSForProviderTest(t)
+	oversize := strings.Repeat("a", 10*1024*1024+1<<20)
+	brave := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"web":{"results":[{"URL":"` + oversize + `"}]}}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+	})}
+	_, status, err := searchBrave(context.Background(), "q", SearchOptions{BraveAPIKey: "k", Brave: brave, Count: 1})
+	if err == nil {
+		t.Fatal("searchBrave error = nil, want an oversize refusal")
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON input") {
+		t.Fatalf("searchBrave error = %q, want it to name the byte ceiling rather than a decode failure", err)
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("searchBrave error = %q, want it to name the byte ceiling", err)
+	}
+	_ = status
 }

@@ -194,6 +194,48 @@ func TestGatewayClientJarSemantics(t *testing.T) {
 	}
 }
 
+// TestGatewayFetchHonorsTrustedOrigin: gatewayFetch used to call
+// assertFetchable(req.url, false) unconditionally, refusing the operator's
+// own loopback origin as a private host even though gatewayAttempt (which
+// every rung underneath actually calls) already honors trustedOrigin. The two
+// entry points must agree.
+func TestGatewayFetchHonorsTrustedOrigin(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return response(r, http.StatusOK, "application/json", `{"ok":true}`), nil
+	})}
+	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}})
+	got, err := h.gatewayFetch(context.Background(), gatewayRequest{
+		url:           "http://127.0.0.1:9/healthz",
+		client:        client,
+		trustedOrigin: true,
+		policy:        gatewayNoEscalate,
+	})
+	if err != nil {
+		t.Fatalf("gatewayFetch(trustedOrigin loopback) error = %v, want it accepted like gatewayAttempt does", err)
+	}
+	if got.status != http.StatusOK {
+		t.Fatalf("gatewayFetch(trustedOrigin loopback) status = %d, want 200", got.status)
+	}
+}
+
+// TestGatewayAttemptTrustedOriginNilClientErrors: gatewayRequestClient
+// dereferences *req.client unconditionally for a trusted origin. A nil
+// client is a caller bug, not a network failure, and must surface as an
+// error naming the missing client rather than panicking the process.
+func TestGatewayAttemptTrustedOriginNilClientErrors(t *testing.T) {
+	_, err := gatewayAttempt(context.Background(), gatewayRequest{
+		url:           "http://127.0.0.1:9/healthz",
+		trustedOrigin: true,
+	})
+	if err == nil {
+		t.Fatal("gatewayAttempt(trustedOrigin, nil client) error = nil, want an error naming the missing client")
+	}
+	if !strings.Contains(err.Error(), "client") {
+		t.Fatalf("gatewayAttempt(trustedOrigin, nil client) error = %q, want it to name the missing client", err)
+	}
+}
+
 // TestGatewayBothRungsFailingReportsBothErrors: when neither rung reached the
 // server, reporting only the first hides the rung carrying the more diagnostic
 // failure.

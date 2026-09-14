@@ -2,8 +2,6 @@ package harvest
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -143,14 +141,10 @@ func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([
 	if key := strings.TrimSpace(r.CoreAPIKey); key != "" {
 		headers["Authorization"] = "Bearer " + key
 	}
-	body, status, _, err := getBodyWithHeaders(ctx, client, u, contextualUA(ctx), headers, resolverJSONMaxBody)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, fmt.Errorf("HTTP %d", status)
-	}
-	if err := json.Unmarshal(body, &data); err != nil {
+	// getJSONWithHeaders, not getBodyWithHeaders: a JSON-decoding path refuses
+	// an over-ceiling body by name rather than truncating it into a decode
+	// failure.
+	if err := getJSONWithHeaders(ctx, client, u, headers, &data); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}

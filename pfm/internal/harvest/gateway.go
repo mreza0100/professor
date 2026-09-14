@@ -67,7 +67,11 @@ type gatewayRequest struct {
 	headers http.Header
 	max     int64
 	jar     http.CookieJar
-	policy  gatewayPolicy
+	// policy is read ONLY by gatewayFetch's ladder, to decide whether to
+	// escalate past req.client. gatewayAttempt performs exactly one HTTP
+	// attempt and never consults this field — a caller that calls
+	// gatewayAttempt directly (bypassing the ladder) has nothing to set here.
+	policy gatewayPolicy
 	// method defaults to GET. body is held as BYTES, not a Reader, because the
 	// ladder may replay the same request on a second rung and a consumed
 	// stream would replay as an empty one — a POST silently losing its form.
@@ -112,8 +116,10 @@ var errGatewayNoRung = errors.New("every gateway rung was exhausted")
 
 // fetch runs one request through the gateway ladder.
 func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
-	if err := assertFetchable(req.url, false); err != nil {
-		return gatewayResponse{}, err
+	if !req.trustedOrigin {
+		if err := assertFetchable(req.url, false); err != nil {
+			return gatewayResponse{}, err
+		}
 	}
 	if req.max <= 0 {
 		req.max = doiMirrorMaxBytes(h)
@@ -226,6 +232,13 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 		if err := assertFetchable(req.url, false); err != nil {
 			return out, err
 		}
+	}
+	if req.trustedOrigin && req.client == nil {
+		// gatewayRequestClient below dereferences *req.client unconditionally
+		// for a trusted origin, matching the base client's own redirect
+		// policy. A nil client here is a caller bug, not a network failure —
+		// name it rather than let the dereference panic the process.
+		return out, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", req.url)
 	}
 	method := req.method
 	if method == "" {
