@@ -253,8 +253,9 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			Exit        int                     `json:"exit"`
 			EngineExit  int                     `json:"engine_exit"`
 			Timeout     bool                    `json:"timeout"`
+			Error       string                  `json:"error,omitempty"`
 			Diagnostics []string                `json:"diagnostics,omitempty"`
-		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, result.Diagnostics})
+		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, errorText(runErr), result.Diagnostics})
 		if err == nil {
 			var file *os.File
 			file, err = os.OpenFile(*receipt, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
@@ -269,6 +270,14 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 	}
 	return code
+}
+
+// errorText is the run error as the receipt records it — empty when the run succeeded.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Expand the lab's multi-value file options into stdlib flag's repeatable form.

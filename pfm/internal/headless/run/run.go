@@ -84,10 +84,15 @@ type Request struct {
 	unsupportedOptions []string
 }
 
+// TokenUsage is every way an engine can bill one call. Claude's usage block splits the input
+// three ways and CacheCreation is by far the largest of them the first time a big attachment is
+// sent: dropping it reported ~2 input tokens for a 60 KB prompt, which is not a small error but a
+// fiction. A receipt that cannot be trusted for size cannot be trusted for cost either.
 type TokenUsage struct {
-	Input       int `json:"input_tokens"`
-	CachedInput int `json:"cached_input_tokens"`
-	Output      int `json:"output_tokens"`
+	Input         int `json:"input_tokens"`
+	CachedInput   int `json:"cached_input_tokens"`
+	CacheCreation int `json:"cache_creation_input_tokens"`
+	Output        int `json:"output_tokens"`
 }
 
 type Result struct {
@@ -509,7 +514,11 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	}
 	if runErr != nil {
 		result.IsError = true
-		return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024))
+		// An engine that exits non-zero with an empty stderr said what went wrong on stdout
+		// (Claude's JSON envelope carries `is_error` + a result line); without both tails the
+		// failure reads as absence — 60 s, exit 1, nothing.
+		result.Diagnostics = append(result.Diagnostics, failureDiagnostics(result)...)
+		return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q; stdout tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024), boundedTail(result.Stdout, 1024))
 	}
 	if err := parseOutput(&result, request); err != nil {
 		result.IsError = true
@@ -700,8 +709,42 @@ type claudeEnvelope struct {
 	Result     json.RawMessage `json:"result"`
 	Structured json.RawMessage `json:"structured_output"`
 	Usage      json.RawMessage `json:"usage"`
+	ModelUsage json.RawMessage `json:"modelUsage"`
 	TotalCost  json.RawMessage `json:"total_cost_usd"`
 	IsError    bool            `json:"is_error"`
+}
+
+// parseModelUsage sums Claude's per-model `modelUsage` totals — the whole session, every API
+// turn. The envelope's `usage` block is the LAST turn only, while `total_cost_usd` is the sum: a
+// seat that took a second turn (a structured-output retry, a tool call) reported ~2k input tokens
+// against a cost that says 60k. Nil when the block is absent or empty.
+func parseModelUsage(raw json.RawMessage) (*TokenUsage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var models map[string]struct {
+		Input         int `json:"inputTokens"`
+		Output        int `json:"outputTokens"`
+		CacheRead     int `json:"cacheReadInputTokens"`
+		CacheCreation int `json:"cacheCreationInputTokens"`
+	}
+	if err := json.Unmarshal(raw, &models); err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, nil
+	}
+	usage := &TokenUsage{}
+	for name, m := range models {
+		if m.Input < 0 || m.Output < 0 || m.CacheRead < 0 || m.CacheCreation < 0 {
+			return nil, fmt.Errorf("modelUsage %s: negative token count", name)
+		}
+		usage.Input += m.Input
+		usage.Output += m.Output
+		usage.CachedInput += m.CacheRead
+		usage.CacheCreation += m.CacheCreation
+	}
+	return usage, nil
 }
 
 func parseOutput(result *Result, request Request) error {
@@ -722,6 +765,11 @@ func parseOutput(result *Result, request Request) error {
 		result.Usage, err = parseUsage(envelope.Usage)
 		if err != nil {
 			return fmt.Errorf("parse Claude usage: %w", err)
+		}
+		if whole, err := parseModelUsage(envelope.ModelUsage); err != nil {
+			return fmt.Errorf("parse Claude modelUsage: %w", err)
+		} else if whole != nil {
+			result.Usage = whole // every turn, not the last one
 		}
 		result.TotalCostUSD, err = parseCost(envelope.TotalCost)
 		if err != nil {
@@ -844,6 +892,7 @@ func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
 	}{
 		{[]string{"input_tokens", "prompt_tokens"}, &usage.Input},
 		{[]string{"cached_input_tokens", "cache_read_input_tokens", "cached_tokens"}, &usage.CachedInput},
+		{[]string{"cache_creation_input_tokens", "cache_write_input_tokens"}, &usage.CacheCreation},
 		{[]string{"output_tokens", "completion_tokens"}, &usage.Output},
 	} {
 		for _, name := range field.names {
@@ -909,6 +958,26 @@ func validateInstance(schemaRaw, instanceRaw json.RawMessage) error {
 		return err
 	}
 	return resolved.Validate(instance)
+}
+
+// failureDiagnostics is what a failed engine run leaves in the receipt: the stderr and stdout
+// tails, and — for a Claude envelope on stdout — the error line the envelope carried.
+func failureDiagnostics(result Result) []string {
+	var lines []string
+	if tail := boundedTail(result.Stderr, 1024); tail != "" {
+		lines = append(lines, "stderr: "+tail)
+	}
+	if tail := boundedTail(result.Stdout, 1024); tail != "" {
+		lines = append(lines, "stdout: "+tail)
+	}
+	var envelope claudeEnvelope
+	if err := json.Unmarshal([]byte(result.Stdout), &envelope); err == nil && envelope.IsError {
+		var text string
+		if json.Unmarshal(envelope.Result, &text) == nil && text != "" {
+			lines = append(lines, "engine error: "+boundedTail(text, 512))
+		}
+	}
+	return lines
 }
 
 func boundedTail(value string, limit int) string {
