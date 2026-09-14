@@ -252,7 +252,7 @@ printf 'PICKER-LAUNCHED\n'
 		t.Fatalf("run auto-open shell on a pty: %v: %s", err, output)
 	}
 	got := string(output)
-	want := "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit and relaunch it from the Dock"
+	want := "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit that app and relaunch it from outside any chat"
 	if !strings.Contains(got, want) {
 		t.Fatalf("interactive tty with inherited CLAUDECODE did not report the skip:\n%q", got)
 	}

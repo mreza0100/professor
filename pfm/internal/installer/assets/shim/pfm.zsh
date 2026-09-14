@@ -193,7 +193,7 @@ if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:
     # only fires for a real terminal, and only when one is attached ([[ -t 2 ]]) — never into a
     # log a human will never read.
     if [[ -t 2 ]]; then
-      print -u2 -- "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit and relaunch it from the Dock"
+      print -u2 -- "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit that app and relaunch it from outside any chat"
     fi
     # Unset here too: left set, a nested interactive shell (a `zsh` typed inside this one)
     # would repeat the same stderr line every time it starts, for a marker it did nothing to
