@@ -186,42 +186,36 @@ _pfm_selfswitch() {
 # terminal-profile variables are consumed without reviving retired commands.
 if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:-}" ]]; then
   if [[ -n "${CLAUDECODE:-}" ]]; then
-    # A shell really inside a chat's Bash tool must never open a picker — but an app that was
-    # ITSELF launched from inside a chat (VS Code relaunched by a chat's `code .`, for one)
-    # hands every terminal it opens the same CLAUDECODE marker, and the guard above used to
-    # step aside in total silence. A chat's own Bash-tool shells are never interactive, so this
-    # only fires for a real terminal, and only when one is attached ([[ -t 2 ]]) — never into a
-    # log a human will never read.
-    if [[ -t 2 ]]; then
-      print -u2 -- "pfm: auto-open skipped — this shell inherited CLAUDECODE=1 from a chat; the app that opened it was launched from inside a chat — quit that app and relaunch it from outside any chat"
-    fi
-    # Unset here too: left set, a nested interactive shell (a `zsh` typed inside this one)
-    # would repeat the same stderr line every time it starts, for a marker it did nothing to
-    # inherit itself.
-    unset PFM_AUTO_OPEN CC_AUTO_OPEN VSCODE_AUTO_CC
-  else
-    # Read the value, then unset BEFORE arming, both spellings. The variable is exported by the
-    # terminal profile, so it is inherited: a shell opened inside the chat would open a chat
-    # inside the chat.
-    typeset -g _pfm_auto_what="${PFM_AUTO_OPEN:-${CC_AUTO_OPEN:-$VSCODE_AUTO_CC}}"
-    unset PFM_AUTO_OPEN CC_AUTO_OPEN VSCODE_AUTO_CC
-    autoload -Uz add-zsh-hook
-    _pfm_auto_open() {
-      # Disarm FIRST. The command below RETURNS — when the chat exits, or when the picker is
-      # dismissed — and the shell then draws another prompt. A hook still registered at that
-      # moment is a terminal that reopens whatever you just closed, forever.
-      add-zsh-hook -d precmd _pfm_auto_open
-      unfunction _pfm_auto_open
-      # The value chooses, from a WHITELIST — never `eval`, and never run as-is. It arrives from
-      # the environment, which a terminal profile, a parent process or an ssh client can set.
-      local cmd
-      case "$_pfm_auto_what" in
-        cx|codex)     cmd=cx ;;                 # a fresh Codex chat
-        *)           cmd="$HOME/.local/bin/pfm" ;; # retired and unknown values open the picker
-      esac
-      unset _pfm_auto_what
-      $cmd
-    }
-    add-zsh-hook precmd _pfm_auto_open
+    # Only a terminal profile sets these variables, and they are unset before arming, so they never
+    # reach a chat's own shells (which are never interactive anyway). Both markers together mean
+    # the APP that opened this terminal was itself launched from inside a chat (VS Code relaunched
+    # by a chat's `code .`, for one) and handed the chat's identity to every terminal it opens.
+    # Skipping here turned every new terminal into a dead prompt; clear what the app leaked — the
+    # same keys the VS Code profile nulls — and open as normal. Say so on a real tty only.
+    [[ -t 2 ]] && print -u2 -- "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app — relaunch the app outside any chat to stop it"
+    unset CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION TMUX TMUX_PANE
   fi
+  # Read the value, then unset BEFORE arming, both spellings. The variable is exported by the
+  # terminal profile, so it is inherited: a shell opened inside the chat would open a chat
+  # inside the chat.
+  typeset -g _pfm_auto_what="${PFM_AUTO_OPEN:-${CC_AUTO_OPEN:-$VSCODE_AUTO_CC}}"
+  unset PFM_AUTO_OPEN CC_AUTO_OPEN VSCODE_AUTO_CC
+  autoload -Uz add-zsh-hook
+  _pfm_auto_open() {
+    # Disarm FIRST. The command below RETURNS — when the chat exits, or when the picker is
+    # dismissed — and the shell then draws another prompt. A hook still registered at that
+    # moment is a terminal that reopens whatever you just closed, forever.
+    add-zsh-hook -d precmd _pfm_auto_open
+    unfunction _pfm_auto_open
+    # The value chooses, from a WHITELIST — never `eval`, and never run as-is. It arrives from
+    # the environment, which a terminal profile, a parent process or an ssh client can set.
+    local cmd
+    case "$_pfm_auto_what" in
+      cx|codex)     cmd=cx ;;                 # a fresh Codex chat
+      *)           cmd="$HOME/.local/bin/pfm" ;; # retired and unknown values open the picker
+    esac
+    unset _pfm_auto_what
+    $cmd
+  }
+  add-zsh-hook precmd _pfm_auto_open
 fi
