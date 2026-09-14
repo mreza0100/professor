@@ -11,7 +11,7 @@ The container `pfm-release-rehearsal` is a brand-new Linux host (own HOME, no Cl
 3. `publish {NEW} $(git rev-parse release/v{NEW})` — the release event, local to the container.
 4. Stage B (brief below). FRICTION → fix on the candidate, commit, `revert`, `publish` again, re-run Stage B.
 
-Stage B's hardest case is the adopter several versions behind: `seed` an older tag instead of `{STABLE}` to rehearse it — the candidate's update docs must carry that adopter through every skipped release's actions.
+Stage B's hardest case is the adopter several versions behind: rehearse it on a second machine beside the first (`PFM_REHEARSAL_NAME=pfm-release-rehearsal-behind`, the brief's `{CONTAINER}` set to match) seeded with an older tag in place of `{STABLE}` — the candidate's update docs must carry that adopter through every skipped release's actions.
 
 ## The driver
 
@@ -48,9 +48,9 @@ Judge the result, never the model's verdict alone: re-run each claimed-clean ste
 
 ## Shared brief preamble
 
-Prepended to both briefs, `{STABLE}` / `{NEW}` substituted:
+Prepended to both briefs, `{CONTAINER}` / `{STABLE}` / `{NEW}` substituted:
 
-> You are an adopter's assistant working on a fresh Linux machine: the Docker container `pfm-release-rehearsal`. Run EVERY command inside it as `docker exec pfm-release-rehearsal bash -lc '<command>'`; touch nothing else on this host. The machine cannot reach GitHub for this project: wherever docs use `https://github.com/mreza0100/professor.git`, use `/root/upstream.git`; release downloads are unavailable, so take the build-from-source path. Neither the `claude` nor the `codex` CLI exists on the machine — pass `--skip-harvest --skip-engine codex` to `pfm install`. When an interactive step expects a human, answer as a user with a small demo project would.
+> You are an adopter's assistant working on a fresh Linux machine: the Docker container `{CONTAINER}`. Run EVERY command inside it as `docker exec {CONTAINER} bash -lc '<command>'`; touch nothing else on this host. The machine cannot reach GitHub for this project: wherever docs use `https://github.com/mreza0100/professor.git`, use `/root/upstream.git`; release downloads are unavailable, so take the build-from-source path. Neither the `claude` nor the `codex` CLI exists on the machine — pass `--skip-harvest --skip-engine codex` to `pfm install`. When an interactive step expects a human, answer as a user with a small demo project would.
 >
 > Follow the docs literally. A documented step that fails, or docs that leave you guessing, is FRICTION: record the doc section, the exact command, what happened, and what the docs led you to expect — then do what a determined user would to get past it, and continue. Verdict CLEAN only when every step worked exactly as written; BLOCKED only when no workaround gets you through.
 
@@ -64,4 +64,10 @@ Prepended to both briefs, `{STABLE}` / `{NEW}` substituted:
 
 ## Brief B — update to the candidate
 
-> A new Professor release, {NEW}, is published. This machine runs the Professor install you find on it, adopted in `/root/project`. Update the machine and the project exactly as the NEW release's docs direct — read them from `git -C /root/upstream.git show {NEW}:INSTALL.md` and `docs/SETUP.md` at {NEW}, not from the installed copy. Finish with `pfm doctor` and `pfm update check` in `/root/project` holding no item you have not resolved. List in `release_notes_read` every release-notes file you read.
+`{UPDATE_PROMPT}` is the text `professorUpdatePrompt` (`pfm/cmd/pfm/update_notice_command.go`) returns for `{NEW}` at the candidate — the words a real adopter's update chat opens with from the `pfm ls` banner, so the rehearsal tests the product's own prompt, never a hand-tuned stand-in. A Stage B friction the prompt caused is fixed in that function.
+
+> A new Professor release, {NEW}, is published. The user opened the update chat from `pfm ls`'s **PROFESSOR UPDATE** banner in the source clone `~/.professor`, and it opens with the update prompt quoted at the end — work it as written. The user approves the overview you present: record the overview and its checklist as your first step's `note`, then continue past the approval gate. Where a step needs docs, read them at {NEW} (`git -C ~/.professor show {NEW}:INSTALL.md`, `docs/SETUP.md` at {NEW}) — the installed copy is the old release.
+>
+> Then bring the adopted project `/root/project` current per `docs/SETUP.md` § Staying current at {NEW}: run `pfm update check` there and resolve every item it reports. Finish with `pfm doctor`, and `pfm update check` in `/root/project` holding no item you have not resolved. List in `release_notes_read` every release-notes file you read.
+>
+> The update prompt: {UPDATE_PROMPT}

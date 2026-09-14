@@ -17,8 +17,9 @@ set -euo pipefail
 # empty). No
 # path prints success for a step whose in-container check did not pass.
 
-NAME=pfm-release-rehearsal
-SNAPSHOT_VOLUME=pfm-release-rehearsal-snapshot
+# PFM_REHEARSAL_NAME runs a second machine beside the first (an adopter several releases behind).
+NAME="${PFM_REHEARSAL_NAME:-pfm-release-rehearsal}"
+SNAPSHOT_VOLUME="$NAME-snapshot"
 SNAPSHOT=/snapshot/home.tar
 IMAGE=professor-pfm-dev
 UPSTREAM=/root/upstream.git

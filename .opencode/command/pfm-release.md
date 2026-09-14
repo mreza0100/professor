@@ -21,7 +21,7 @@ description: "Versions, tags and publishes this repo — `/pfm-release {patch|mi
 
 ## Steps
 
-1. **Validate args** — bump type + summary required, bail if missing. `patch` = bug fixes / doc tweaks · `minor` = new archetype, command, or step · `major` = breaking change or migration. Read `VERSION`, compute `{NEW}`; it must exceed every tag from Pre-flight 3.
+1. **Validate args** — bump type + summary required, bail if missing. `patch` = bug fixes / doc tweaks · `minor` = new archetype, command, or step · `major` = breaking change or migration. Compute `{NEW}` by bumping the newest tag from Pre-flight 3; it carries no suffix and must exceed every tag. `develop`'s `VERSION` names the development line (`{X.Y.Z}-alpha`, opened by Step 13), never the release number.
 
 2. **Worktrees** — `/git` Phase SETUP twice: `.worktrees/release/main` as `git worktree add --detach … origin/main`, then verify `HEAD == origin/main` and `status --porcelain` empty; `.worktrees/release/develop` on branch `release/v{NEW}` from `develop`'s SHA. A resumed release reuses both only after the same verification; `main` drifted from `origin/main` → recreate it.
 
@@ -37,7 +37,7 @@ description: "Versions, tags and publishes this repo — `/pfm-release {patch|mi
 
 7b. **Source-fetched skill release** — for each bullet naming a `sources.json` skill, ship the substance to the skill's OWN public repo first: clone/pull it → rebase-first against its current state (both-changed = keep the richer, never blast-overwrite) → genericize project identifiers → sync the live `.claude/skills/{name}/` byte-identical → bump its `version:` frontmatter + README refs → leak-grep the staged diff → commit + annotated tag + push. Then rewrite the professor bullet as a version pointer marked **`update`: skip — informational only** with a `#### → For:` re-pull note.
 
-8. **Reconcile the candidate** — `README.md` + `docs/BLUEPRINT.md` cast / command / skill lists match `templates/`, version references stay current (prefer version-neutral phrasing); the README's universal "any repo / any stack" promise is the CONTRACT — fix drifted templates up to it, never downgrade the README. `echo "{NEW}" > VERSION`. Stamp the self-hosted install ledger: `.professor/VERSION` and `manifest.json`'s `installed_from.version` to `{NEW}`, re-stamp `file_hashes` for the roster `infra/check-self-hosted-manifest.sh` enumerates, then `bash infra/check-self-hosted-manifest.sh . templates pfm engines/wave-walker/engine` — STOP on failure. Empty this repo's `.professor/release.md` pending list (header kept) — its bullets now live in `releases/v{NEW}.md`. `/git` commit: `release: v{NEW} — {summary}` (+ `Source: {sha}` trailer when Step 4 ran).
+8. **Reconcile the candidate** — `README.md` + `docs/BLUEPRINT.md` cast / command / skill lists match `templates/`, version references stay current (prefer version-neutral phrasing); the README's universal "any repo / any stack" promise is the CONTRACT — fix drifted templates up to it, never downgrade the README. `echo "{NEW}" > VERSION` (dropping the `-alpha`). Stamp the self-hosted install ledger: `.professor/VERSION` and `manifest.json`'s `installed_from.version` to `{NEW}`, re-stamp `file_hashes` for the roster `infra/check-self-hosted-manifest.sh` enumerates, then `bash infra/check-self-hosted-manifest.sh . templates pfm engines/wave-walker/engine` — STOP on failure. Empty this repo's `.professor/release.md` pending list (header kept) — its bullets now live in `releases/v{NEW}.md`. `/git` commit: `release: v{NEW} — {summary}` (+ `Source: {sha}` trailer when Step 4 ran).
 
 9. **Gate both sides in the fence** — from each worktree, `.claude/scripts/dev.sh iso all {templates|pfm|walker}` and `.claude/scripts/dev.sh iso e2e`. Stable red → report it as inherited, never a candidate verdict; candidate red → Step 6, then re-gate. Quote every verdict line.
 
@@ -53,7 +53,7 @@ description: "Versions, tags and publishes this repo — `/pfm-release {patch|mi
 
     c. `/git release v{NEW}` — gitter Phase RELEASE: the `develop → main` PR, green required checks, merge, annotated tag, `develop` fast-forwarded onto `main`. STOP at the first failed step and report which.
 
-13. **Close** — clear every OTHER ledger Step 3 reported PENDING (exactly the paths it printed; header kept); `infra/release-rehearsal.sh down`; `/git` removes both release worktrees and the merged `release/v{NEW}` branch.
+13. **Close** — open the next development line on `develop` in the live checkout: `VERSION`, `.professor/VERSION` and `manifest.json`'s `installed_from.version` become `{NEXT}-alpha` (`{NEXT}` = `{NEW}` with minor + 1, patch 0), `infra/check-self-hosted-manifest.sh` passes, and `/git` commits `chore(release): open v{NEXT}-alpha on develop` and pushes `develop` — a build from `develop` then never reports itself as the release it follows. Clear every OTHER ledger Step 3 reported PENDING (exactly the paths it printed; header kept); `infra/release-rehearsal.sh down`; `/git` removes both release worktrees and the merged `release/v{NEW}` branch.
 
 14. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), reviewer and rehearsal verdicts with the attempt count, and the release-note bullets, ending with: `Blueprint released: v{NEW}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW}`
 

@@ -47,7 +47,7 @@ node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-o
 - **`main` is release-only.** All work lands on `develop`; GitHub's ruleset (pull request + green checks required, no force-push, no deletion) and `.githooks/pre-push` both refuse a direct push to `main`, which moves only when `/pfm:release` merges the `develop → main` release PR (gitter Phase RELEASE).
 - **Nothing identifying ships:** no source-project brand, no user PII, no client domain content, no machine-absolute path (`/home/…`, `/Users/…`) in any tracked file. `scripts/leak-check.sh` (`pre-push`) is the backstop, not the plan — write it clean the first time.
 - Template example values are invented placeholders, never mined from a live private repo.
-- **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/vX.Y.Z.md`, and the tag agree or the release is wrong; `/pfm:release` owns the sequence.
+- **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/vX.Y.Z.md`, and the tag agree or the release is wrong; between releases `develop`'s `VERSION` is the next `X.Y.Z-alpha`. `/pfm:release` owns the sequence.
 
 ### Prompt & template code
 

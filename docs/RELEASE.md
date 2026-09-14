@@ -16,7 +16,7 @@ Two mechanisms ship on every tag: the portable blueprint tree (this repo, at `te
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated git tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push.
+[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated git tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`: the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
 
 | Bump | When | Adopter impact |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Maintainer command: `/pfm:release {patch|minor|major} "{summary}" [--from {live-
 5. **Notes** — `releases/v{X.Y.Z}.md` from the ledger bullets (verbatim) and the reviewers' bullets, the `CHANGELOG.md` index line, `VERSION`, the self-hosted install ledger.
 6. **Gates** — both worktrees run `dev.sh iso all` per project and `dev.sh iso e2e`; a stable red is inherited, a candidate red is fixed.
 7. **Rehearsal** — a Codex model installs the stable release on a fenced adopter machine exactly as the stable docs say, then updates it to the candidate exactly as the candidate's docs say (`infra/release-rehearsal.sh`, `docs/commands/pfm/references/release-rehearsal.md`); every friction is fixed, the machine reverted to its stable snapshot, and the update re-run until CLEAN.
-8. **Ship** — `develop` fast-forwards onto the candidate, `leak-check.sh` runs clean, `develop` is pushed, and the `develop → main` pull request merges on green checks; the annotated tag lands on the merge commit and `develop` fast-forwards back onto `main`.
+8. **Ship** — `develop` fast-forwards onto the candidate, `leak-check.sh` runs clean, `develop` is pushed, and the `develop → main` pull request merges on green checks; the annotated tag lands on the merge commit and `develop` fast-forwards back onto `main`. `develop` then opens the next `-alpha` line.
 
 **Never:** push secrets or project identifiers (current/former brand, PII, internal URLs, machine-absolute home paths), force-push, push to `main` directly, ship a Tier A character with empty placeholders, publish a candidate whose rehearsal did not end CLEAN, or auto-bump the README version without re-checking the templates it describes.
 
