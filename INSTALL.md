@@ -31,10 +31,10 @@ The `claude` and `codex` executables are not installed by `pfm`. Their self-doct
 
 No clone, no Go toolchain. The installer's own assets (command cards, launcher shim, scheduler units) are embedded in the binary.
 
-Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/mreza0100/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
+Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/rezzminator/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
 OS=linux      # or darwin
@@ -112,7 +112,7 @@ Optional `cc-memory-wire.sh` and `cc-memory-consolidate.sh` helpers become `memo
 ## 2. Build from source — `pfm` only
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 SOURCE_DIR="$HOME/.professor"
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')

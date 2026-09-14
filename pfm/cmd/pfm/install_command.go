@@ -12,6 +12,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/updatecheck"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real
@@ -153,7 +154,7 @@ func professorThemeManifestURL(currentVersion string) string {
 	if reference == "" || reference == "dev" {
 		reference = "main"
 	}
-	return "https://raw.githubusercontent.com/mreza0100/professor/" + reference + "/templates/themes/sources.json"
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
 }
 
 func newInstallerOptions(

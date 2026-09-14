@@ -8,7 +8,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--
 
 ## Constants
 
-- Public repo: `mreza0100/professor` — **this repo IS the upstream.** The working copy you are in is the one that publishes.
+- Public repo: `rezzminator/professor` — **this repo IS the upstream.** The working copy you are in is the one that publishes.
 - Blueprint tree: `templates/` · Public README: `README.md` · Release notes: `releases/vX.Y.Z.md` · Index: `CHANGELOG.md` · Version file: `VERSION`
 - Release worktrees: `.worktrees/release/main` (detached, byte-identical to `origin/main` — the STABLE side) and `.worktrees/release/develop` (branch `release/v{NEW}` from `develop` — the CANDIDATE side). Every release edit, fix, and commit lands in the candidate worktree; the live checkout holds other sessions' WIP and is never swept.
 - Rehearsal: `infra/release-rehearsal.sh` (the fenced adopter machine) + `$CDOCS/pfm/$REFS/release-rehearsal.md` (the Codex driver and its briefs).
@@ -17,7 +17,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--
 ## Pre-flight
 
 1. **Publication authority.** This command pushes. It runs only on an explicit in-turn request to release/publish. No authority → stop here and say so.
-2. `gh auth status` — must be the repo owner. `gh api repos/mreza0100/professor/rules/branches/main` must list `pull_request`, `non_fast_forward`, `deletion`, and `required_status_checks`; a missing rule is a STOP — restore the `main-release-only` ruleset before anything publishes.
+2. `gh auth status` — must be the repo owner. `gh api repos/rezzminator/professor/rules/branches/main` must list `pull_request`, `non_fast_forward`, `deletion`, and `required_status_checks`; a missing rule is a STOP — restore the `main-release-only` ruleset before anything publishes.
 3. `git fetch --tags origin`; `git pull --ff-only origin develop` in the live checkout (STOP if it fails); `git merge-base --is-ancestor origin/main develop` — a commit on `main` that `develop` lacks means the last release never fast-forwarded `develop` back; STOP and report it. Report the newest tag.
 
 ## Steps
@@ -56,7 +56,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}] [--
 
 13. **Close** — open the next development line on `develop` in the live checkout: `VERSION`, `.professor/VERSION` and `manifest.json`'s `installed_from.version` become `{NEXT}-alpha` (`{NEXT}` = `{NEW}` with minor + 1, patch 0), `infra/check-self-hosted-manifest.sh` passes, and `/git` commits `chore(release): open v{NEXT}-alpha on develop` and pushes `develop` — a build from `develop` then never reports itself as the release it follows. Clear every OTHER ledger Step 3 reported PENDING (exactly the paths it printed; header kept); `infra/release-rehearsal.sh down`; `/git` removes both release worktrees and the merged `release/v{NEW}` branch.
 
-14. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), reviewer and rehearsal verdicts with the attempt count, and the release-note bullets, ending with: `Blueprint released: v{NEW}. URL: https://github.com/mreza0100/professor/releases/tag/v{NEW}`
+14. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), reviewer and rehearsal verdicts with the attempt count, and the release-note bullets, ending with: `Blueprint released: v{NEW}. URL: https://github.com/rezzminator/professor/releases/tag/v{NEW}`
 
 ## Hard rules
 

@@ -138,7 +138,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		default:
 		}
 		<-releaseLookup
-		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.61.2")
+		writer.Header().Set("Location", "/rezzminator/professor/releases/tag/v0.61.2")
 		writer.WriteHeader(http.StatusFound)
 	}))
 	defer server.Close()

@@ -19,7 +19,7 @@ import (
 	"hostops/pfm/internal/updatecheck"
 )
 
-const professorLatestReleaseURL = "https://github.com/mreza0100/professor/releases/latest"
+const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
 var startProfessorUpdateCheck = func(command *exec.Cmd) error {
 	if err := command.Start(); err != nil {

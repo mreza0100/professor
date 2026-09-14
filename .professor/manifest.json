@@ -2,7 +2,7 @@
   "_comment": "Professor self-hosted install state. Source is the live working tree; its SHA is resolved from Git at inspection time and is never persisted in this tracked, self-referential file.",
   "installed_from": {
     "mode": "self-hosted",
-    "repo": "mreza0100/professor",
+    "repo": "rezzminator/professor",
     "version": "0.77.0"
   },
   "profile": "minimal",
@@ -119,7 +119,7 @@
     ".claude/commands/dev.md": "a950a181331e9efe153a5b118c629cd506a9f913986d9bc22652fa719b6c175a",
     ".claude/commands/git.md": "050aa8a13386e62bfc9924a0056d4a33219cf4088bbb8d3b5d64ed5094ff8dfb",
     ".claude/commands/pfm.md": "ec7234c3d716d77ef1b76babf26cdb15575622983dc89c5e0ec0f42b105da127",
-    ".claude/commands/pfm/release.md": "ffef55ec9ffec3532ace8b18f5aad8bd3ae00e68e34fcb1ad293cae82d870be3",
+    ".claude/commands/pfm/release.md": "4ea5fc9c87a9da59efd473484b69798f9800a9b0a6d594a5c4d72d1e337c1a64",
     ".claude/commands/quality/doc.md": "cdae714d4b3da94bf7b0c11b177bb8d657fd3dac0de8f74b35f8519e25df1ac4",
     ".claude/commands/quality/prompt.md": "603d08f9e701c742dc3b9d8f74bd75c0538d11a0851fc6894b74a658414c42b5",
     ".claude/commands/readme-gif.md": "7dc20b253350b84281f979c02a9d90bb3365b7f2f5024055f9aaccf562939d15",
@@ -144,7 +144,7 @@
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".codex/skills/dev/SKILL.md": "2d42494fb459b7b24b8d0507984ee55b3003e27a176ae322093e9cd0eaa3a8a0",
     ".codex/skills/git/SKILL.md": "8445d97247f6b12a3e072209c15dcd56b9cb57d02512d7c83e84659e85ce4dc0",
-    ".codex/skills/pfm-release/SKILL.md": "555c62884307df21ebf707d0b41b6b53889f82af5949f527a2814863e9f64dab",
+    ".codex/skills/pfm-release/SKILL.md": "7dc832e6423816275fe3482954e13bb6b3592c3e8e5b9a5fe55287bfd21b0023",
     ".codex/skills/pfm/SKILL.md": "44079a1f3417550c041781a59e3be1356dd2ae01a783ab5cc95d0bf1e1a428d1",
     ".codex/skills/quality-doc/SKILL.md": "1595e930ccb2c521f3552a2352deaefa1955f3d4d8b93161ca82c71c45fc667f",
     ".codex/skills/quality-prompt/SKILL.md": "cace2c7ad5ce6299567d1dfcd0a1bf456518fa8f58014eaef425e47d7db8ee60",
@@ -162,7 +162,7 @@
     ".opencode/agent/tracer.md": "498d3c82358aac7524b913b9c6e9e09b63e36565c2612c66c6e1183000e5ea9f",
     ".opencode/command/dev.md": "c7eb74ae4c6c7bebbfd698f34a7d6513d0764c10803b4ec1d1d69cecfab8a113",
     ".opencode/command/git.md": "52649dc86674deedff9c7a1234e9de1d9982c62ffb2ae7bac7573a68b4e60aa7",
-    ".opencode/command/pfm-release.md": "1b6010bd285d46f3843b34453657eb702bbd3bda10081bfd9b450531cbe1159a",
+    ".opencode/command/pfm-release.md": "ce40b28b6708bfe43145976a8049042e6cf1fd295809de9d522cfd3c8ea4fb43",
     ".opencode/command/pfm.md": "b69f3edb1c44a135427a8e3d32cb284930074814eb593af4ec5ffd439ef306f8",
     ".opencode/command/quality-doc.md": "f660f676710310f2f77b62176eadadbe3feb453fed5808a749f822fc52b782f9",
     ".opencode/command/quality-prompt.md": "7eb496ca35888e76c10ef7d60e1deada4d3c7e7b57a720e754628bd1f3bc71ed",
@@ -177,7 +177,7 @@
     "CLAUDE.md": "29e7a4f3590b55a2a2786279c0e0c7894342a6d45360911f4ff8108763d0c391",
     "docs/commands/pfm/references/audit-scopes.md": "8634be6c91bfcdcb3ec7609afea5470e92a24918045806f5c5e48a9ab038f4c1",
     "docs/commands/pfm/references/refresh.md": "f764e9aca097f4d0ed0ad534153b2dc6eba189c02f870216e6751069f698e60b",
-    "docs/commands/pfm/references/release-rehearsal.md": "803a3683dfaae342d5b67006423440791aa6a9289698754ea1c86cdbf357e698",
+    "docs/commands/pfm/references/release-rehearsal.md": "947322ac0337d014afd9aa499c038d8fc2c556090ece86072f6d58f8ce3937ce",
     "pfm/AGENTS.md": "2f09c3129d14b3e45c8c5d13b605b9de6ee13fe43951756d3763fc02b85a6a66",
     "pfm/CLAUDE.md": "0e696cacb5a04c52e7e1dccd5c34c1d66fc3dd765714cc7bdeb71559a4f526f4"
   }
