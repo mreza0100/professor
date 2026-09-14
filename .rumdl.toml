@@ -92,7 +92,8 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 #
 #   prompt  .claude/**, CLAUDE.md, templates/**  — an LLM reads it at runtime
 #   doc     docs/**, pfm/**, engines/**          — an agent greps then reads it
-#   public  README.md, INSTALL.md               — a person reads it rendered
+#   public  README.md, INSTALL.md               — a person reads it rendered;
+#                                                 README.md exempt from MD033
 #   generated / record                           — in `exclude` above
 #
 # A prompt is exempt from four reader-facing rules and two structural ones:
@@ -109,5 +110,9 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 # Templates additionally carry `{PLACEHOLDER}` tokens and point at paths that
 # exist only after an install, so link-existence checks report false hits.
 "templates/**/*.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD051", "MD057", "MD059"]
+# The public README renders on GitHub, where allowlisted inline HTML (`p align`,
+# `picture`, `img`, `details`) is the only layout primitive: a centered hero,
+# badge row, and collapsible sections exist only as HTML.
+"README.md" = ["MD033"]
 # The hygiene audit hunts TODO/FIXME markers, so it must be able to name them.
 "templates/project/commands/audit/code-hygiene.md" = ["MD061"]
