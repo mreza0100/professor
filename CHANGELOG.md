@@ -31,16 +31,9 @@ Bullets MUST follow this shape:
 
 ---
 
-## [Unreleased]
-
-- B: pfm + project scaffolding — `pfm init` now scaffolds project templates once with per-file baseline pins; local files own truth, `pfm update check` reports upstream deltas for reviewed hand application, and the dormant Codex override layer is removed.
-
-#### → For: adopters — run `pfm update check`, review and apply wanted template diffs, then pin each accepted local file; do not regenerate the project or replay its install interview.
-
----
-
 ## Releases
 
+- [v0.77.0](releases/v0.77.0.md) — Harvester gains five discovery adapters and stops caching app shells, the Professor VS Code extension ships inside pfm, `pfm update` takes a detached source clone and lists every release note it moved past, source installs record their clone again, the chat MCP drops `chat_goal`/`chat_reload`, `/quality:description` rewrites every routing description, and `/pfm:release` rehearses the adopter update in a fresh machine.
 - [v0.76.0](releases/v0.76.0.md) — hiding a live chat ends it, `/exit`/`e` close the terminal tab, `chat new` inherits the caller's engine, WebGL-safe glyphs, and the first `develop → main` release.
 - [v0.75.1](releases/v0.75.1.md) — `pfm install` stops restarting a launch agent whose plist did not change, so it no longer takes the MCP daemon down with it.
 
