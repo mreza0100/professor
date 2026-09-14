@@ -102,7 +102,6 @@ One daemon process (Task #8), two servers. Every tool is a thin adapter over the
 | Tool | Status | Inputs | Returns |
 | --------------------------- | ------ | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat_ls` | ● | `{all?, killed?, project?, limit?}` | Fleet rows (accounts, engines, sizes, liveness), including chats still booting. `project` filters case-insensitively on project label or directory; rows are capped (200 default, 1000 max) with `matched`/`truncated` reporting the cut. |
-| `chat_goal` | ✚ | `{goal, target?}` | Guarded delivery of an already-compiled, one-line `/goal` body (≤4,000 characters); target defaults to the requesting chat. |
 | `chat_new` | ✚ | `{engine, account?, name?, cwd?}` | Spawned chat identity. |
 | `chat_open` | ✚ | `{target}` | Open result. |
 | `chat_read` | ◆ | `{target, excerpt?}` | Transcript text (converges onto CLI `read`). |
@@ -114,7 +113,6 @@ One daemon process (Task #8), two servers. Every tool is a thin adapter over the
 | `chat_keys` | ✚ | `{target, keys: [string], literal?, delay_ms?, capture?}` | Press keys in the chat's pane — the model's hands on a TUI that swallowed a keystroke. Same validation as the CLI verb: an unknown key name is an error, never typed as text. |
 | `chat_name` | ✚ | `{target, name}` | Rename result. |
 | `chat_kill` / `chat_unkill` | ✚ | `{target}` | Kill-state result. A live target is really ended (its pane is closed by the exit finisher); the message names which happened — pane closed, or de-listed only. |
-| `chat_reload` | ✚ | `{target}` | Reload result. The target is resolved to its tmux socket, because `pfm chat reload` takes no positional target. Account/cache/`--then` are CLI-only. |
 | `chat_find` | ◆ | `{query}` | Matching transcripts (converges onto CLI `find`). |
 | `chat_save` | ✚ | `{target, transcript?}` | Appends a transcript + environment snapshot to a FILE — `target` is a path, never a chat, and a bare word is refused. |
 | `chat_whoami` | ● | `{}` | Caller identity. |

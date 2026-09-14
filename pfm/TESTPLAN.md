@@ -33,7 +33,7 @@ The four identity/state regressions that established this plan. A tagged row mus
 4. [D — Index, naming and identity resolution](#d--index-naming-and-identity-resolution)
 5. [E — Kill / unkill and shared state](#e--kill--unkill-and-shared-state)
 6. [F — Action synthesis and launch](#f--action-synthesis-and-launch)
-7. [G — MCP server (27 tools)](#g--mcp-server-27-tools)
+7. [G — MCP server (18 tools)](#g--mcp-server-18-tools)
 8. [H — `pfm chat`: subcommands, guards, `--then`, exit codes](#h--pfm-chat-subcommands-guards---then-exit-codes)
 9. [I — zsh shell surface: launchers](#i--zsh-shell-surface-launchers)
 10. [J — Internal wiring and store](#j--internal-wiring-and-store)
@@ -440,7 +440,7 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | `_cc_solo` skips the stray-Claude kill sweep when the keep socket cannot be probed | JAIL | `action/executor_test.go:284-308`, `action/solo.go` | |
 | Empty keep-set is destructive only for `ResumeClaude`; `Agent` skips the sweep and live rows keep their socket | JAIL | `action/executor_test.go:310-373`, `action/executor.go:115-123,200-208` | |
 
-## G — MCP server (27 tools)
+## G — MCP server (18 tools)
 
 | flow | safety | expected behavior (source) | regression |
 | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
@@ -470,7 +470,6 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | `chat_read` bounds: `last_n` ≤200, `max_bytes` ≤1Mi, Claude and Codex turn shapes | JAIL | `mcpserv/read.go:18-21,49-70,199-273` | |
 | `chat_status summary=true` delegates to the canonical CLI and returns `summary` + `summary_cached` | JAIL | `TestChatStatusSummaryUsesCanonicalCommandAndReturnsField` | |
 | `chat_branch` is RETIRED from the MCP roster and its absence is pinned by name, so it cannot return under the advertised set; the CLI `pfm chat branch` is unaffected | UNIT | `TestChatMCPRosterNeverAdvertisesChatBranch` | |
-| `chat_goal` injects an already-compiled one-line body at the request caller; empty, multiline, and >4,000-character bodies are refused | JAIL+tmux | `TestChatGoalUsesRequestIdentity`, `mcpserv/workflows.go` | |
 | `chat_load` / `pfm chat load` stay retired — the MCP roster never advertises the tool and the CLI verb refuses as an unknown command | UNIT+JAIL | `TestChatMCPRosterNeverAdvertisesChatLoad`, `TestChatLoadVerbIsRetired` | |
 
 ## H — `pfm chat`: subcommands, guards, `--then`, exit codes

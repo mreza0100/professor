@@ -306,11 +306,6 @@ type SaveInput struct {
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
 }
 
-type GoalInput struct {
-	Target string `json:"target,omitempty" jsonschema:"target chat; defaults to the requesting chat"`
-	Goal   string `json:"goal" jsonschema:"already-compiled inline /goal body, one line and at most 4000 characters"`
-}
-
 // IssueInput is one agent complaint filed against Professor itself. Reporter
 // identity is never accepted here — issue_servicedesk captures it the same
 // way chat_inject captures a sender, so a model can complain but never say
