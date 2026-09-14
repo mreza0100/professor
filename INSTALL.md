@@ -70,7 +70,7 @@ pfm install --yes --skip-harvest --skip-engine codex --skip-themes
 
 - `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download and its disk footprint. It does not hide a failed provision.
 - `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
-- `--skip-themes` suppresses source-fetched theme installation. Theme entries come from `templates/themes/sources.json` and the current Tokyo Night target is `~/.claude/themes/tokyo-night.json`.
+- `--skip-themes` suppresses theme installation. Theme entries come from `templates/themes/sources.json`: the source-fetched Tokyo Night (`~/.claude/themes/tokyo-night.json`) and the bundled per-account palettes `professor-{gold,silver,bronze}.json` beside it.
 
 The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`, the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about **5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly 57 MB, and temporary files or caches can require more free space. Other platforms and future lock revisions vary; the preview is the authoritative plan for the host.
 
@@ -94,7 +94,7 @@ pfm install --yes --vscode
 5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; only marker-owned command outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
 6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and Dream/STM hooks; it installs no automatic Codex hook
 7. One source line appended to `~/.zshrc` — restart your shell (or `source ~/.zshrc`) for it to take effect
-8. `~/.claude/themes/` — source-fetched themes declared by `templates/themes/sources.json`; a failed cosmetic fetch is reported and skipped without aborting the other surfaces
+8. `~/.claude/themes/` — the themes declared by `templates/themes/sources.json`, source-fetched and bundled; a failed cosmetic fetch or an unreadable bundled file is reported and skipped without aborting the other surfaces
 9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install), and in the user or remote-machine `settings.json` adds a `PFM` terminal profile and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links still pointing at PFM's copy and restores the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension.
 
 Every rewritten file is backed up before it's touched.
@@ -170,7 +170,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Host fleet wiring | `pfm install` — the only writer | `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, the systemd/launchd scheduler units, every Claude account `settings.json`, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json` |
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
-| Source-fetched themes (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json` and other targets declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
+| Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

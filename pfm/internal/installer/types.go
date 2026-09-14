@@ -119,7 +119,7 @@ type Options struct {
 	HarvestPlatform    harvestpy.Platform
 	HarvestOffline     bool
 
-	// InstallThemes enables the optional source-fetched Claude Code themes.
+	// InstallThemes enables the optional Claude Code themes, source-fetched and bundled.
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
