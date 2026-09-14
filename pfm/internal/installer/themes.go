@@ -45,16 +45,30 @@ type themeSource struct {
 	// clone; empty for a source-fetched theme or a bundled one resolved
 	// against the release manifest, both of which download Raw.
 	local string
+	// base names the source_fetched theme a bundled overlay is merged onto;
+	// empty for a complete palette.
+	base string
 }
 
 // bundledTheme is a palette the blueprint ships itself under templates/themes/:
 // File names it beside sources.json, so it is read from the source clone
 // when the manifest is, or downloaded from beside the release manifest.
+// With Base set the file is an overlay — only `name` and the `overrides`
+// keys that differ — written merged onto the fetched base, so the base is
+// never vendored and cannot drift.
 type bundledTheme struct {
 	File     string `json:"file"`
+	Base     string `json:"base,omitempty"`
 	Target   string `json:"target"`
 	Activate string `json:"activate"`
 	Requires string `json:"requires"`
+}
+
+// themePalette is the Claude Code theme file shape both kinds share.
+type themePalette struct {
+	Name      string            `json:"name"`
+	Base      string            `json:"base,omitempty"`
+	Overrides map[string]string `json:"overrides"`
 }
 
 type themeOwnershipRecord struct {
@@ -78,6 +92,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 		return
 	}
 
+	bases := map[string][]byte{} // fetched base palettes, one download per run
 	for _, name := range sortedThemeNames(sources) {
 		source := sources[name]
 		target, targetErr := themeTarget(installer.options.Home, source.Target)
@@ -120,6 +135,23 @@ func (installer *engine) installThemes(ctx context.Context) {
 		if loadErr != nil {
 			installer.skip("theme " + name + " " + loadErr.Error())
 			continue
+		}
+		if source.base != "" {
+			base, cached := bases[source.base]
+			if !cached {
+				fetched, baseErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[source.base])
+				if baseErr != nil {
+					installer.skip("theme " + name + " base " + source.base + " " + baseErr.Error())
+					continue
+				}
+				base, bases[source.base] = fetched, fetched
+			}
+			merged, mergeErr := mergeThemeOverlay(base, content)
+			if mergeErr != nil {
+				installer.skip("theme " + name + " overlay onto " + source.base + " failed: " + mergeErr.Error())
+				continue
+			}
+			content = merged
 		}
 		digest := contentSHA256(content)
 		if exists && bytes.Equal(existing, content) && owned && record.SHA256 == digest {
@@ -242,6 +274,35 @@ func loadThemeContent(ctx context.Context, client *http.Client, source themeSour
 	return content, nil
 }
 
+// mergeThemeOverlay writes the base palette with the overlay's name (when set)
+// and its overrides on top; a key the overlay does not name keeps the base value.
+func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
+	var basePalette, overlayPalette themePalette
+	if err := json.Unmarshal(base, &basePalette); err != nil {
+		return nil, fmt.Errorf("decode base palette: %w", err)
+	}
+	if err := json.Unmarshal(overlay, &overlayPalette); err != nil {
+		return nil, fmt.Errorf("decode overlay: %w", err)
+	}
+	if len(overlayPalette.Overrides) == 0 {
+		return nil, errors.New("overlay carries no overrides")
+	}
+	if len(basePalette.Overrides) == 0 {
+		return nil, errors.New("base palette carries no overrides")
+	}
+	for key, value := range overlayPalette.Overrides {
+		basePalette.Overrides[key] = value
+	}
+	if overlayPalette.Name != "" {
+		basePalette.Name = overlayPalette.Name
+	}
+	content, err := json.MarshalIndent(basePalette, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode merged palette: %w", err)
+	}
+	return append(content, '\n'), nil
+}
+
 func loadThemeSources(ctx context.Context, options Options) (map[string]themeSource, error) {
 	var content []byte
 	var origin string
@@ -320,7 +381,13 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		if _, clash := sources[name]; clash {
 			return nil, fmt.Errorf("manifest %s names theme %q as both source_fetched and bundled", origin, name)
 		}
-		source := themeSource{Target: bundled.Target, Activate: bundled.Activate, Requires: bundled.Requires}
+		base := strings.TrimSpace(bundled.Base)
+		if base != "" {
+			if _, known := manifest.SourceFetched[base]; !known {
+				return nil, fmt.Errorf("manifest %s bundled theme %q base %q is not a source_fetched theme", origin, name, base)
+			}
+		}
+		source := themeSource{Target: bundled.Target, Activate: bundled.Activate, Requires: bundled.Requires, base: base}
 		if localThemes != "" {
 			source.local = filepath.Join(localThemes, file)
 		} else {

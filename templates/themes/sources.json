@@ -1,5 +1,5 @@
 {
-  "_comment": "Claude Code themes pfm install places into ~/.claude/themes/ (a user-level dir, shared by every project; the fleet accounts share it too when their themes/ dirs are symlinked). Two kinds. source_fetched: fetched at install from the theme's canonical public repo, always latest — the blueprint never vendors a copy. bundled: palettes the blueprint ships itself as `file` beside this manifest, read from the source clone or downloaded from beside the release manifest. Both kinds are recorded in the install ownership ledger. Activate with /theme, or set `theme` in an account's settings.json.",
+  "_comment": "Claude Code themes pfm install places into ~/.claude/themes/ (a user-level dir, shared by every project and, when their themes/ dirs are symlinked, by the fleet accounts). Two kinds. source_fetched: fetched at install from the theme's canonical public repo, always latest — the blueprint never vendors a copy. bundled: a `file` beside this manifest, read from the source clone or downloaded from beside the release manifest; with `base` it is an overlay — only `name` and the differing `overrides` — written merged onto the fetched base. Both kinds are recorded in the install ownership ledger. Activate with /theme, or set `theme` in an account's settings.json.",
   "source_fetched": {
     "tokyo-night": {
       "repo": "https://github.com/{GH_USER}/claude-code-tokyo-night",
@@ -12,20 +12,23 @@
   "bundled": {
     "professor-gold": {
       "file": "professor-gold.json",
+      "base": "tokyo-night",
       "target": "~/.claude/themes/professor-gold.json",
-      "activate": "/theme → \"Professor Gold — blazing gold on deep indigo, hot-pink ask — noon sun\" — the 🥇 account 1 palette; per account: \"theme\": \"custom:professor-gold\" in that account's settings.json",
+      "activate": "/theme → \"Professor Gold\" — Tokyo Night with the 🥇 account 1 input bar (#ffd60a); per account: \"theme\": \"custom:professor-gold\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     },
     "professor-silver": {
       "file": "professor-silver.json",
+      "base": "tokyo-night",
       "target": "~/.claude/themes/professor-silver.json",
-      "activate": "/theme → \"Professor Silver — chrome on midnight navy, electric-blue ask, acid-green success — lightning\" — the 🥈 account 2 palette; per account: \"theme\": \"custom:professor-silver\" in that account's settings.json",
+      "activate": "/theme → \"Professor Silver\" — Tokyo Night with the 🥈 account 2 input bar (#d9e8f5); per account: \"theme\": \"custom:professor-silver\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     },
     "professor-bronze": {
       "file": "professor-bronze.json",
+      "base": "tokyo-night",
       "target": "~/.claude/themes/professor-bronze.json",
-      "activate": "/theme → \"Professor Bronze — molten bronze on dark maroon, hot-pink ask — lava lamp\" — the 🥉 account 3 palette; per account: \"theme\": \"custom:professor-bronze\" in that account's settings.json",
+      "activate": "/theme → \"Professor Bronze\" — Tokyo Night with the 🥉 account 3 input bar (#ff5e1a); per account: \"theme\": \"custom:professor-bronze\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     }
   }
