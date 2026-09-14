@@ -155,7 +155,7 @@ func TestDOIMirrorClientPreservesBaseRedirectPolicy(t *testing.T) {
 		called = true
 		return wantErr
 	}}
-	client := doiMirrorClient(base, jar)
+	client := gatewayClient(base, jar)
 	next, err := http.NewRequest(http.MethodGet, "https://mirror.example/final", nil)
 	if err != nil {
 		t.Fatal(err)

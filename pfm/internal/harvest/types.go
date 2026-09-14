@@ -67,7 +67,10 @@ type Options struct {
 	ProxyURL  string
 	UserAgent string
 	// ResolvePublic is called once for each production dial. It is injectable
-	// for deterministic DNS-rebinding tests; nil uses net.LookupIP.
+	// for deterministic DNS-rebinding tests; nil installs the DNS-over-HTTPS
+	// resolver (doh.go), because a consumer ISP's resolver can answer a source
+	// host with its own block address and no rung can tell that from the real
+	// one. The SSRF guard runs on whatever this returns, unchanged.
 	ResolvePublic func(context.Context, string) ([]net.IP, error)
 	// BrowserRung opts the real-browser rung in (harvester.config.json
 	// fetch.browser). The rung is OFF by default: nil or false never starts
@@ -245,6 +248,14 @@ func New(options Options) (*Harvester, error) {
 	}
 	if options.JinaURL == "" {
 		options.JinaURL = "https://r.jina.ai/"
+	}
+	// Every client below is built with options.ResolvePublic, and that resolver
+	// reaches the dialer through pinnedDialContext/publicIPs — so installing the
+	// DoH resolver here is the ONE place that moves all six transports (direct,
+	// chrome, both binary tiers, jina, oa) off a resolver the network can
+	// rewrite. A caller that supplied its own resolver keeps it.
+	if options.ResolvePublic == nil {
+		options.ResolvePublic = ResolvePublicHost
 	}
 	client := options.Client
 	customClient := client != nil

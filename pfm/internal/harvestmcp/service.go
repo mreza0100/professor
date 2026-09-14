@@ -324,7 +324,13 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 
 	fetchCtx, cancel := context.WithTimeout(ctx, browserHardDeadline)
 	defer cancel()
-	html, status, fetchErr := browser.Fetch(fetchCtx, source, converter.proxyURL, headless, 45000, onAsk)
+	// Pin Chrome to the address DoH resolved and the guard validated. Without
+	// this the browser rung resolves the host a second time through the system
+	// resolver — so on a network that rewrites DNS answers every HTTP rung
+	// would reach the real host while the browser rung alone landed on a block
+	// page, and the wall would look like the source's own.
+	hostResolverRules := harvest.BrowserHostResolverRule(fetchCtx, source)
+	html, status, fetchErr := browser.FetchPinned(fetchCtx, source, converter.proxyURL, hostResolverRules, headless, 45000, onAsk)
 	if fetchErr != nil && policyDenied {
 		return "", 0, fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
 	}

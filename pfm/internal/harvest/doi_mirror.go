@@ -64,18 +64,24 @@ func (f doiMirrorFailure) result(identifier string, rungs []string) Result {
 		Challenge: f.challenge, HTTPStatus: f.status, Rungs: append([]string(nil), rungs...)}
 }
 
-func doiMirrorClient(base *http.Client, jar http.CookieJar) *http.Client {
+// gatewayClient clones base for ONE gateway request: it attaches the request's
+// cookie jar and re-validates every redirect hop, without mutating the shared
+// client. A nil jar leaves the base client's own jar in place — dropping it
+// would silently discard a session an earlier rung established.
+func gatewayClient(base *http.Client, jar http.CookieJar) *http.Client {
 	clone := &http.Client{Jar: jar}
 	var existingRedirect func(*http.Request, []*http.Request) error
 	if base != nil {
 		copy := *base
 		clone = &copy
-		clone.Jar = jar
+		if jar != nil {
+			clone.Jar = jar
+		}
 		existingRedirect = clone.CheckRedirect
 	}
 	clone.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return errors.New("doi-mirror redirect limit exceeded")
+			return errors.New("gateway redirect limit exceeded")
 		}
 		if err := assertFetchable(next.URL.String(), false); err != nil {
 			return err
@@ -135,7 +141,7 @@ func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8")
 	req.Header.Set("User-Agent", h.userAgent)
-	client := doiMirrorClient(h.client, jar)
+	client := gatewayClient(h.client, jar)
 	resp, err := client.Do(req)
 	if err != nil {
 		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: errorKind(err)}
@@ -195,7 +201,7 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 		req.Header.Set("Accept", "application/pdf,application/octet-stream;q=0.9,*/*;q=0.5")
 		req.Header.Set("User-Agent", h.userAgent)
 		req.Header.Set("Referer", lookup.pageURL)
-		resp, err := doiMirrorClient(base, jar).Do(req)
+		resp, err := gatewayClient(base, jar).Do(req)
 		if err != nil {
 			failure := doiMirrorFailure{message: "PDF request failed: " + err.Error(), kind: errorKind(err)}
 			if attempt == 0 {

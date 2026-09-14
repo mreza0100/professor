@@ -8,7 +8,8 @@ hidden by Patchright.
 
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
-  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,"timeout_ms":45000}
+  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,
+                   "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000}
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -102,7 +103,8 @@ def serialized_ask(raw_ask):
     return guarded_ask
 
 
-async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True):
+async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
+                        host_resolver_rules=None):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
 
     Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
@@ -135,9 +137,19 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
 
     proxy = {"server": proxy_url} if proxy_url else None
 
+    # Chrome resolves DNS itself, with no pinning hop. On a network that
+    # rewrites DNS answers that would send the browser rung to a block page
+    # while every HTTP rung reached the real host. Go resolves over HTTPS and
+    # hands us the validated address as a "MAP host ip" rule; an absent rule
+    # leaves Chrome's own resolution in place.
+    launch_args = []
+    if host_resolver_rules:
+        launch_args.append(f"--host-resolver-rules={host_resolver_rules}")
+
     async def _render(headless: bool):
         async with async_playwright() as p:  # type: ignore[attr-defined]
-            browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy)
+            browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
+                                              args=launch_args)
             try:
                 context = await browser.new_context()
                 await context.route("**/*", browser_route_guard(guarded_ask))
@@ -190,6 +202,7 @@ async def handle_fetch(request):
         proxy_url=request.get("proxy"),
         timeout_ms=int(request.get("timeout_ms") or 45_000),
         headless=bool(request.get("headless", True)),
+        host_resolver_rules=request.get("host_resolver_rules") or None,
     )
     if error is not None and not html:
         return {"ok": False, "error": error}

@@ -31,10 +31,17 @@ type browserAsk struct {
 // for a direct connection; it is threaded through verbatim, never configured
 // here — procuring an exit is a separate decision.
 type BrowserFetchRequest struct {
-	URL       string `json:"url"`
-	Proxy     string `json:"proxy,omitempty"`
-	Headless  bool   `json:"headless"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	URL      string `json:"url"`
+	Proxy    string `json:"proxy,omitempty"`
+	Headless bool   `json:"headless"`
+	// HostResolverRules pins Chrome's own DNS to the address the Go side
+	// already resolved and validated (a "MAP host ip" rule). Chrome otherwise
+	// resolves independently through the system resolver, which on a network
+	// that rewrites DNS answers would send the browser rung to a block page
+	// while every HTTP rung reached the real host. Empty leaves Chrome's
+	// resolution alone.
+	HostResolverRules string `json:"host_resolver_rules,omitempty"`
+	TimeoutMS         int    `json:"timeout_ms,omitempty"`
 }
 
 // browserWorkerRequest is the wire shape of one worker op.
@@ -69,10 +76,17 @@ func (worker *BrowserWorker) Close() error {
 // authority (harvest.AssertFetchable at the adapter layer). A nil onAsk
 // refuses every ask fail-closed.
 func (worker *BrowserWorker) Fetch(ctx context.Context, source, proxy string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
+	return worker.FetchPinned(ctx, source, proxy, "", headless, timeoutMS, onAsk)
+}
+
+// FetchPinned is Fetch with Chrome's resolver pinned to an already-validated
+// address (see BrowserFetchRequest.HostResolverRules). An empty rule behaves
+// exactly like Fetch.
+func (worker *BrowserWorker) FetchPinned(ctx context.Context, source, proxy, hostResolverRules string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
 	if strings.TrimSpace(source) == "" {
 		return "", 0, errors.New("browser fetch url is empty")
 	}
-	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, Headless: headless, TimeoutMS: timeoutMS}})
+	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, Headless: headless, HostResolverRules: hostResolverRules, TimeoutMS: timeoutMS}})
 	if err != nil {
 		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
 	}
