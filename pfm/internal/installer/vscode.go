@@ -255,8 +255,14 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 		profiles = map[string]any{}
 	}
 	existingProfile, hasProfile := profiles[vscodeProfileName]
-	// An exact previously managed profile is an upgrade, not an operator edit.
-	upgradingProfile := alreadyOwned && record.ProfileOwned && isLegacyVSCodeProfile(existingProfile)
+	// A profile byte-identical to a shape pfm itself has ever written is never an
+	// operator customization worth refusing over — UNCONDITIONALLY, not just when
+	// the ownership ledger already tracks it: a real devbox backup (see
+	// realMalformedVSCodeSettings) can carry a hand-inserted PFM block that
+	// happens to match an old canonical shape with no ledger behind it at all,
+	// and that must read as "already correct," the same verdict an exact CURRENT
+	// canonical match gets below, never as a conflicting operator profile.
+	upgradingProfile := isLegacyVSCodeProfile(existingProfile)
 	profileRelinquished := false
 	if alreadyOwned && record.ProfileOwned && hasProfile && !reflect.DeepEqual(existingProfile, canonical) && !upgradingProfile {
 		// A user edit after installation wins. Relinquish this field instead of
@@ -690,17 +696,50 @@ func vscodeSettingKeys(platform string) (string, string) {
 	return "terminal.integrated.profiles." + platform, "terminal.integrated.defaultProfile." + platform
 }
 
+// vscodeLegacyProfileEnvs lists every env shape pfm has EVER written as the
+// canonical profile's "env", oldest first. A profile that matches one of
+// these (and nothing else about the profile has drifted) is pfm's own
+// earlier install caught up by an upgrade, not an operator edit — see
+// isLegacyVSCodeProfile. Each entry is appended, never rewritten, the day
+// vscodeProfile's own "env" changes shape: the previous CURRENT shape
+// becomes a new legacy one so an install still holding it keeps upgrading.
+var vscodeLegacyProfileEnvs = []map[string]any{
+	{"CC_AUTO_OPEN": "pfm"},
+	{"PFM_AUTO_OPEN": "pfm"},
+}
+
 func isLegacyVSCodeProfile(profile any) bool {
 	legacy := vscodeProfile()
-	legacy["env"] = map[string]any{"CC_AUTO_OPEN": "pfm"}
-	return reflect.DeepEqual(profile, legacy)
+	for _, env := range vscodeLegacyProfileEnvs {
+		legacy["env"] = env
+		if reflect.DeepEqual(profile, legacy) {
+			return true
+		}
+	}
+	return false
 }
 
 func vscodeProfile() map[string]any {
 	return map[string]any{
 		"path": "/bin/zsh",
 		"args": []any{"-l"},
-		"env":  map[string]any{"PFM_AUTO_OPEN": "pfm"},
+		// A terminal opened straight from this profile is a shell the operator
+		// typed into, never a nested chat — but it inherits VS Code's own
+		// process env, which (when VS Code was itself launched from inside a
+		// chat) carries that chat's identity markers. `null` is how VS Code
+		// deletes an inherited env var (terminal.integrated.env.<platform> and
+		// a profile's own "env" both honour it), matching the Professor
+		// extension's terminal (extension.js nextTerminal) — see
+		// CC_SESSION_UNSET in pfm.zsh (~line 56) for why each one lies in a
+		// different way, plus the TMUX pair that names its tmux server.
+		"env": map[string]any{
+			"PFM_AUTO_OPEN":             "pfm",
+			"CLAUDECODE":                nil,
+			"CLAUDE_CODE_SESSION_ID":    nil,
+			"CLAUDE_CODE_CHILD_SESSION": nil,
+			"TMUX":                      nil,
+			"TMUX_PANE":                 nil,
+		},
 	}
 }
 
