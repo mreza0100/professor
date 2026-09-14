@@ -806,7 +806,7 @@ func TestRemoteLegacy_DenylistStillAppliesInsideRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := filepath.Join(cache, "leaked.pem")
-	if err := os.WriteFile(key, []byte("-----BEGIN PRIVATE KEY-----"), 0o600); err != nil {
+	if err := os.WriteFile(key, []byte("example key material"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if harvest.DenyLocalPath(key, []string{cache}) == "" {

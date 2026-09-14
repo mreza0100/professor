@@ -189,7 +189,7 @@ func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
 		return jsonResponse(request, `{"web":{"results":[{"title":"C","url":"https://c.example","description":"desc c"}]}}`), nil
 	})}
 	results, backend, err = searchConfigured(context.Background(), "fixture", SearchOptions{
-		BraveAPIKey: "fixture-key", Lang: "zh", Brave: brave,
+		BraveAPIKey: "example-fixture-key", Lang: "zh", Brave: brave,
 	})
 	if err != nil || backend != "brave" || len(results) != 1 || results[0].Engine != "brave" {
 		t.Fatalf("Brave result=%#v backend=%q err=%v", results, backend, err)

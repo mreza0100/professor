@@ -240,10 +240,10 @@ func TestSearchEnabledNeedsABackendAndNotDisabled(t *testing.T) {
 	if !SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test"}) {
 		t.Fatal("SearXNG did not enable search")
 	}
-	if !SearchEnabled(SearchOptions{BraveAPIKey: "fixture-key"}) {
+	if !SearchEnabled(SearchOptions{BraveAPIKey: "example-fixture-key"}) {
 		t.Fatal("Brave did not enable search")
 	}
-	if SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test", BraveAPIKey: "fixture-key", DisableSearch: true}) {
+	if SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test", BraveAPIKey: "example-fixture-key", DisableSearch: true}) {
 		t.Fatal("disabled search reported enabled")
 	}
 }

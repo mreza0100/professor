@@ -24,7 +24,7 @@ import (
 const (
 	themeManifestRelative = "templates/themes/sources.json"
 	themeOwnershipName    = "theme-ownership.json"
-	themeOwnerToken       = "{GH_USER}"
+	themeOwnerPlaceholder = "{GH_USER}"
 	maxThemeDownloadBytes = 10 << 20
 )
 
@@ -234,12 +234,12 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			return nil, fmt.Errorf("fetch release manifest %s: %w", origin, err)
 		}
 	}
-	if bytes.Contains(content, []byte(themeOwnerToken)) {
+	if bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
 		owner, ownerErr := themeManifestOwner(options)
 		if ownerErr != nil {
-			return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerToken, ownerErr)
+			return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, ownerErr)
 		}
-		content = bytes.ReplaceAll(content, []byte(themeOwnerToken), []byte(owner))
+		content = bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner))
 	}
 	var manifest themeManifest
 	decoder := json.NewDecoder(bytes.NewReader(content))

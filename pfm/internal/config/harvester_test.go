@@ -298,14 +298,14 @@ func TestSetMCPServerHarvesterWritesHarvesterFile(t *testing.T) {
 func TestHarvesterSecretsNeverRenderInDisplay(t *testing.T) {
 	harvester := DefaultHarvester()
 	harvester.External.Passphrase = "open sesame"
-	harvester.External.StaticToken = "tok-123"
-	harvester.Search.BraveAPIKey = "brave-456"
-	harvester.Scholarly.CoreAPIKey = "core-789"
+	harvester.External.StaticToken = "example-tok-123"
+	harvester.Search.BraveAPIKey = "example-brave-456"
+	harvester.Scholarly.CoreAPIKey = "example-core-789"
 	content, err := MarshalHarvester(harvester, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"open sesame", "tok-123", "brave-456", "core-789"} {
+	for _, secret := range []string{"open sesame", "example-tok-123", "example-brave-456", "example-core-789"} {
 		if strings.Contains(string(content), secret) {
 			t.Fatalf("redacted harvester output leaks %q:\n%s", secret, content)
 		}
