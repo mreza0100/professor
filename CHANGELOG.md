@@ -33,6 +33,7 @@ Bullets MUST follow this shape:
 
 ## Releases
 
+- [v0.77.2](releases/v0.77.2.md) — the repository clears the HOL AI Plugin Scanner bar (56/F with 11 high findings → 88/B with none): no fixture that reads as a credential, the pricing check parses instead of `eval`, SHA-pinned actions, `SECURITY.md`, Dependabot, and the scanner in CI.
 - [v0.77.1](releases/v0.77.1.md) — `pfm heal` never rebuilds a Codex thread whose rollout ordinals repeat or skip (openai/codex#38792; NONCANONICAL and UNSCANNED verdicts, Codex 0.154.0 named as the projector that recovers it), Harvester's SSRF pre-check and MCP resolver client dial through DNS-over-HTTPS, and a terminal opened by an app launched inside a chat opens the picker again.
 - [v0.77.0](releases/v0.77.0.md) — Harvester gains Google Scholar discovery and stops caching app shells, the Professor VS Code extension ships inside pfm, `pfm update` takes a detached source clone and lists every release note it moved past, source installs record their clone again, the chat MCP drops `chat_goal`/`chat_reload`, `/quality:description` rewrites every routing description, and `/pfm:release` rehearses the adopter update in a fresh machine.
 - [v0.76.0](releases/v0.76.0.md) — hiding a live chat ends it, `/exit`/`e` close the terminal tab, `chat new` inherits the caller's engine, WebGL-safe glyphs, and the first `develop → main` release.
