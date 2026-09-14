@@ -405,3 +405,56 @@ func TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount(t *testing.T) 
 		t.Fatalf("an absent-Claude account was certified linked:\n%s", output.String())
 	}
 }
+
+// TestInspectGlobalAgentsSourceDirectoryStates pins the three-way split of a
+// source directory that cannot be enumerated: absent entirely is NO-CLONE
+// (nothing to link, never a warning), present but empty is NO-SOURCES (a
+// broken clone, still a warning), and unreadable (e.g. the agents path is a
+// file, not a directory) is UNREADABLE — "we failed to look", never MISSING.
+func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		stage func(t *testing.T, home string)
+		want  GlobalAgentsState
+	}{
+		{
+			name:  "no agents directory at all",
+			stage: func(t *testing.T, home string) {},
+			want:  GlobalAgentsNoClone,
+		},
+		{
+			name: "empty agents directory",
+			stage: func(t *testing.T, home string) {
+				if err := os.MkdirAll(filepath.Join(home, ".professor", "templates", "global", "agents"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: GlobalAgentsNoSources,
+		},
+		{
+			name: "agents path is a file, not a directory",
+			stage: func(t *testing.T, home string) {
+				dir := filepath.Join(home, ".professor", "templates", "global")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "agents"), []byte("not a directory\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: GlobalAgentsUnreadable,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			tt.stage(t, home)
+			statuses := InspectGlobalAgents(home, nil, false)
+			if len(statuses) != 1 {
+				t.Fatalf("statuses=%d, want 1: %+v", len(statuses), statuses)
+			}
+			if statuses[0].State != tt.want {
+				t.Fatalf("state=%s, want %s: %+v", statuses[0].State, tt.want, statuses[0])
+			}
+		})
+	}
+}

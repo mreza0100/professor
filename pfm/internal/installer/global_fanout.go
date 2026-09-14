@@ -160,9 +160,18 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 		return []GlobalAgentsStatus{{Dir: repo, State: GlobalAgentsUnresolved, Error: markerErr.Error()}}
 	}
 	agentsDir := filepath.Join(repo, "templates", "global", "agents")
-	sources, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
-	if err != nil {
+	// os.ReadDir, not filepath.Glob: Glob drops every I/O error and would
+	// render an agents path that cannot be read (not a directory, no
+	// permission) as NO-SOURCES — a failed look reported as absence.
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return []GlobalAgentsStatus{{Dir: agentsDir, State: GlobalAgentsUnreadable, Error: err.Error()}}
+	}
+	var sources []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".md") {
+			sources = append(sources, filepath.Join(agentsDir, entry.Name()))
+		}
 	}
 	if len(sources) == 0 {
 		return []GlobalAgentsStatus{{Dir: agentsDir, State: GlobalAgentsNoSources}}
