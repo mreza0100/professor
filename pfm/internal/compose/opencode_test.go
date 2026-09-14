@@ -53,6 +53,59 @@ func TestOpencodeSessionsBecomeResumeRows(t *testing.T) {
 	}
 }
 
+// An OpenCode session with prompts but zero assistant messages was opened
+// and never answered — exactly as empty as a Claude transcript with no
+// visible turns. It must be suppressed in the default view and counted in
+// SuppressedCount, never shown as if it were a real chat.
+func TestOpencodeSessionWithNoAssistantReplyIsSuppressed(t *testing.T) {
+	output := Compose(Input{
+		OcSessions: []store.OcSession{
+			{
+				ID: "ses_unanswered", Title: "unanswered", Directory: "/work/a", ProjectDir: "/work/a",
+				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 0,
+			},
+		},
+		Options: Options{View: DefaultView},
+	})
+	for _, row := range output.Rows {
+		if row.ID == "ses_unanswered" {
+			t.Fatalf("an unanswered OpenCode session earned a row: %+v", row)
+		}
+	}
+	if output.SuppressedCount != 1 {
+		t.Fatalf("SuppressedCount = %d, want 1 for the unanswered session", output.SuppressedCount)
+	}
+}
+
+// An OpenCode session with at least one prompt AND at least one assistant
+// reply is a real, answered chat and must be shown.
+func TestOpencodeSessionWithAssistantReplyIsShown(t *testing.T) {
+	output := Compose(Input{
+		OcSessions: []store.OcSession{
+			{
+				ID: "ses_answered", Title: "answered", Directory: "/work/a", ProjectDir: "/work/a",
+				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 1,
+			},
+		},
+		Options: Options{View: DefaultView},
+	})
+	found := false
+	for _, row := range output.Rows {
+		if row.ID == "ses_answered" {
+			found = true
+			if row.PromptCount != 1 {
+				t.Fatalf("answered session PromptCount = %d, want 1 (never fudged)", row.PromptCount)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("an answered OpenCode session was suppressed: %+v", output)
+	}
+	if output.SuppressedCount != 0 {
+		t.Fatalf("SuppressedCount = %d, want 0 for the answered session", output.SuppressedCount)
+	}
+}
+
 func TestOpencodeKilledSessionsAreOmittedAndCounted(t *testing.T) {
 	killedAt := int64(12345)
 	output := Compose(Input{

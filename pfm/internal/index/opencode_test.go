@@ -169,16 +169,17 @@ func TestReadOpencodeSessionsReadsTheFixtureStore(t *testing.T) {
 	}
 	got := sessions[rootSession]
 	want := struct {
-		title        string
-		projectDir   string
-		agent        string
-		model        string
-		firstPrompt  string
-		promptCount  int64
-		tokensInput  int64
-		tokensOutput int64
-		costMilli    int64
-	}{"Ramsey attack", "/work/nuts", "plan", "openai/m2", "prove the bound", 2, 150, 35, 150000}
+		title          string
+		projectDir     string
+		agent          string
+		model          string
+		firstPrompt    string
+		promptCount    int64
+		assistantCount int64
+		tokensInput    int64
+		tokensOutput   int64
+		costMilli      int64
+	}{"Ramsey attack", "/work/nuts", "plan", "openai/m2", "prove the bound", 2, 2, 150, 35, 150000}
 	switch {
 	case got.Title != want.title:
 		t.Errorf("title = %q, want %q", got.Title, want.title)
@@ -192,6 +193,8 @@ func TestReadOpencodeSessionsReadsTheFixtureStore(t *testing.T) {
 		t.Errorf("first prompt = %q, want %q", got.FirstPrompt, want.firstPrompt)
 	case got.PromptCount != want.promptCount:
 		t.Errorf("prompt count = %d, want %d", got.PromptCount, want.promptCount)
+	case got.AssistantCount != want.assistantCount:
+		t.Errorf("assistant count = %d, want %d", got.AssistantCount, want.assistantCount)
 	case got.TokensInput != want.tokensInput:
 		t.Errorf("tokens input = %d, want %d", got.TokensInput, want.tokensInput)
 	case got.TokensOutput != want.tokensOutput:
@@ -199,9 +202,14 @@ func TestReadOpencodeSessionsReadsTheFixtureStore(t *testing.T) {
 	case got.CostMillicents != want.costMilli:
 		t.Errorf("cost millicents = %d, want %d", got.CostMillicents, want.costMilli)
 	}
+	// ses_child has one user prompt (m3) and zero assistant messages — a
+	// session opened and never answered, the exact shape defaultEligible
+	// must treat as empty.
 	child, found := byID["ses_child"]
 	if !found || sessions[child].ParentID != "ses_root" {
 		t.Errorf("child session lost or unparented: %#v", sessions)
+	} else if sessions[child].PromptCount != 1 || sessions[child].AssistantCount != 0 {
+		t.Errorf("unanswered child session = %#v, want prompt_count=1 assistant_count=0", sessions[child])
 	}
 	empty, found := byID["ses_gone"]
 	if !found {

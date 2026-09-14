@@ -185,20 +185,6 @@ func TestChatNewDefaultsToRequestScopedCallerCWD(t *testing.T) {
 	}
 }
 
-func TestChatGoalUsesRequestIdentity(t *testing.T) {
-	service := metadataIdentityService(t)
-	protocol := connectInMemory(t, service.Server())
-	alpha := mcp.Meta{"threadId": "thread-a"}
-
-	goal := callToolWithMeta[InjectOutput](
-		t, protocol.clientSession, "chat_goal", alpha,
-		GoalInput{Goal: "finish the request-scoped protocol stress test"},
-	)
-	if goal.Code != 0 || !goal.Typed || goal.Unsigned {
-		t.Fatalf("chat_goal = %+v", goal)
-	}
-}
-
 // metadataThenSpawner keeps a valid self-compact call inside the test process.
 // CommandThenSpawner deliberately uses os.Executable; under go test that is
 // the test binary, so launching it as `internal then` would recursively rerun

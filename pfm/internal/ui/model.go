@@ -946,7 +946,7 @@ func (model *Model) wakeSky() tea.Cmd {
 func liveSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
 	for _, row := range rows {
-		if row.Socket != "" && isLiveNameGroupRow(row.Kind) {
+		if row.Socket != "" && isNameGroupRow(row.Kind) {
 			sockets[row.Socket] = true
 		}
 	}
@@ -1303,7 +1303,7 @@ func (model *Model) rebuildOrder() {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
 			row := model.rows[index]
-			if !model.visibleInView(row) || !isLiveNameGroupRow(row.Kind) {
+			if !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
 				continue
 			}
 			if prefix, ok := nameGroupPrefix(row.Name); ok {
@@ -1358,7 +1358,7 @@ func (model *Model) rebuildOrder() {
 			// because that path emits the member list and skips the row it was
 			// called for.
 			grouped = grouped &&
-				isLiveNameGroupRow(model.rows[index].Kind) &&
+				isNameGroupRow(model.rows[index].Kind) &&
 				len(members[prefix]) >= 1
 			if !grouped {
 				model.order = append(model.order, index)
@@ -1405,8 +1405,12 @@ func nameGroupPrefix(name string) (string, bool) {
 	return prefix, true
 }
 
-func isLiveNameGroupRow(kind compose.Kind) bool {
-	return isLive(kind) || kind == compose.Agent || kind == compose.Booting
+// isNameGroupRow admits every kind a GROUP:NAME can fold into a panel: live,
+// Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
+// with its live namesakes exactly like a live row would.
+func isNameGroupRow(kind compose.Kind) bool {
+	return isLive(kind) || kind == compose.Agent || kind == compose.Booting ||
+		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpencode
 }
 
 func (model *Model) refilter(follow string, fallback int) {

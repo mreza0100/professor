@@ -15,13 +15,19 @@ type OcSession struct {
 	ProjectDir string
 	// ParentID is non-empty for subagent sessions — children spawned by an
 	// agent turn. They never earn picker rows of their own.
-	ParentID     string
-	Agent        string
-	Model        string
-	FirstPrompt  string
-	PromptCount  int64
-	TokensInput  int64
-	TokensOutput int64
+	ParentID    string
+	Agent       string
+	Model       string
+	FirstPrompt string
+	PromptCount int64
+	// AssistantCount is the number of assistant messages the session holds.
+	// PromptCount alone cannot tell an answered session from one the user
+	// opened and never got a reply in — a session with prompts but zero
+	// assistant messages is exactly as empty as a Claude transcript with no
+	// visible turns, and the picker's suppression law treats it that way.
+	AssistantCount int64
+	TokensInput    int64
+	TokensOutput   int64
 	// CostMillicents keeps the session's cumulative cost in integer
 	// millicents — SQLite has no decimal and float money drifts.
 	CostMillicents int64

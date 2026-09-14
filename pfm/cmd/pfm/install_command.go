@@ -12,6 +12,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/updatecheck"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real
@@ -74,7 +75,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	preflight := printDependencyDoctor(context.Background(), stdout, entries, deps.ProbeOptions{
+	preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
 		SkipHarvest: *skipHarvest, SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex}, Provisioning: true,
 	})
 	if preflight != 0 && mode == installer.ModeApply {
@@ -153,7 +154,7 @@ func professorThemeManifestURL(currentVersion string) string {
 	if reference == "" || reference == "dev" {
 		reference = "main"
 	}
-	return "https://raw.githubusercontent.com/mreza0100/professor/" + reference + "/templates/themes/sources.json"
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
 }
 
 func newInstallerOptions(

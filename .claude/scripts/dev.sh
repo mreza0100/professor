@@ -248,14 +248,17 @@ act_templates() { # the shipped product: mechanical gates, no build
       # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
       # registers the entry, a stricter runtime silently drops it, and no prompt
       # rule can see it. The script distinguishes its own broken state from a
-      # clean tree (exit 2 toolchain, 3 empty scan, 1 real failure).
+      # clean tree (exit 2 toolchain, 3 empty scan, 4 git could not list the
+      # repository, 1 real failure); any other exit is the script crashing.
       if scripts/description-check.sh; then
         ok "every tracked frontmatter parses; description budget reported above"
       else
         case $? in
+          1) fail_step "a tracked frontmatter does not parse as YAML — quote the value or remove the bare ': ' (see the list above)" ;;
           2) fail_step "description-check could not run (python3/PyYAML absent) — NO frontmatter was parsed" ;;
           3) fail_step "description-check scanned nothing — the SCAN is broken, not the tree" ;;
-          *) fail_step "a tracked frontmatter does not parse as YAML — quote the value or remove the bare ': ' (see the list above)" ;;
+          4) fail_step "description-check could not locate or list the repository through git — NO frontmatter was parsed" ;;
+          *) fail_step "description-check crashed (exit $?) — NOT a verdict on the tree" ;;
         esac
       fi
 
@@ -422,14 +425,20 @@ cmd_iso() { # cmd_iso <action> [project]
   export PFM_DEV_WORKTREE="$REPO_ROOT"
   export PFM_DEV_GIT_COMMON="$git_common"
   export PFM_DEV_GIT_DIR_REL="$git_dir_relative"
+  # The leak denylist is untracked and lives only in the main checkout, so a
+  # linked worktree's mount never carries it; hand it in read-only (LEAK_TERMS
+  # wins). Without one the in-fence leak gate fails loudly — never a fake pass.
+  local terms="${LEAK_TERMS:-$(dirname "$git_common")/scripts/leak-terms.txt}"
+  local extra=()
+  [[ -f "$terms" ]] && extra=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)
-      docker compose -f "$compose" run --rm --build pfm-dev zsh -c "$proof; exec zsh -i" ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     e2e)
-      docker compose -f "$compose" run --rm --build pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
     install|build|typecheck|verify|test|all|status)
-      docker compose -f "$compose" run --rm --build pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     *)
       echo "usage: dev.sh iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]" >&2; exit 2 ;;
   esac

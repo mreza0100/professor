@@ -35,9 +35,9 @@ const (
 const selfCompactDescription = "Compacts THIS chat in place after its turn settles and KEEPS the session (crons, sub-agents, pane) — the only answer to \"compact yourself\" / \"self-compact at this milestone\", this tool and nothing else, never a hand-typed /compact. Call chat_self_compact{focus:\"one line\", then:\"one steer\"} — exactly ONE post-compact steer, a string never a list. Only focus and then cross the boundary — write durable state to disk FIRST. END THE TURN IMMEDIATELY after it returns, run no further tool; more work lands the steer beside the compaction. Main chat only — a sub-agent has no pane."
 
 var chatToolNames = []string{
-	"chat_capture", "chat_find", "chat_goal", "chat_inject",
+	"chat_capture", "chat_find", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
-	"chat_new", "chat_open", "chat_read", "chat_reload", "chat_resolve",
+	"chat_new", "chat_open", "chat_read", "chat_resolve",
 	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
 	"chat_whoami", "issue_servicedesk",
 }
@@ -111,7 +111,7 @@ func newService(version string, backend *backend) *Service {
 		Name:    "pfm",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: "The local pfm chat fleet — cross-chat communication between independent running chats, never parent/child agent communication (a sub-agent returns its result and its parent reads it; neither holds a reason to call any chat_* verb). Routing — \"send / tell / message / reply to / inject into chat X\" is chat_inject; \"compact yourself / self-compact at this milestone\" is chat_self_compact; \"fire this compiled /goal\" is chat_goal; \"who am I / my address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn / start a new chat\" is chat_new; \"is chat X idle, what is it doing\" is chat_status; \"what did X answer last\" is chat_last; \"find / read an old transcript\" is chat_find then chat_read; \"dump my transcript to a file\" is chat_save. Every target names a chat except chat_save's, which is a file path. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands.",
+		Instructions: "The local pfm chat fleet — cross-chat communication between independent running chats, never parent/child agent communication (a sub-agent returns its result and its parent reads it; neither holds a reason to call any chat_* verb). Routing — \"send / tell / message / reply to / inject into chat X\" is chat_inject; \"compact yourself / self-compact at this milestone\" is chat_self_compact; \"who am I / my address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn / start a new chat\" is chat_new; \"is chat X idle, what is it doing\" is chat_status; \"what did X answer last\" is chat_last; \"find / read an old transcript\" is chat_find then chat_read; \"dump my transcript to a file\" is chat_save. Every target names a chat except chat_save's, which is a file path. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands.",
 	})
 	service := &Service{server: server, backend: backend}
 	service.register()
@@ -156,9 +156,6 @@ func (service *Service) register() {
 		Description: selfCompactDescription,
 		Annotations: mutating,
 	}, service.chatSelfCompact)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_goal", Description: "Fires an already-compiled one-line /goal body at a live chat — \"run this goal in chat X\", or in the requesting chat. Call chat_goal{goal:\"…\"} (self) or chat_goal{target:\"my-chat\", goal:\"…\"}. Cross-chat or self only — a sub-agent returns its result to its parent and never fires a goal at it. Returns the chat_inject receipt (delivered, queued, refused…); not_found = no such chat; a tool error = the body was empty, multi-line, over 4000 chars, or delivery broke.", Annotations: mutating,
-	}, service.chatGoal)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_keys",
 		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call chat_keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use chat_inject; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
@@ -205,9 +202,6 @@ func (service *Service) register() {
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name: "chat_unkill", Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.", Annotations: mutating,
 	}, service.chatUnkill)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_reload", Description: "Reboots a LIVE chat in place, same conversation — \"reload chat X\". Call chat_reload{target:\"my-chat\"} — target only; an account switch, cache mode, or --then follow-up needs the shell form pfm chat reload [--account N] [--1h on|off] [--then \"prompt\"], every setting a flag. Returns status ok; a tool error = the target is not live (no tmux socket) or the reload failed. To compact rather than reboot, chat_self_compact.", Annotations: mutating,
-	}, service.chatReload)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name: "chat_save", Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.", Annotations: mutating,
 	}, service.chatSave)

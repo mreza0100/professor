@@ -31,10 +31,10 @@ The `claude` and `codex` executables are not installed by `pfm`. Their self-doct
 
 No clone, no Go toolchain. The installer's own assets (command cards, launcher shim, scheduler units) are embedded in the binary.
 
-Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/mreza0100/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
+Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/rezzminator/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
 OS=linux      # or darwin
@@ -112,7 +112,7 @@ Optional `cc-memory-wire.sh` and `cc-memory-consolidate.sh` helpers become `memo
 ## 2. Build from source — `pfm` only
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 SOURCE_DIR="$HOME/.professor"
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
@@ -124,9 +124,10 @@ GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -l
 
 Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.24.13 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
-The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path:
+The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
 ```bash
+cd "$HOME/.professor"
 pfm install
 pfm install --yes
 ```
@@ -199,6 +200,8 @@ Each tier has one source of truth and one update mechanism:
 | Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
+
+**Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
 
 The project flow is deliberately non-destructive:
 

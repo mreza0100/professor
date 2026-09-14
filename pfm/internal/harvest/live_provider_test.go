@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,25 +24,25 @@ const (
 // provider requires the caller to inspect its status line and does not turn an
 // unavailable mirror into a download pass.
 func TestLiveProviderSciHub(t *testing.T) {
-	runLiveProvider(t, "scihub", "https://sci-hub.ee/", func(ctx context.Context, h *Harvester) Result {
+	runLiveProvider(t, "scihub", liveMirrorURL("scihub"), func(ctx context.Context, h *Harvester) Result {
 		return h.fetchSciHub(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
 
 func TestLiveProviderSciDB(t *testing.T) {
-	runLiveProvider(t, "scidb", "https://annas-archive.gl", func(ctx context.Context, h *Harvester) Result {
+	runLiveProvider(t, "scidb", liveMirrorURL("scidb"), func(ctx context.Context, h *Harvester) Result {
 		return h.fetchSciDBDOI(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
 
 func TestLiveProviderAnna(t *testing.T) {
-	runLiveProvider(t, "annas", "https://annas-archive.gl", func(ctx context.Context, h *Harvester) Result {
+	runLiveProvider(t, "annas", liveMirrorURL("annas"), func(ctx context.Context, h *Harvester) Result {
 		return h.fetchAnnasMD5(ctx, liveRequestedDOI(), liveProviderMD5, FetchOptions{})
 	})
 }
 
 func TestLiveProviderLibGen(t *testing.T) {
-	runLiveProvider(t, "libgen", "https://libgen.vg", func(ctx context.Context, h *Harvester) Result {
+	runLiveProvider(t, "libgen", liveMirrorURL("libgen"), func(ctx context.Context, h *Harvester) Result {
 		return h.fetchLibGenDOI(ctx, liveRequestedDOI(), FetchOptions{})
 	})
 }
@@ -83,10 +84,10 @@ func TestLiveFetchRequestedDOI(t *testing.T) {
 	h, err := New(Options{
 		CacheDir:         cacheDir,
 		Converter:        worker,
-		SciHubURL:        "https://sci-hub.ee/",
-		AnnasURL:         "https://annas-archive.gl",
-		SciDBURL:         "https://annas-archive.gl",
-		LibGenURL:        "https://libgen.vg",
+		SciHubURL:        liveMirrorURL("scihub"),
+		AnnasURL:         liveMirrorURL("annas"),
+		SciDBURL:         liveMirrorURL("scidb"),
+		LibGenURL:        liveMirrorURL("libgen"),
 		GoogleScholarURL: "https://scholar.google.com",
 		ContactEmail:     strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT")),
 	})
@@ -137,6 +138,9 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	if !liveProviderSelected(name) {
 		t.Skipf("provider=%s status=opt-in-required kind= chars=0 valid=false complete=false receipt_safe=false", name)
+	}
+	if env, mirror := liveMirrorEnv[name]; mirror && baseURL == "" {
+		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false — set %s to the mirror's base URL", name, env)
 	}
 	python, script := strings.TrimSpace(os.Getenv("HARVESTER_LIVE_PYTHON")), strings.TrimSpace(os.Getenv("HARVESTER_LIVE_SCRIPT"))
 	if python == "" || script == "" {
@@ -199,6 +203,39 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	if !valid {
 		t.Errorf("provider=%s did not produce a valid public artifact", name)
 	}
+}
+
+// liveMirrorEnv names the variable carrying each shadow-library mirror's base
+// URL. Mirror hosts are private configuration — they live in the operator's
+// harvester config, never in tracked source — so a live run supplies them.
+var liveMirrorEnv = map[string]string{
+	"scihub": "HARVESTER_LIVE_SCIHUB_URL",
+	"scidb":  "HARVESTER_LIVE_SCIDB_URL",
+	"annas":  "HARVESTER_LIVE_ANNAS_URL",
+	"libgen": "HARVESTER_LIVE_LIBGEN_URL",
+}
+
+func liveMirrorURL(name string) string {
+	return strings.TrimSpace(os.Getenv(liveMirrorEnv[name]))
+}
+
+// liveProviderSecrets lists every acquisition host and the contact address a
+// public receipt must never carry: the configured mirror hosts plus the
+// public providers' API hosts.
+func liveProviderSecrets(contact string) []string {
+	secrets := []string{"scholar.google.com", "api.unpaywall.org", "pmc.ncbi.nlm.nih.gov", contact}
+	for _, name := range []string{"scihub", "scidb", "annas", "libgen"} {
+		raw := liveMirrorURL(name)
+		if raw == "" {
+			continue
+		}
+		if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
+			secrets = append(secrets, parsed.Host)
+		} else {
+			secrets = append(secrets, raw)
+		}
+	}
+	return secrets
 }
 
 func liveProviderSelected(name string) bool {
@@ -299,7 +336,7 @@ func liveReceiptSafe(result Result, contact string) bool {
 		return false
 	}
 	text := string(receipt)
-	for _, secret := range []string{"sci-hub.ee", "annas-archive.gl", "libgen.vg", "scholar.google.com", "api.unpaywall.org", "pmc.ncbi.nlm.nih.gov", contact} {
+	for _, secret := range liveProviderSecrets(contact) {
 		if secret != "" && strings.Contains(text, secret) {
 			return false
 		}
@@ -326,7 +363,7 @@ func liveArtifactMetadataSafe(result Result, contact string) bool {
 	} else if len(content) > 4096 {
 		content = content[:4096]
 	}
-	for _, secret := range []string{"sci-hub.ee", "annas-archive.gl", "libgen.vg", "scholar.google.com", "api.unpaywall.org", "pmc.ncbi.nlm.nih.gov", contact} {
+	for _, secret := range liveProviderSecrets(contact) {
 		if secret != "" && strings.Contains(strings.ToLower(content), strings.ToLower(secret)) {
 			return false
 		}

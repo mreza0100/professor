@@ -431,3 +431,111 @@ func TestV4MigrationAddsCxNameProvenanceIdempotently(t *testing.T) {
 		t.Fatalf("pre-v4 row after reopen = %#v", record)
 	}
 }
+
+// hasOcSessionsAssistantCount reports whether oc_sessions carries the
+// additive assistant_count column, read directly via PRAGMA table_info so
+// the check never depends on the ensure step it is proving.
+func hasOcSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	rows, err := db.Query("PRAGMA table_info(oc_sessions)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "assistant_count" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFreshStoreEnsuresAssistantCountAtSchema8 pins the D1 ruling: the
+// assistant_count column is additive and ENSURED, never versioned. A fresh
+// store settles at user_version 8 (the hardcoded literal, not the symbolic
+// SchemaVersion — a database an older pfm on the same machine must still be
+// able to open) with the column already present.
+func TestFreshStoreEnsuresAssistantCountAtSchema8(t *testing.T) {
+	setStoreTestJail(t)
+	fresh := openTestStore(t)
+	t.Cleanup(func() { _ = fresh.Close() })
+	got, err := fresh.UserVersion(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 8 {
+		t.Fatalf("UserVersion() = %d, want the hardcoded 8 — a schema bump for one additive column strands every older pfm on this machine", got)
+	}
+	if !hasOcSessionsAssistantCount(t, fresh.db) {
+		t.Fatal("fresh store has no oc_sessions.assistant_count column")
+	}
+}
+
+// TestEnsureOcSessionsAssistantCountAddsColumnIdempotently builds a database
+// at schema 8 the way an older pfm (before assistant_count existed) would
+// have left it — the v1..v8 migrations only, no assistant_count — and proves
+// the ensure step adds the column on open, round-trips it through
+// ReplaceOcSessions/OcSessions, and never fails when run twice.
+func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
+	dbPath := setStoreTestJail(t)
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range migrations {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, "PRAGMA user_version=8"); err != nil {
+		t.Fatal(err)
+	}
+	if hasOcSessionsAssistantCount(t, database) {
+		t.Fatal("fixture already carries assistant_count — it must start without the column")
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opened := openTestStore(t)
+	assertSchemaVersion(t, opened, SchemaVersion)
+	if !hasOcSessionsAssistantCount(t, opened.db) {
+		t.Fatal("opening a pre-assistant_count schema-8 database did not add the column")
+	}
+	if err := opened.ReplaceOcSessions(ctx, []OcSession{{ID: "ses-1", Title: "fixture", AssistantCount: 3}}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := opened.OcSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].AssistantCount != 3 {
+		t.Fatalf("round-tripped sessions = %#v, want one session with AssistantCount 3", sessions)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopening must not attempt ALTER TABLE a second time — that fails with
+	// "duplicate column name" — and the earlier row must survive untouched.
+	reopened := openTestStore(t)
+	t.Cleanup(func() { _ = reopened.Close() })
+	assertSchemaVersion(t, reopened, SchemaVersion)
+	sessions, err = reopened.OcSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].AssistantCount != 3 {
+		t.Fatalf("round-tripped sessions after reopen = %#v", sessions)
+	}
+}

@@ -326,3 +326,99 @@ func TestGlobalAgentsInstallLeavesAForeignSymlinkAlone(t *testing.T) {
 		t.Fatalf("foreign symlink was rewritten: now -> %s, want -> %s", resolved, elsewhere)
 	}
 }
+
+// TestGlobalAgentsLinkIntoEveryConfiguredClaudeConfigDir pins the fanout the
+// retire side already had: a host with two configured Claude accounts must
+// receive one agent link per account registry, not one link into the primary
+// while every other account silently has no global agents at all. Check mode
+// plans a link for BOTH dirs, build creates both, and a second check reports
+// nothing left to do.
+func TestGlobalAgentsLinkIntoEveryConfiguredClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+	writeTestFile(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	first := filepath.Join(home, ".claude")
+	second := filepath.Join(home, ".claude2")
+	options := GlobalAgentsOptions{Home: home, ClaudeConfigDirs: []string{first, second}}
+
+	options.Mode = ModeCheck
+	plan, err := RunGlobalAgents(options)
+	if err != nil {
+		t.Fatalf("RunGlobalAgents check: %v", err)
+	}
+	for _, want := range []string{
+		filepath.Join(first, "agents", "alpha.md"),
+		filepath.Join(second, "agents", "alpha.md"),
+	} {
+		if !hasGlobalAgentLinkAction(plan.Actions, want, source) {
+			t.Fatalf("check mode planned no link for %s: %#v", want, plan.Actions)
+		}
+	}
+
+	options.Mode = ModeBuild
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("RunGlobalAgents build: %v", err)
+	}
+	assertGlobalSymlink(t, filepath.Join(first, "agents", "alpha.md"), source)
+	assertGlobalSymlink(t, filepath.Join(second, "agents", "alpha.md"), source)
+
+	options.Mode = ModeCheck
+	settled, err := RunGlobalAgents(options)
+	if err != nil {
+		t.Fatalf("RunGlobalAgents recheck: %v", err)
+	}
+	if len(settled.Actions) != 0 || len(settled.Problems) != 0 {
+		t.Fatalf("a settled install still reports work: actions=%#v problems=%#v", settled.Actions, settled.Problems)
+	}
+}
+
+// TestGlobalAgentsTolerateAnAliasedAccountRegistry is the real host shape:
+// the second account's agents/ registry is itself a directory symlink into
+// the first account's registry. Both desired targets resolve to the same
+// physical file, so build must converge with no error and a recheck must
+// report zero actions and zero problems — never a CONFLICT, and never an
+// "file exists" failure from linking the same physical path twice.
+func TestGlobalAgentsTolerateAnAliasedAccountRegistry(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")
+	writeTestFile(t, source, "---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	first := filepath.Join(home, ".claude")
+	second := filepath.Join(home, ".claude2")
+	if err := os.MkdirAll(filepath.Join(first, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(first, "agents"), filepath.Join(second, "agents")); err != nil {
+		t.Fatal(err)
+	}
+	options := GlobalAgentsOptions{Home: home, ClaudeConfigDirs: []string{first, second}, Mode: ModeBuild}
+
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("RunGlobalAgents build over an aliased registry: %v", err)
+	}
+	assertGlobalSymlink(t, filepath.Join(second, "agents", "alpha.md"), source)
+
+	options.Mode = ModeCheck
+	settled, err := RunGlobalAgents(options)
+	if err != nil {
+		t.Fatalf("RunGlobalAgents recheck: %v", err)
+	}
+	if len(settled.Actions) != 0 || len(settled.Problems) != 0 {
+		t.Fatalf("an aliased registry is not settled: actions=%#v problems=%#v", settled.Actions, settled.Problems)
+	}
+}
+
+// hasGlobalAgentLinkAction reports whether the plan carries the exact link
+// action for one desired target — an action list that merely has the right
+// LENGTH would pass while pointing everywhere but the account that is missing
+// its agents.
+func hasGlobalAgentLinkAction(actions []GlobalAgentAction, path, target string) bool {
+	for _, action := range actions {
+		if action.Kind == "link" && action.Path == path && action.Target == target {
+			return true
+		}
+	}
+	return false
+}

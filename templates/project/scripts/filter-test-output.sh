@@ -31,12 +31,15 @@ _filter() {
 # (`;`, `&&`, `||`, `|`, subshell parens), strip leading VAR=val assignments and the
 # wrappers (timeout/time/env/nice/sudo), then require the runner as the command word:
 # a bare/path runner, `python -m pytest`, `uv run pytest`, `{pm} [run] test|integration|e2e`,
-# `npx|pnpm [exec] vitest|jest|mocha|cucumber|playwright test`.
+# `npx|pnpm [exec] vitest|jest|mocha|cucumber|playwright test`, a toolchain's own test verb
+# (`go|cargo|dotnet|swift|mix|deno|bun test`, `cargo nextest`), `rspec` / `bundle exec rspec`,
+# `phpunit`, `ctest`, `mvn|gradle … test`, and `make test|check`. A runner missing here is
+# never filtered — its raw output stands; add its pattern to this regex.
 _is_test_cmd() {
   printf '%s\n' "$1" \
     | sed -E 's/(&&|\|\||\||;|\(|\))/\n/g' \
     | sed -E 's/^[[:space:]]+//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//; s/^((timeout|time|env|nice|sudo)([[:space:]]+-[^[:space:]]+)*([[:space:]]+[0-9]+[smhd]?)?[[:space:]]+)*//' \
-    | grep -qE '^([^[:space:]]*/)?(pytest|vitest|jest|mocha|cucumber(-js)?)([[:space:]]|$)|^([^[:space:]]*/)?python[0-9.]*[[:space:]]+-m[[:space:]]+pytest([[:space:]]|$)|^uv[[:space:]]+run[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*pytest([[:space:]]|$)|^(pnpm|npm|yarn|bun)[[:space:]]+(run[[:space:]]+)?(test|integration|e2e)([:[:space:]]|$)|^(npx|pnpm|bunx)[[:space:]]+(exec[[:space:]]+)?(playwright[[:space:]]+test|vitest|jest|mocha|cucumber(-js)?)([[:space:]]|$)|^([^[:space:]]*/)?playwright[[:space:]]+test([[:space:]]|$)'
+    | grep -qE '^([^[:space:]]*/)?(pytest|vitest|jest|mocha|cucumber(-js)?)([[:space:]]|$)|^([^[:space:]]*/)?python[0-9.]*[[:space:]]+-m[[:space:]]+pytest([[:space:]]|$)|^uv[[:space:]]+run[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*pytest([[:space:]]|$)|^(pnpm|npm|yarn|bun)[[:space:]]+(run[[:space:]]+)?(test|integration|e2e)([:[:space:]]|$)|^(npx|pnpm|bunx)[[:space:]]+(exec[[:space:]]+)?(playwright[[:space:]]+test|vitest|jest|mocha|cucumber(-js)?)([[:space:]]|$)|^([^[:space:]]*/)?playwright[[:space:]]+test([[:space:]]|$)|^([^[:space:]]*/)?(go|cargo|dotnet|swift|mix|deno|bun)[[:space:]]+test([[:space:]]|$)|^cargo[[:space:]]+nextest[[:space:]]|^(bundle[[:space:]]+exec[[:space:]]+)?([^[:space:]]*/)?(rspec|phpunit|ctest)([[:space:]]|$)|^([^[:space:]]*/)?(mvnw?|gradlew?)([[:space:]]+[^[:space:]]+)*[[:space:]]+test([[:space:]]|$)|^make[[:space:]]+(test|check)([[:space:]]|$)'
 }
 
 # --- PIPE mode ---

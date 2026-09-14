@@ -81,6 +81,24 @@ func ReadSourceRepoMarker(home string) (string, error) {
 	return repo, nil
 }
 
+// reportSourceRepoMarker names, never silences, the state of an install run
+// with no --repo: the existing marker (kept as is), its absence (a named
+// skip — never rendered as if nothing were expected there), or any other
+// read failure (returned with context, an error is never absence).
+func (installer *engine) reportSourceRepoMarker() error {
+	recorded, err := ReadSourceRepoMarker(installer.options.Home)
+	switch {
+	case err == nil:
+		installer.ok(SourceRepoPath(installer.options.Home) + " (kept: " + recorded + ")")
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+		installer.skip("source repository not found — run pfm install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it")
+		return nil
+	default:
+		return fmt.Errorf("check source repository marker: %w", err)
+	}
+}
+
 func binaryOwnershipPath(home string) string {
 	return filepath.Join(managedRootForHome(home), binaryOwnershipName)
 }

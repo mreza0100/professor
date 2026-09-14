@@ -16,7 +16,7 @@ Two mechanisms ship on every tag: the portable blueprint tree (this repo, at `te
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated git tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push.
+[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated git tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`: the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
 
 | Bump | When | Adopter impact |
 | --- | --- | --- |
@@ -37,22 +37,18 @@ Bullets carry a category prefix and optional trailing tags, both read at update 
 
 ## Cutting a release
 
-Maintainer command: `/pfm:release {patch|minor|major} "{summary}"`.
+Maintainer command: `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}]`, run in this repo (the upstream itself) only on an explicit publish request. The command file (`.claude/commands/pfm/release.md`) is the procedure; its phases:
 
-Run from inside the live source project against the local clone at `{BLUEPRINT_CLONE_PATH}` — the only working copy — targeting the public repo (`{BLUEPRINT_REPO}`, GH user `{GH_USER}`).
+1. **Pre-flight** — owner auth, the `main-release-only` ruleset intact (pull request, green checks, no force-push, no deletion), `develop` fast-forwarded and containing `origin/main`.
+2. **Two worktrees** — `.worktrees/release/main` detached at `origin/main` (stable) and `.worktrees/release/develop` on `release/v{X.Y.Z}` (candidate). All release work lands in the candidate; the live checkout is never swept.
+3. **Scope** — `refresh-scope.sh ledgers` sweeps every linked `.professor/release.md`; with `--from`, the refresh pass re-derives `templates/**` from the live source per `docs/commands/pfm/references/refresh.md`.
+4. **Review** — reviewers read `origin/main...HEAD` per area and return defects plus bullets for un-ledgered changes; every defect is verified against the code, then fixed and committed on the candidate.
+5. **Notes** — `releases/v{X.Y.Z}.md` from the ledger bullets (verbatim) and the reviewers' bullets, the `CHANGELOG.md` index line, `VERSION`, the self-hosted install ledger.
+6. **Gates** — both worktrees run `dev.sh iso all` per project and `dev.sh iso e2e`; a stable red is inherited, a candidate red is fixed.
+7. **Rehearsal** — a Codex model installs the stable release on a fenced adopter machine exactly as the stable docs say, then updates it to the candidate exactly as the candidate's docs say (`infra/release-rehearsal.sh`, `docs/commands/pfm/references/release-rehearsal.md`); every friction is fixed, the machine reverted to its stable snapshot, and the update re-run until CLEAN.
+8. **Ship** — `develop` fast-forwards onto the candidate, `leak-check.sh` runs clean, `develop` is pushed, and the `develop → main` pull request merges on green checks; the annotated tag lands on the merge commit and `develop` fast-forwards back onto `main`. `develop` then opens the next `-alpha` line.
 
-1. **Update-gate.** `baseline-sync.sh` checks the clone isn't behind published tags for reasons other than this repo's own prior publish round-trip; a genuine peer-content gap forces updating the install from the clone first.
-2. **Sync the clone** — `git fetch && git pull --ff-only origin main` (stop on failure).
-3. **Refresh pass**, scoped by `templates/refresh-map.json`: `refresh-scope.sh scan` hashes every live source — unchanged sources skip their templates, changed sources (plus anything named in `.professor/release.md`) get re-derived, unmapped live files get a mapping ruling, `curated` templates are never auto-derived. Then execute `docs/commands/pfm/references/refresh.md` over that scope: `scripts/genericize.sh` runs the deterministic placeholder pass first (`scripts/placeholder-map.tsv`), hand-judgment covers structure only (roster collapsing, domain nouns, persona metaphors). `refresh-scope.sh regen` re-baselines the hashes afterward.
-4. **Compute the new version** from `VERSION` + the bump type.
-5. **Build changelog bullets** from `.professor/release.md` (already-final, copied verbatim — never re-authored). Bullets touching a `sources.json` skill ship to that skill's own public repo first, then get rewritten as a version-pointer bullet.
-6. **Write `releases/v{X.Y.Z}.md`**, prepend the index line to `CHANGELOG.md`.
-7. **Reconcile hand-curated docs** — `README.md` + `BLUEPRINT.md`'s cast/command/skill lists must match `templates/`; the README's "any repo, any stack" promise is the contract to keep, never downgrade.
-8. `echo "{X.Y.Z}" > VERSION`.
-9. **Gate, then ship:** `leak-check.sh` clean on the staged diff (brand names current+former, PII, machine-absolute home paths, secrets) → commit (`release: v{X.Y.Z} — {summary}`) → annotated tag `v{X.Y.Z}` → `git push origin main --follow-tags` (never force-push).
-10. Clear `.professor/release.md`'s pending entries (keep the header), then report the tag URL, commit, source SHA, and changelog bullets.
-
-**Never:** push secrets or project identifiers (current/former brand, PII, internal URLs, machine-absolute home paths), force-push, ship a Tier A character with empty placeholders, or auto-bump the README version without re-checking the templates it describes.
+**Never:** push secrets or project identifiers (current/former brand, PII, internal URLs, machine-absolute home paths), force-push, push to `main` directly, ship a Tier A character with empty placeholders, publish a candidate whose rehearsal did not end CLEAN, or auto-bump the README version without re-checking the templates it describes.
 
 ## What the tag push triggers
 
@@ -65,7 +61,7 @@ A `v*` tag push (or manual `workflow_dispatch`) runs on GitHub Actions:
 3. **Require authored notes** — fails the run if `releases/{tag}.md` doesn't exist; a tag with no hand-written release file cannot publish.
 4. **Publish the GitHub Release** — attaches the `pfm_*` binaries + `SHA256SUMS`, with `releases/{tag}.md` as the release body verbatim (`generate_release_notes: false` — no auto-summary, the authored file is the only source of truth for the release body).
 
-The authored-notes gate is why step 6 above (write `releases/v{X.Y.Z}.md` *before* tagging) is not optional — the tag push fails release assembly without it.
+The authored-notes gate is why phase 5 above (write `releases/v{X.Y.Z}.md` *before* tagging) is not optional — the tag push fails release assembly without it.
 
 ---
 
@@ -73,4 +69,4 @@ The authored-notes gate is why step 6 above (write `releases/v{X.Y.Z}.md` *befor
 
 State lives in `.professor/` inside the adopter's project: `VERSION` (installed version), `manifest.json` (user-owned interview record), `baseline.json` (pfm-owned local-to-template pins), `drift.md` (optional local customization notes), and `release.md` (framework changes queued to publish upstream — swept by the framework repo's release flow).
 
-Run `pfm update` to advance the tagged clone, rebuild the binary, refresh machine-global links, and append the current project's report. Run `pfm update check` when only the read-only project report is wanted. For every `UPDATED` item, inspect the printed template diff, hand-apply what belongs in the local source, then run `pfm update pin <local>`. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` print their own `pin --template` or `drop` actions. An install that predates `pfm init` runs `pfm update adopt [--at <ref>]` once to create its baseline; `pfm update ignore <template>...` keeps an unwanted template out of `NEW`. Generated engine mirrors remain whole-file compiler outputs; symlinked machine-global files update through their blueprint original. Source-fetched skills (`templates/project/skills/sources.json`) update from their own repos — compare the installed `version:` frontmatter against the skill repo's latest tag; never downgrade. Project files are never regenerated or merged during update.
+First read every `releases/vX.Y.Z.md` between the installed version and the target and merge their `#### → For:` actions (`INSTALL.md` § Updating). Then run `pfm update` to advance the tagged clone, rebuild the binary, refresh machine-global links, and append the current project's report. Run `pfm update check` when only the read-only project report is wanted. For every `UPDATED` item, inspect the printed template diff, hand-apply what belongs in the local source, then run `pfm update pin <local>`. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` print their own `pin --template` or `drop` actions. An install that predates `pfm init` runs `pfm update adopt [--at <ref>]` once to create its baseline; `pfm update ignore <template>...` keeps an unwanted template out of `NEW`. Generated engine mirrors remain whole-file compiler outputs; symlinked machine-global files update through their blueprint original. Source-fetched skills (`templates/project/skills/sources.json`) update from their own repos — compare the installed `version:` frontmatter against the skill repo's latest tag; never downgrade. Project files are never regenerated or merged during update.

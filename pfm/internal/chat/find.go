@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -198,13 +197,11 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 // transcriptRange is the first and last record timestamps in a transcript.
 func transcriptRange(raw []byte) (string, string) {
 	var first, last string
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	for scanner.Scan() {
+	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		var record struct {
 			Timestamp string `json:"timestamp"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) == nil && record.Timestamp != "" {
+		if json.Unmarshal(line, &record) == nil && record.Timestamp != "" {
 			if first == "" {
 				first = record.Timestamp
 			}

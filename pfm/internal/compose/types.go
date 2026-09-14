@@ -128,11 +128,16 @@ type Row struct {
 	CWD         string
 	Size        int64
 	PromptCount int64
-	ActivityNS  int64
-	AgeNS       int64
-	Account     int
-	Accounts    []int
-	Killed      bool
+	// AssistantCount is set only for a ResumeOpencode row: an OpenCode
+	// session has no file size, so its reality signal is prompts answered,
+	// not bytes on disk. A session with prompts but no assistant reply is
+	// exactly as empty as a Claude transcript with no visible turns.
+	AssistantCount int64
+	ActivityNS     int64
+	AgeNS          int64
+	Account        int
+	Accounts       []int
+	Killed         bool
 	// NameKilled marks a row killed by its "_KILL…" label rather than by a
 	// store row: the picker's kill key cannot toggle it, because the label —
 	// not the killed table — is what keeps it out of the list.

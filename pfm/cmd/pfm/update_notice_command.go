@@ -19,7 +19,7 @@ import (
 	"hostops/pfm/internal/updatecheck"
 )
 
-const professorLatestReleaseURL = "https://github.com/mreza0100/professor/releases/latest"
+const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
 var startProfessorUpdateCheck = func(command *exec.Cmd) error {
 	if err := command.Start(); err != nil {
@@ -148,7 +148,9 @@ func openProfessorUpdate(
 func professorUpdatePrompt(row compose.Row) string {
 	target := strings.TrimPrefix(row.ID, "pfm-update-")
 	return "Professor " + target + " is available. Work only in this Professor source clone. " +
-		"First inspect the installed version and the " + target + " release notes, then present a concise overview of every change and migration impact. " +
-		"Ask the user for explicit approval before making any change. Only after approval, run `pfm update --to " + target + "`, then run `pfm doctor` and report the exact result. " +
+		"First run `pfm version` for the installed version and `git fetch --tags origin`, then read EVERY release-notes file after the installed version through " + target + ", oldest first, with `git show " + target + ":releases/vX.Y.Z.md` (`git show " + target + ":CHANGELOG.md` lists them) — skipping a release skips its migration actions. " +
+		"Merge their `#### → For:` actions into one checklist, a later release superseding an earlier one on the same surface, and mark each as before or after the update. " +
+		"Then present a concise overview of every change and migration impact, with that checklist. " +
+		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "`, work the rest of the checklist, then run `pfm doctor` and report the exact result of each step. " +
 		"Do not push, tag, publish, release, or edit the source manually."
 }

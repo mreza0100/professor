@@ -66,7 +66,7 @@ Host fleet tooling has one source outside the template tree: the Go engine under
 
 ```bash
 # Clone to any directory you like (use the latest release tag)
-git clone --branch vX.Y.Z https://github.com/mreza0100/professor.git /path/to/professor
+git clone --branch vX.Y.Z https://github.com/rezzminator/professor.git /path/to/professor
 
 cd /path/to/your-project
 pfm init .
@@ -139,7 +139,7 @@ The blueprint deliberately does NOT offer a "no character" mode. If you want ste
 
 This blueprint is **regenerated and published** from the live upstream source whenever its pipeline evolves. Each commit corresponds to a snapshot of a working production pipeline — not a theoretical design.
 
-Maintained by [@mreza0100](https://github.com/mreza0100). Issues and PRs welcome — but please open an issue first to discuss large changes, since the canonical source lives in the upstream project and edits flow downstream from there.
+Maintained by [@rezzminator](https://github.com/rezzminator). Issues and PRs welcome — but please open an issue first to discuss large changes, since the canonical source lives in the upstream project and edits flow downstream from there.
 
 ---
 
