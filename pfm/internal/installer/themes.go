@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -29,13 +30,28 @@ const (
 )
 
 type themeManifest struct {
-	Comment       string                 `json:"_comment,omitempty"`
-	SourceFetched map[string]themeSource `json:"source_fetched"`
+	Comment       string                  `json:"_comment,omitempty"`
+	SourceFetched map[string]themeSource  `json:"source_fetched,omitempty"`
+	Bundled       map[string]bundledTheme `json:"bundled,omitempty"`
 }
 
 type themeSource struct {
 	Repo     string `json:"repo"`
 	Raw      string `json:"raw"`
+	Target   string `json:"target"`
+	Activate string `json:"activate"`
+	Requires string `json:"requires"`
+	// local is the absolute path of a bundled palette read from the source
+	// clone; empty for a source-fetched theme or a bundled one resolved
+	// against the release manifest, both of which download Raw.
+	local string
+}
+
+// bundledTheme is a palette the blueprint ships itself under templates/themes/:
+// File names it beside sources.json, so it is read from the source clone
+// when the manifest is, or downloaded from beside the release manifest.
+type bundledTheme struct {
+	File     string `json:"file"`
 	Target   string `json:"target"`
 	Activate string `json:"activate"`
 	Requires string `json:"requires"`
@@ -100,13 +116,9 @@ func (installer *engine) installThemes(ctx context.Context) {
 			continue
 		}
 
-		content, fetchErr := fetchTheme(ctx, installer.options.ThemeHTTPClient, source.Raw)
-		if fetchErr != nil {
-			installer.skip("theme " + name + " fetch failed: " + fetchErr.Error())
-			continue
-		}
-		if !json.Valid(content) {
-			installer.skip("theme " + name + " fetch failed: response is not valid JSON")
+		content, loadErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, source)
+		if loadErr != nil {
+			installer.skip("theme " + name + " " + loadErr.Error())
 			continue
 		}
 		digest := contentSHA256(content)
@@ -203,18 +215,48 @@ func (installer *engine) uninstallThemes() {
 	}
 }
 
+// loadThemeContent returns a theme's palette bytes: a bundled palette from the
+// source clone is read from disk ("read failed: ..." names the path), anything
+// else is downloaded ("fetch failed: ..."); either way non-JSON is refused.
+func loadThemeContent(ctx context.Context, client *http.Client, source themeSource) ([]byte, error) {
+	var content []byte
+	if source.local != "" {
+		read, err := os.ReadFile(source.local)
+		if err != nil {
+			return nil, fmt.Errorf("read failed: %w", err)
+		}
+		content = read
+	} else {
+		fetched, err := fetchTheme(ctx, client, source.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetch failed: %w", err)
+		}
+		content = fetched
+	}
+	if !json.Valid(content) {
+		if source.local != "" {
+			return nil, fmt.Errorf("read failed: %s is not valid JSON", source.local)
+		}
+		return nil, errors.New("fetch failed: response is not valid JSON")
+	}
+	return content, nil
+}
+
 func loadThemeSources(ctx context.Context, options Options) (map[string]themeSource, error) {
 	var content []byte
 	var origin string
+	var localThemes string // templates/themes/ in the source clone when the manifest was read there
 	var err error
 	if strings.TrimSpace(options.SourceRepo) != "" {
 		origin = filepath.Join(options.SourceRepo, filepath.FromSlash(themeManifestRelative))
+		localThemes = filepath.Dir(origin)
 		content, err = os.ReadFile(origin)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				return nil, fmt.Errorf("read local manifest %s: %w", origin, err)
 			}
 			localErr := err
+			localThemes = ""
 			origin = strings.TrimSpace(options.ThemeManifestURL)
 			if origin == "" {
 				return nil, fmt.Errorf("read local manifest: %w; no release manifest URL is configured", localErr)
@@ -254,9 +296,10 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		}
 		return nil, fmt.Errorf("decode %s trailing content: %w", origin, err)
 	}
-	if len(manifest.SourceFetched) == 0 {
-		return nil, fmt.Errorf("manifest %s has no source_fetched themes", origin)
+	if len(manifest.SourceFetched) == 0 && len(manifest.Bundled) == 0 {
+		return nil, fmt.Errorf("manifest %s has no source_fetched or bundled themes", origin)
 	}
+	sources := make(map[string]themeSource, len(manifest.SourceFetched)+len(manifest.Bundled))
 	for name, source := range manifest.SourceFetched {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" || strings.TrimSpace(source.Target) == "" {
 			return nil, fmt.Errorf("manifest %s theme %q is missing name, raw, or target", origin, name)
@@ -264,8 +307,33 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		if err := validateThemeURL(source.Raw); err != nil {
 			return nil, fmt.Errorf("manifest %s theme %q raw URL: %w", origin, name, err)
 		}
+		sources[name] = source
 	}
-	return manifest.SourceFetched, nil
+	for name, bundled := range manifest.Bundled {
+		file := strings.TrimSpace(bundled.File)
+		if strings.TrimSpace(name) == "" || file == "" || strings.TrimSpace(bundled.Target) == "" {
+			return nil, fmt.Errorf("manifest %s bundled theme %q is missing name, file, or target", origin, name)
+		}
+		if file != path.Base(file) || file == "." || file == ".." {
+			return nil, fmt.Errorf("manifest %s bundled theme %q file %q must be a bare file name beside the manifest", origin, name, file)
+		}
+		if _, clash := sources[name]; clash {
+			return nil, fmt.Errorf("manifest %s names theme %q as both source_fetched and bundled", origin, name)
+		}
+		source := themeSource{Target: bundled.Target, Activate: bundled.Activate, Requires: bundled.Requires}
+		if localThemes != "" {
+			source.local = filepath.Join(localThemes, file)
+		} else {
+			// The release manifest was fetched: the palette is published beside it.
+			source.Raw = strings.TrimSuffix(origin, path.Base(origin)) + file
+			source.Repo = source.Raw
+			if err := validateThemeURL(source.Raw); err != nil {
+				return nil, fmt.Errorf("manifest %s bundled theme %q release URL: %w", origin, name, err)
+			}
+		}
+		sources[name] = source
+	}
+	return sources, nil
 }
 
 func themeManifestOwner(options Options) (string, error) {

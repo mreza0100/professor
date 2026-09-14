@@ -40,7 +40,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	vscode := flags.Bool("vscode", false, "install the Professor VS Code extension and make the PFM terminal the default")
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
-	skipThemes := flags.Bool("skip-themes", false, "skip source-fetched Claude Code themes")
+	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
