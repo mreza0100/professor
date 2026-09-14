@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"hostops/pfm/internal/atomicfile"
 	pfmconfig "hostops/pfm/internal/config"
@@ -90,8 +91,13 @@ func recordUpdateHookAfter(snapshots []updateFileSnapshot) {
 // restoreUpdateHookFiles returns each hook file to its pre-install bytes, but
 // only while it still holds exactly what the candidate's install left: a file
 // something else rewrote since — a live chat saving its settings — is never
-// clobbered. It is named as residue instead.
-func restoreUpdateHookFiles(snapshots []updateFileSnapshot, stderr io.Writer) error {
+// clobbered. It is named as residue instead — and when that residue still
+// carries a hook of pfm's own shape naming a subcommand this binary does not
+// implement (issue #24 finding 2: exactly what a rollback across the update
+// this file's install just performed can leave stranded), the residue
+// message names those entries so the operator's repair instruction is
+// concrete rather than a bare "reconcile it by hand".
+func restoreUpdateHookFiles(snapshots []updateFileSnapshot, home string, stderr io.Writer) error {
 	var residue error
 	for _, snapshot := range snapshots {
 		current, _, existed, err := readUpdateHookFile(snapshot.path)
@@ -103,7 +109,14 @@ func restoreUpdateHookFiles(snapshots []updateFileSnapshot, stderr io.Writer) er
 			continue
 		}
 		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
-			residue = errors.Join(residue, fmt.Errorf("hook file %s changed after the update's install wrote it; left as is — reconcile it by hand", snapshot.path))
+			message := fmt.Sprintf("hook file %s changed after the update's install wrote it; left as is — reconcile it by hand", snapshot.path)
+			if stranded := installer.UnknownPFMHookCommands(current, home); len(stranded) > 0 {
+				message = fmt.Sprintf(
+					"hook file %s changed after the update's install wrote it; left as is — it still carries %s; reconcile by hand or run pfm install --yes",
+					snapshot.path, strings.Join(stranded, ", "),
+				)
+			}
+			residue = errors.Join(residue, errors.New(message))
 			continue
 		}
 		if snapshot.beforeExisted {

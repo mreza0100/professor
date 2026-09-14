@@ -226,6 +226,18 @@ The candidate's own `install --yes` renames `config.json` → `pfm.config.json` 
 | MCP launch-agent/unit removal names the config it read the disabled state from | JAIL | change line carries `(no MCP server is enabled in <MCPConfigPath>)` | `internal/installer/launchd_test.go` (`TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom`) |
 | a rollback that crosses the v0.74.0 migration boundary on a real, previously-installed pre-split host (`config.json` only, MCP genuinely enabled), with the plist and daemon confirmed restored end to end | REAL-SESSION | fenced rehearsal in an `iso shell`: install v0.73.x from source, `pfm update --to <tag>` with a candidate whose doctor is forced to fail, assert the MCP plist and `config.json` are back | not automated — see § Flows that CANNOT be jailed |
 
+### A.5 — Orphaned hooks a rollback strands (issue #24 finding 2)
+
+`v0.77.0` fixed hook-file snapshot/restore on rollback and unknown `pfm internal <name>` exiting 1 instead of 2, but only in the binary that ships them — a hook of pfm's own shape naming a subcommand THIS binary does not implement (a rollback to an older release, or a rollback whose residue guard leaves a newer-then-reverted file untouched) was invisible to install and doctor alike. `unknownPFMHookCommand` (`internal/installer/settings.go`) is the rule that names it.
+
+| behavior | safety | expected | regression |
+| --- | --- | --- | --- |
+| `pfm install --yes` strips an unknown pfm-shaped hook on apply, leaving every real template hook wired | JAIL | the entry is gone, the nine template hooks remain, `unknownPFMHookCommand` names it `hook-from-a-newer-pfm` | `internal/installer/settings_wiring_test.go` (`TestInstallRetiresAPFMHookThisBinaryDoesNotImplement`) |
+| a foreign hook whose command merely mentions "pfm" in its arguments is never matched | JAIL | the hook survives untouched (boundary pin — holds before and after the fix) | `internal/installer/settings_wiring_test.go` (`TestInstallLeavesAForeignHookThatMerelyMentionsPFM`) |
+| `pfm doctor` reports an unknown pfm-shaped hook as `stale`, not silence | JAIL | `ProbeExpectedHooks` returns a `stale` result named `unknown:hook-from-a-newer-pfm` with an error naming the subcommand this pfm does not implement | `internal/installer/expected_hooks_test.go` (`TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale`) |
+| a rollback residue left by a concurrent settings edit names the stranded unknown hook commands it carries | JAIL | stderr contains `it still carries` and the stranded subcommand name | `cmd/pfm/update_command_test.go` (`TestUpdateRollbackResidueNamesTheStrandedHookCommands`) |
+| a rolled-back update on a real ≤0.76.0 host, confirmed stranding both hooks in `settings.json` and blocking every new-chat prompt until hand-removed | REAL-SESSION | fenced rehearsal: install ≤0.76.0 from source, force a `pfm update` rollback, confirm the two entries survive on the OLD binary (nothing in this release can retroactively fix that binary) and that the release note's removal steps clear them | not automated — see § Flows that CANNOT be jailed |
+
 | `reap` dry run classifies every socket, changes nothing | JAIL+tmux | `cmd/pfm/reap_jail_test.go:134-189`, `internal/reap/reap.go:139-160` | |
 | `reap` KEEP rules: attached, self, `cc-new-*`, busy, transcript written < 60s | JAIL | `internal/reap/reap_test.go:14-200` | |
 | `reap` never kills a socket hosting non-chat processes (dev servers, `uv`) | JAIL+tmux | `internal/reap/proc.go:78-110`, `cmd/pfm/reap_jail_test.go:134-189` | |
@@ -688,6 +700,8 @@ Schedule these deliberately on a scratch project directory. Rows tagged `REAL-SE
 **Needs real multi-account state:** 31. Transcripts under a SEPARATE account root (not a symlink back to account 1). 32. Statusline badge computation across accounts.
 
 **Needs a real self-update across the v0.74.0 config migration (issue #24 findings 3/4):** 33. A rollback that crosses the migration boundary on a genuinely pre-split host (`config.json` only, real accounts, MCP servers actually enabled) — `iso e2e` proves the mechanics post-split only (`TestInstallInitUpdateUninstallE2E` "update" starts at the previous release, already post-split); the fenced rehearsal is: in an `iso shell`, install v0.73.x from source, run `pfm update --to <this tag> --repo <stage whose candidate's doctor is forced to fail by a broken required dep>`, and assert the MCP launch agent plist and `config.json` are both restored.
+
+**Needs a real self-update rolling back from a ≤0.76.0 host (issue #24 finding 2):** 34. A rollback to a genuinely pre-M4 pfm — the jail proves `unknownPFMHookCommand` strips/reports the entry once THIS binary runs `pfm install --yes` or `pfm doctor`, but the OLD binary rollback restores is never rebuilt here, so nothing jailed proves the two hooks actually strand a real ≤0.76.0 install; the fenced rehearsal is: in an `iso shell`, install v0.76.0 (or older) from source, force a `pfm update` rollback (candidate doctor made to fail), confirm `pfm internal exit-close`/`pfm internal exit-intercept` survive in the account `settings.json` on the restored OLD binary, and that the release note's hand-removal steps clear them before a chat is started.
 
 ---
 

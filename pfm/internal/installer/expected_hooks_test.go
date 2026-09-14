@@ -106,6 +106,59 @@ func TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale(t *testing.T) {
 	}
 }
 
+// TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale pins issue #24
+// finding 2's doctor half: a settings.json carrying a hook of pfm's own
+// shape naming a subcommand THIS binary does not implement — left behind by
+// a rollback to an older pfm, or by a newer pfm's own hook surviving a
+// revert — produces NO probe row before unknownPFMHookCommand exists,
+// exactly like the already-fixed table-retired case above, but for a
+// subcommand no table entry or template will ever know by name.
+func TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale(t *testing.T) {
+	home, machine := stageExpectedHookFixtures(t)
+	hook := findExpectedHook(t, home, machine, "claude[2]", "exit-intercept")
+	unknown := strings.Replace(hook.Command, "internal exit-intercept", "internal hook-from-a-newer-pfm", 1)
+	if unknown == hook.Command {
+		t.Fatalf("fixture command %q did not contain internal exit-intercept", hook.Command)
+	}
+
+	raw, err := os.ReadFile(hook.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	appendHookWithMatcher(document, hook.Event, hook.Matcher, unknown)
+	updated, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook.File, append(updated, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	results := ProbeExpectedHooks(home, machine)
+	var unknownResult *HookProbeResult
+	for index, result := range results {
+		if strings.Contains(result.Hook.Command, "hook-from-a-newer-pfm") {
+			unknownResult = &results[index]
+		}
+	}
+	if unknownResult == nil {
+		t.Fatalf("doctor hook probe said nothing about the unknown pfm hook %q: %#v", unknown, results)
+	}
+	if unknownResult.State != "stale" {
+		t.Fatalf("unknown pfm hook result state=%q, want stale: %#v", unknownResult.State, unknownResult)
+	}
+	if unknownResult.Hook.Name != "unknown:hook-from-a-newer-pfm" {
+		t.Fatalf("unknown pfm hook result name=%q, want %q: %#v", unknownResult.Hook.Name, "unknown:hook-from-a-newer-pfm", unknownResult)
+	}
+	if !strings.Contains(unknownResult.Error, "does not implement") {
+		t.Fatalf("unknown pfm hook result error=%q, want it to say this pfm does not implement the subcommand", unknownResult.Error)
+	}
+}
+
 // TestClaudeHookTemplatesIncludesReloadIntercept pins T2's installer half
 // directly at the template source doctor and the settings wiring both read:
 // the `/reload` UserPromptSubmit hook must be present, on the right event,

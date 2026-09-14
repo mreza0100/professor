@@ -42,7 +42,7 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 			return command
 		})
 	}
-	if removeRetiredHookCommands(document) {
+	if removeRetiredHookCommands(document, pfmBinary) {
 		changed = true
 	}
 
@@ -52,7 +52,7 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
 			command, _ := hook["command"].(string)
-			if isRetiredHookCommand(command) || retiredCommands[command] {
+			if isRetiredHookCommand(command, pfmBinary) || retiredCommands[command] {
 				changed = true
 				continue
 			}

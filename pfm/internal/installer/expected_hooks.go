@@ -204,7 +204,12 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 	// A retired command sitting in a file is invisible to the loop above —
 	// it matches no expected hook — so walk every probed file's raw command
 	// inventory once for any hook that matches the shared retired-command
-	// table, regardless of whether the installer ever wrote or owned it.
+	// table, regardless of whether the installer ever wrote or owned it. The
+	// same walk also catches a hook of pfm's own shape naming a subcommand
+	// this binary does not implement — what a rolled-back or newer-then-
+	// reverted update leaves behind (issue #24 finding 2) — since that shape
+	// matches no expected hook either.
+	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
 	for physical, file := range files {
 		if file.err != nil {
 			continue
@@ -213,17 +218,25 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 			if count == 0 {
 				continue
 			}
-			name, retired := retiredHookCommandName(key.Command)
-			if !retired {
+			if name, retired := retiredHookCommandName(key.Command); retired {
+				results = append(results, HookProbeResult{
+					Hook: ExpectedHook{
+						Target: fileTargets[physical], File: fileDisplayPaths[physical],
+						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
+					},
+					State: "stale", Error: "retired hook command is still present",
+				})
 				continue
 			}
-			results = append(results, HookProbeResult{
-				Hook: ExpectedHook{
-					Target: fileTargets[physical], File: fileDisplayPaths[physical],
-					Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
-				},
-				State: "stale", Error: "retired hook command is still present",
-			})
+			if name, unknown := unknownPFMHookCommand(key.Command, pfmBinary); unknown {
+				results = append(results, HookProbeResult{
+					Hook: ExpectedHook{
+						Target: fileTargets[physical], File: fileDisplayPaths[physical],
+						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unknown:" + name,
+					},
+					State: "stale", Error: "hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm) — run pfm install --yes",
+				})
+			}
 		}
 	}
 	for path, counts := range ownership {

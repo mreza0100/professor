@@ -1,0 +1,29 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"strings"
+	"testing"
+)
+
+// TestUpdateRollbackResidueNamesTheStrandedHookCommands extends
+// updateHookRollbackFixture's race guard (issue #24 finding 2): when the
+// concurrent edit that forces residue itself carries a hook of pfm's own
+// shape naming a subcommand this binary does not implement, the residue
+// message names the stranded entry instead of only saying "reconcile it by
+// hand" — the operator's repair instruction must be concrete.
+func TestUpdateRollbackResidueNamesTheStrandedHookCommands(t *testing.T) {
+	stranded := []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal exit-intercept-vnext\"}]}]}\n}\n")
+	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
+		if err := os.WriteFile(settings, stranded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, stranded) {
+		t.Fatalf("settings after rollback = %q, %v; want the concurrent edit kept %q", got, err, stranded)
+	}
+	if !strings.Contains(stderr, "it still carries") || !strings.Contains(stderr, "exit-intercept-vnext") {
+		t.Fatalf("rollback residue did not name the stranded hook command: %q", stderr)
+	}
+}

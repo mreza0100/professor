@@ -499,7 +499,7 @@ func rollbackUpdateState(
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back source to %s\n", previousRef)
 	}
-	rollbackErr = errors.Join(rollbackErr, restoreUpdateHookFiles(hookSnapshots, stderr))
+	rollbackErr = errors.Join(rollbackErr, restoreUpdateHookFiles(hookSnapshots, runtime.Paths.Home, stderr))
 	if len(replacements) == 0 {
 		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
 	}
