@@ -47,11 +47,19 @@ STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]'
 #   ~/work/professor — this repo's own public name, quoted in a historical release note
 BENIGN_TOKENS='(/home/account-42|~/work/professor|/home/tester|~/work/alpha|/home/test|~/work/Foo|/home/me|/home/x)'
 
-# True when the line still matches PATTERN after benign tokens are removed.
+# True when the line still matches PATTERN after benign tokens and the configured
+# ignore tokens are removed. Ignore tokens are lowercase regexes (the terms-file
+# convention), so they are applied to the lowercased line; PATTERN matches with -i.
 line_is_real_hit() {
-  printf '%s ' "$1" \
-    | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" \
-    | grep -qiE "$PATTERN"
+  local line tok
+  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")"
+  if (( ${#ignore_tokens[@]} > 0 )); then
+    line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
+    for tok in "${ignore_tokens[@]}"; do
+      line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")"
+    done
+  fi
+  printf '%s' "$line" | grep -qiE "$PATTERN"
 }
 
 usage() {
@@ -92,13 +100,30 @@ if [[ ! -f "$terms_file" ]]; then
   exit 1
 fi
 
+# The terms file also carries the machine's own ignore list, private like the terms:
+#   !ignore-token <lowercase regex>  stripped from a line BEFORE it is judged, so a
+#                                    known-public string (a public handle, a code
+#                                    identifier a term matches inside) stops failing
+#                                    while a real leak on the same line still does
+#   !ignore-path <git glob>          a path never scanned at all — reported on every
+#                                    run, because an unannounced blind spot is a leak path
 terms=()
+ignore_tokens=()
+ignore_paths=()
 while IFS= read -r term || [[ -n "$term" ]]; do
   term="${term%$'\r'}"
   [[ "$term" =~ ^[[:space:]]*# ]] && continue
   [[ -z "${term//[[:space:]]/}" ]] && continue
+  case "$term" in
+    '!ignore-token '*) ignore_tokens+=("${term#!ignore-token }"); continue ;;
+    '!ignore-path '*) ignore_paths+=("${term#!ignore-path }"); continue ;;
+    '!'*) echo "leak-check: FAILED — unknown directive in $terms_file: $term" >&2; exit 1 ;;
+  esac
   terms+=("$term")
 done < "$terms_file"
+if (( ${#ignore_paths[@]} > 0 )); then
+  printf 'leak-check: %d configured path ignore(s) — NOT scanned: %s\n' "${#ignore_paths[@]}" "${ignore_paths[*]}" >&2
+fi
 
 if (( ${#terms[@]} == 0 )); then
   echo "leak-check: FAILED — terms file has zero usable terms: $terms_file" >&2
@@ -138,14 +163,21 @@ diff_excludes=(
   ':(exclude).githooks'
   ':(exclude)LICENSE'
 )
+for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
+  diff_excludes+=(":(exclude,glob)$glob")
+done
 
 is_excluded_path() {
-  local p="$1"
+  local p="$1" glob
   case "$p" in
     scripts/placeholder-map.tsv|scripts/leak-terms.txt|LICENSE) return 0 ;;
     .githooks/*|.githooks) return 0 ;;
   esac
   [[ -n "$terms_rel" && "$p" == "$terms_rel" ]] && return 0
+  for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
+    # shellcheck disable=SC2053 — the configured glob is matched as a pattern on purpose
+    [[ "$p" == $glob ]] && return 0
+  done
   return 1
 }
 
@@ -232,7 +264,7 @@ scan_diff_stream() {
     printf 'unattributed=%d\n' "$unattributed"
   } > "$coverage_file"
 
-  (( suppressed > 0 )) && printf 'leak-check: %d benign-token line(s) suppressed by the documented allowlist\n' "$suppressed" >&2
+  (( suppressed > 0 )) && printf 'leak-check: %d benign- or ignore-token line(s) suppressed by the documented allowlist and the configured ignore tokens\n' "$suppressed" >&2
   return 0
 }
 
