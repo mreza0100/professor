@@ -289,6 +289,9 @@ func (installer *engine) install(ctx context.Context) error {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
 		}
+		if err := installer.ensureLaunchdLogDir(); err != nil {
+			return err
+		}
 		if err := installer.wireLaunchAgent(ctx); err != nil {
 			return err
 		}

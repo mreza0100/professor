@@ -12,6 +12,11 @@
   KeepAlive restarts the daemon on any exit, including the one it takes when
   its own binary is replaced by a new install. __PFM_HOME__ is substituted at
   install time — launchd has no %h.
+
+  StandardOutPath / StandardErrorPath land the daemon's own stdout/stderr in
+  __PFM_HOME__/Library/Logs/pfm/mcp.log — launchd otherwise discards a
+  background agent's output, so a crash or a logged error was silent. The
+  installer creates ~/Library/Logs/pfm before loading this agent.
 -->
 <plist version="1.0">
 <dict>
@@ -32,5 +37,9 @@
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>StandardOutPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/mcp.log</string>
+	<key>StandardErrorPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/mcp.log</string>
 </dict>
 </plist>

@@ -172,7 +172,10 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		return Result{Source: source, Error: err.Error()}
 	}
 	if isPubMedSearchURL(source) {
-		return Result{Source: source, Error: fmt.Sprintf("%s is a PubMed search/results URL, not an article — use the `findWorks` tool (or `search`) to get candidate works, each with a fetch handle.", source)}
+		return Result{Source: source, Error: fmt.Sprintf("%s is a PubMed search/results URL, not an article — use the `findWorks` tool%s to get candidate works, each with a fetch handle.", source, SearchHint(h.settings.searchAvailable,
+			" (or `search`)",
+			"",
+		))}
 	}
 	if providerResult, handled := h.fetchProviderRecord(ctx, source, options); handled {
 		return providerResult
@@ -566,9 +569,12 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			}
 		}
 	}
-	message := failureMessage(source, lastStatus, lastErrorKind, lastChallenge)
+	message := failureMessage(source, lastStatus, lastErrorKind, lastChallenge, h.settings.searchAvailable)
 	if wrongPDF {
-		message = fmt.Sprintf("%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). Use `search` to find an open-access copy.", source)
+		message = fmt.Sprintf("%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s", source, SearchHint(h.settings.searchAvailable,
+			"Use `search` to find an open-access copy.",
+			"Find an open-access copy with findWorks or another URL.",
+		))
 	}
 	if emptyPDFConvert {
 		// A BROKEN OCR backend and an OCR pass that legitimately found no text
@@ -576,11 +582,20 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		// "this PDF has nothing in it".
 		switch {
 		case ocrBackendFailed:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: retry, or use `search` to find an alternative copy.", source)
+			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: %s", source, SearchHint(h.settings.searchAvailable,
+				"retry, or use `search` to find an alternative copy.",
+				"retry, or find an alternative copy with findWorks or another URL.",
+			))
 		case ocrRan:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. Use `search` to find an alternative copy.", source)
+			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. %s", source, SearchHint(h.settings.searchAvailable,
+				"Use `search` to find an alternative copy.",
+				"Find an alternative copy with findWorks or another URL.",
+			))
 		default:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. Use `search` to find an alternative copy.", source)
+			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. %s", source, SearchHint(h.settings.searchAvailable,
+				"Use `search` to find an alternative copy.",
+				"Find an alternative copy with findWorks or another URL.",
+			))
 		}
 	}
 	// A dead-ended challenge must say what the real-browser rung did — the
@@ -608,7 +623,10 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		case browserPolicyRefused:
 			message += " The real-browser rung did not run because this server's SSRF guard refused the address (private or internal network). That is policy working as designed, not an outage."
 		case converterOutage:
-			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: retry, or use `search` to find an alternative copy."
+			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(h.settings.searchAvailable,
+				"retry, or use `search` to find an alternative copy.",
+				"retry, or find an alternative copy with findWorks or another URL.",
+			)
 		case browserUnavailable != "":
 			message += fmt.Sprintf(" The real-browser rung (fetch.browser) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.", browserUnavailable)
 		case browserEmptyRender:
