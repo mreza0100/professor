@@ -53,7 +53,10 @@ if (!block) {
 
 let table;
 try {
-  table = eval(`[${block[1]}]`);
+  // The table is literal rows of strings and numbers; drop the // comments and the
+  // trailing comma and it is JSON — parsed as data, never executed as code.
+  const rows = block[1].replace(/\/\/[^\n]*/g, "").trim().replace(/,$/, "");
+  table = JSON.parse(`[${rows}]`);
 } catch (error) {
   console.error(`PRICING-UNREADABLE table did not parse: ${error.message}`);
   process.exit(2);

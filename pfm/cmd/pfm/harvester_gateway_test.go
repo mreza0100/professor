@@ -40,7 +40,7 @@ func externalRuntime(t *testing.T, port int) commandRuntime {
 	runtime.Config.Harvester.Cache.Dir = filepath.Join(home, "cache")
 	runtime.Config.Harvester.External = config.HarvesterExternal{
 		Enabled: true, Host: "127.0.0.1", Port: port, PublicURL: "https://harvester.example.test",
-		StaticToken: "gateway-token", StateDir: filepath.Join(home, "state"),
+		StaticToken: "example-gateway-token", StateDir: filepath.Join(home, "state"),
 	}
 	return runtime
 }
@@ -86,13 +86,13 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	if response := do(http.MethodPost, "/mcp", "wrong", initialize); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong-token /mcp = %d, want 401", response.StatusCode)
 	}
-	response := do(http.MethodPost, "/mcp", "gateway-token", initialize)
+	response := do(http.MethodPost, "/mcp", "example-gateway-token", initialize)
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester") {
 		t.Fatalf("authenticated /mcp = %d %s", response.StatusCode, body)
 	}
 	for _, path := range []string{"/mcp/chat", "/mcp/harvester", "/status"} {
-		if response := do(http.MethodPost, path, "gateway-token", initialize); response.StatusCode != http.StatusNotFound {
+		if response := do(http.MethodPost, path, "example-gateway-token", initialize); response.StatusCode != http.StatusNotFound {
 			t.Errorf("external %s = %d, want 404 — the external port serves the harvester only", path, response.StatusCode)
 		}
 	}

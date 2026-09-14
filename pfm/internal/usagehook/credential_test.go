@@ -160,12 +160,12 @@ func TestLoadCredentialRereadsTheKeychainSoARotatedTokenIsPickedUp(t *testing.T)
 		t.Fatal(err)
 	}
 	// Stand in for the CLI refreshing the credential in place.
-	token = "rotated-token"
+	token = "example-rotated-token"
 	second, err := loadCredential(context.Background(), configDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.OAuth.AccessToken != "first-token" || second.OAuth.AccessToken != "rotated-token" {
+	if first.OAuth.AccessToken != "first-token" || second.OAuth.AccessToken != "example-rotated-token" {
 		t.Fatalf("first=%q second=%q, want the rotated token on the second read",
 			first.OAuth.AccessToken, second.OAuth.AccessToken)
 	}

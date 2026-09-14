@@ -145,7 +145,7 @@ func TestProbeSearchReportsEveryState(t *testing.T) {
 	})
 	t.Run("brave configured not probed", func(t *testing.T) {
 		var hit bool
-		probe := ProbeSearch(context.Background(), SearchOptions{BraveAPIKey: "fixture-key"}, &http.Client{Transport: searchRoundTrip(func(*http.Request) (*http.Response, error) {
+		probe := ProbeSearch(context.Background(), SearchOptions{BraveAPIKey: "example-fixture-key"}, &http.Client{Transport: searchRoundTrip(func(*http.Request) (*http.Response, error) {
 			hit = true
 			t.Fatal("ProbeSearch dialed Brave — a doctor probe must never spend the operator's quota")
 			return nil, nil

@@ -69,7 +69,7 @@ func TestConsentPageTxnInputIsHidden(t *testing.T) {
 
 func TestRemoteStaticGateway(t *testing.T) {
 	base := t.TempDir()
-	static, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", StaticToken: "fixture-token"})
+	static, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", StaticToken: "example-fixture-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRemoteStaticGateway(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "https://harvester.example.test/mcp", nil)
 	req.Host = "harvester.example.test"
-	req.Header.Set("Authorization", "Bearer fixture-token")
+	req.Header.Set("Authorization", "Bearer example-fixture-token")
 	rec = httptest.NewRecorder()
 	static.Handler().ServeHTTP(rec, req)
 	if rec.Code == http.StatusUnauthorized {

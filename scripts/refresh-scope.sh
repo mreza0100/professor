@@ -169,8 +169,8 @@ resolve_path() {
       echo "refresh-scope: manifest .interview.projects.$role is missing/null" >&2
       return 1
     }
-    local token="{project:$role}"
-    resolved="${resolved%%"$token"*}${val}${resolved#*"$token"}"
+    local placeholder="{project:$role}"
+    resolved="${resolved%%"$placeholder"*}${val}${resolved#*"$placeholder"}"
   done
   case "$resolved" in
     "~/"*) resolved="${HOME}/${resolved#\~/}" ;;
