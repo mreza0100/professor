@@ -5,7 +5,7 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, clean tree. Raw map, no verdicts. Te
 ## 1. Capabilities (48)
 
 | capability | what it does | evidence | why it matters for a blocked/paywalled source |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | OA source fan-out | 12 concurrent open-access providers (unpaywall, openalex, semanticscholar, europepmc, openaire, zenodo, elife, plos, nber, crossref, core, doaj), merged/priority-sorted | `pfm/internal/harvest/resolver.go:121-222` | Tries every free legal copy before anything riskier |
 | Identifier detection | Classifies/normalizes DOI, ISBN, PMID, PMCID from raw input | `harvest/identifiers.go:9-167` | One paste reaches the right resolver |
 | Known-ID dispatch | Cache check, then identifier-routed provider call | `harvest/known_id.go:10-60` | Single entry point for any ID kind |
@@ -14,14 +14,14 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, clean tree. Raw map, no verdicts. Te
 | Web search | SearXNG or Brave API ranked results | `harvest/search.go:45-204` | Finds candidate URLs when no direct link exists |
 | Publisher metadata pivot | Extracts `citation_pdf_url`/DOI from blocked HTML, triggers OA resolution | `harvest/identifiers.go:34-47` | Turns a paywalled landing page into an OA lookup |
 | ISBN book resolution | Google Books API + publisher metadata | `harvest/books.go:14+` | Resolves a book ISBN to a fetchable record |
-| SciDB DOI + PDF-viewer extraction | Fetches SciDB DOI page, extracts embedded PDF viewer link | `harvest/shadow_providers.go:78-112,18-59` | Last-resort mirror when the OA chain has nothing |
-| LibGen DOI→MD5→download | Catalog search → MD5 → ads.php/get.php fallback | `harvest/shadow_providers.go:191-253,268-322` | Shadow-library recovery |
-| Anna's Archive MD5 + IPFS | Catalog search → keyless IPFS CID, dweb.link/ipfs.io fallback | `harvest/shadow_providers.go:324-367` | Keyless mirror access |
-| Sci-Hub DOI/PMID rung | SciHubEVA-compatible lookup, HTML PDF extraction, download; config-gated | `harvest/scihub.go`; `pfm/HARVESTER.md:12`; `known_id.go:39` | Classic paywall rung, opt-in |
+| DOI viewer DOI + PDF-viewer extraction | Fetches DOI viewer DOI page, extracts embedded PDF viewer link | `harvest/mirror_providers.go` | Last-resort mirror when the OA chain has nothing |
+| MD5 catalog DOI→MD5→download | Catalog search → MD5 → ads.php/get.php fallback | `harvest/mirror_providers.go` | Mirror-provider recovery |
+| IPFS catalog MD5 + IPFS | Catalog search → keyless IPFS CID, dweb.link/ipfs.io fallback | `harvest/mirror_providers.go` | Keyless mirror access |
+| DOI mirror DOI/PMID rung | POSTs a DOI/PMID to the configured mirror, extracts the embedded PDF link from the HTML, downloads the PDF; config-gated | `harvest/doi_mirror.go`; `pfm/HARVESTER.md:12`; `known_id.go:39` | Classic paywall rung, opt-in |
 | JS app-shell rejection | Fingerprints two random routes; rejects if visible text matches (shell, not content) | `harvest/appshell.go:43-118` | Never "succeeds" on a blank SPA shell |
 | Headless-first browser rung | Renders headless first; on failure or shell-detected retries headed | `harvest/harvest.go:414-431`, `appshell.go:126-148` | JS-rendered content without a visible browser |
 | Chrome-fingerprint TLS transport | tls-client Chrome_146 impersonation | `harvest/net_chrome_transport.go:62-93` | Evades TLS-fingerprint bot blocks |
-| Mirror SSRF safety | `assertFetchable`/`normalizeSciHubURL` scheme/host validation, no private ranges | `harvest/net.go:20-80`, `scihub.go:23-44` | Mirror config cannot become an internal pivot |
+| Mirror SSRF safety | `assertFetchable`/`normalizeDOIMirrorURL` scheme/host validation, no private ranges | `harvest/net.go:20-80`, `harvest/doi_mirror.go` | Mirror config cannot become an internal pivot |
 | Content-addressed cache with TTL | Hash-keyed entries; per-kind TTL (volatile kinds expire, image/archive do not) | `harvest/cache.go:123-177` | No repeat hits on a paywall/mirror |
 | Negative-result cache | Failure caching, transient (15s) vs default (120s) | `harvest/cache.go:296-331` | Fails fast instead of hammering a blocking site |
 | Public artifact export + redaction | Strips mirror URLs, cache filenames, fallback traces | `harvest/public.go:259-267,225-257` | The user never sees which mirror/rung was used |
@@ -62,12 +62,12 @@ A. Identifier-keyed path (`known_id.go`, then `fetchOA` for DOI):
 1. Cache lookup (`cache.go`) — short-circuits everything below if fresh
 2. Identifier classification (DOI/ISBN/PMID/PMCID) — `identifiers.go`
 3. DOI → OA fan-out, concurrent, priority-merged: `unpaywall → openalex → semanticscholar → europepmc → openaire → zenodo → elife → plos → nber → crossref → core → doaj` — `resolver.go:121-222`, `oa_sources.go`
-4. Sci-Hub (if `scholarly.sciHubURL` configured) — `known_id.go:224-230`, `scihub.go`
-5. Shadow chain (`fetchDOIShadow`): SciDB (if `sciDBURL`) → LibGen (if `libGenURL`) — `shadow_providers.go:115-132`
+4. DOI mirror (if `scholarly.doiMirrorURL` configured) — `known_id.go:224-230`, `harvest/doi_mirror.go`
+5. Mirror chain (`fetchDOIMirrors`): DOI viewer (if `doiViewerURL`) → MD5 catalog (if `md5CatalogURL`) — `mirror_providers.go`
 6. Google Scholar mirror (if `googleScholarURL`) — `known_id.go:241-248`
 7. ISBN path: Google Books — `books.go`
 8. PMID path: NCBI idconv → PMCID → PMC OA / Europe PMC — `mirror.go:14-19,88`
-9. Anna's Archive — via MD5 lookup (FindWorks/catalog), not DOI-keyed — `shadow_providers.go:324-367`
+9. IPFS catalog — via MD5 lookup (FindWorks/catalog), not DOI-keyed — `mirror_providers.go`
 
 B. Generic URL path (`harvest.go` ladder, sequential):
 
@@ -82,7 +82,7 @@ B. Generic URL path (`harvest.go` ladder, sequential):
 MCP tool surface, verbatim (`harvestmcp/service.go`):
 
 | Tool | Line | Description |
-|---|---|---|
+| --- | --- | --- |
 | `fetch` | :431 | "Retrieves 1–50 documents as Markdown, input order kept. Call fetch{sources:[…]} — a URL/path, DOI, ISBN, PMID/PMCID, or a handle from findWorks/searchCache…" |
 | `findWorks` | :435 | "Finds scholarly papers and books by TITLE or bibliographic query — 'find the paper about X', 'is there a PDF of ‹title›'. No download…" |
 | `search` | :440 | "Searches the web — 'search for X', 'find pages about X' — ranked titles, URLs, and snippets, never the page itself…" (conditional on `!DisableSearch`) |
@@ -95,7 +95,7 @@ Pins: markitdown 0.1.6, docling 2.107.0, pymupdf4llm 1.27.2.3, trafilatura 2.1.0
 
 ## 3. Dead-end ledger (per file)
 
-- `harvest/appshell.go` EDGE ← `harvest.go:340-342` · `archive.go` EDGE ← MCP `archive` + `content.go` · `books.go` EDGE ← ISBN path · `cache.go` EDGE ← every fetch · `content.go` EDGE ← `harvest.go`, `archive.go`, `scihub.go` · `detect.go` RED-HERRING (kind sniffing) · `find_works.go` EDGE ← MCP `findWorks` · `google_scholar.go` EDGE ← `find_works.go`, `known_id.go` · `harvest.go` EDGE ← `harvestmcp.NewHarvester`/`FetchPublic` · `identifiers.go` EDGE · `images.go` EDGE · `known_id.go` EDGE · `local.go` EDGE · `media.go` EDGE but `FetchImage` has 0 external call sites found — AMBIGUOUS · `metadata_failure.go` NOT-MINE · `mirror.go` EDGE; `PMIDToPMCID`, `EuropePMCFiguresURL`, `EuropePMCFulltextXML` DEAD-END (0 callers) · `net.go` EDGE · `net_chrome_transport.go` EDGE · `oa_sources.go` EDGE · `public.go` EDGE · `public_handle.go` EDGE · `public_images.go` EDGE · `public_search.go` EDGE · `public_store.go` EDGE · `resolver.go` EDGE · `result.go` RED-HERRING · `scholarly_sources.go` EDGE · `scihub.go` EDGE ← `known_id.go:39` · `search.go` EDGE · `shadow_providers.go` EDGE · `stats.go` EDGE; `SummarizeStats` DEAD-END (test-only) · `types.go` EDGE.
+- `harvest/appshell.go` EDGE ← `harvest.go:340-342` · `archive.go` EDGE ← MCP `archive` + `content.go` · `books.go` EDGE ← ISBN path · `cache.go` EDGE ← every fetch · `content.go` EDGE ← `harvest.go`, `archive.go`, `doi_mirror.go` · `detect.go` RED-HERRING (kind sniffing) · `find_works.go` EDGE ← MCP `findWorks` · `google_scholar.go` EDGE ← `find_works.go`, `known_id.go` · `harvest.go` EDGE ← `harvestmcp.NewHarvester`/`FetchPublic` · `identifiers.go` EDGE · `images.go` EDGE · `known_id.go` EDGE · `local.go` EDGE · `media.go` EDGE but `FetchImage` has 0 external call sites found — AMBIGUOUS · `metadata_failure.go` NOT-MINE · `mirror.go` EDGE; `PMIDToPMCID`, `EuropePMCFiguresURL`, `EuropePMCFulltextXML` DEAD-END (0 callers) · `net.go` EDGE · `net_chrome_transport.go` EDGE · `oa_sources.go` EDGE · `public.go` EDGE · `public_handle.go` EDGE · `public_images.go` EDGE · `public_search.go` EDGE · `public_store.go` EDGE · `resolver.go` EDGE · `result.go` RED-HERRING · `scholarly_sources.go` EDGE · `doi_mirror.go` EDGE ← `known_id.go:39` · `search.go` EDGE · `mirror_providers.go` EDGE · `stats.go` EDGE; `SummarizeStats` DEAD-END (test-only) · `types.go` EDGE.
 - `harvestmcp/auth.go` EDGE ← `remote.go` · `remote.go` EDGE ← `mcp_serve_command.go` (FRONTIER) · `service.go` EDGE ← `harvest_command.go`.
 - `harvestpy/browserworker.go` EDGE (wiring to `harvest.go`'s `BrowserFetcher` never quoted — FRONTIER: `grep -rn "BrowserFetcher" pfm/internal/harvest pfm/internal/harvestmcp`) · `browserworker_unix.go` EDGE, no `_windows.go` (platform gate) · `check.go` EDGE, 56 callers outside boundary · `converter.go` EDGE · `digest.go` EDGE · `embed.go` EDGE · `provision.go` EDGE (callers outside boundary) · `provision_browser.go` EDGE · assets (`converter.py`, `pyproject.toml`, `uv.lock`, `browser/browser.py`, `browser/pyproject.toml`, `browser/uv.lock`, `targets.json`, `size-report.json`) EDGE.
 - `.cache/public/` — flat, 7 hashed files (`.png`, `.md`), no subdirectories; matches `HARVESTER.md`.
@@ -108,7 +108,7 @@ Pins: markitdown 0.1.6, docling 2.107.0, pymupdf4llm 1.27.2.3, trafilatura 2.1.0
 
 ## Named holes from the second pass (resume greps)
 
-- `pfm/internal/harvest/scihub.go` (385 lines) — the core Sci-Hub implementation was never deep-read by any tracer; resume with a full Read.
+- `pfm/internal/harvest/doi_mirror.go` (385 lines) — the core DOI mirror implementation was never deep-read by any tracer; resume with a full Read.
 - `pfm/internal/harvestpy/assets/uv.lock` (top-level, non-browser) — never read; `grep -n "name = "` lists the pinned closure.
 - `pfm/internal/harvest/metadata_failure.go` — classifies paywall/timeout/challenge/conversion/storage failures without leaking provider addresses; dispositioned NOT-MINE without a quote — under-evidenced.
 - `content.go` — one pass called it RED-HERRING while quoting its live `Converter.Convert()` call at :21; it is the Go→Python converter bridge.

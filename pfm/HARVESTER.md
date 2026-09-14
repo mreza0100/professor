@@ -4,15 +4,15 @@ Harvester reads `harvester.config.json` beside `pfm.config.json`. CLI fetches an
 
 ## Scholarly providers
 
-Open-access resolution runs first. Optional library mirrors extend retrieval when that chain cannot supply a readable document. Empty or omitted mirror URLs disable the corresponding provider.
+Open-access resolution runs first. Optional mirror providers extend retrieval when that chain cannot supply a readable document. Empty or omitted mirror URLs disable the corresponding provider.
 
 | Configuration | Retrieval and discovery |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `scholarly.contactEmail` | Enables the existing Unpaywall DOI API with the operator's real contact email. |
-| `scholarly.sciHubURL` | SciHubEVA-compatible DOI/PMID lookup, HTML PDF extraction, and PDF download. |
-| `scholarly.sciDBURL` | SciDB DOI pages and their embedded PDF viewer links. |
-| `scholarly.annasURL` | Anna's Archive catalog search and MD5 records with keyless IPFS copies. |
-| `scholarly.libGenURL` | LibGen catalog discovery, exact DOI records, MD5 lookup, and download-page resolution. |
+| `scholarly.doiMirrorURL` | DOI mirror: POSTs a DOI/PMID to the configured mirror, extracts the embedded PDF link from the HTML, downloads the PDF. |
+| `scholarly.doiViewerURL` | DOI viewer: fetches a DOI page and follows its embedded PDF-viewer link. |
+| `scholarly.ipfsCatalogURL` | IPFS catalog: catalog search and MD5 records with keyless IPFS copies. |
+| `scholarly.md5CatalogURL` | MD5 catalog: catalog search, exact DOI records, MD5 lookup, and download-page resolution. |
 | `scholarly.googleScholarURL` | Google Scholar discovery, including linked document copies. |
 | No extra setting | PubMed Central resolution through NCBI ID conversion, OA PDF links, and Europe PMC. |
 
@@ -42,9 +42,6 @@ Harvester adapts the request protocols into its Go transport; it does not launch
 
 | Provider | Inspected implementation |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sci-Hub | [leovan/SciHubEVA](https://github.com/leovan/SciHubEVA) |
-| Anna's Archive / SciDB | [CannonCoPilot/AnnasTools](https://github.com/CannonCoPilot/AnnasTools), [jmrplens/libgen-mcp](https://github.com/jmrplens/libgen-mcp) |
-| LibGen | [harrison-broadbent/libgen-api](https://github.com/harrison-broadbent/libgen-api), [jmrplens/libgen-mcp](https://github.com/jmrplens/libgen-mcp) |
 | Unpaywall | [ourresearch/unpaywall-extension](https://github.com/ourresearch/unpaywall-extension), [ourresearch/oadoi](https://github.com/ourresearch/oadoi), [unpywall/unpywall](https://github.com/unpywall/unpywall) |
 | Google Scholar | [scholarly-python-package/scholarly](https://github.com/scholarly-python-package/scholarly) |
 | PubMed Central | [Bio.Entrez](https://github.com/biopython/biopython/tree/master/Bio/Entrez) |

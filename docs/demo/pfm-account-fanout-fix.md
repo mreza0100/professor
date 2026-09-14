@@ -5,6 +5,7 @@ Root cause: global agents/commands/skills linked into the primary Claude account
 ## What the opus dev agent did (verified, not just trusted)
 
 Files touched (git diff, verified clean of guarded paths):
+
 ```
  M pfm/.arch/cmd-budget.txt
  M pfm/cmd/pfm/doctor.go
@@ -17,6 +18,7 @@ Files touched (git diff, verified clean of guarded paths):
 ?? pfm/internal/installer/global_fanout.go
 ?? pfm/internal/installer/global_fanout_test.go
 ```
+
 No `.claude/**`, `CLAUDE.md`, or `templates/**` touched — confirmed by `git diff --name-only` grep.
 
 - `GlobalAgentsOptions.ClaudeConfigDirs` added; one `.md` link per config dir; apply-time re-classify handles two accounts aliasing one physical registry (this host's `~/.claude2/agents -> ~/.claude/agents` shape).
@@ -37,4 +39,4 @@ No `.claude/**`, `CLAUDE.md`, or `templates/**` touched — confirmed by `git di
 
 ## Harvester scholarly config — done, live, smoke-tested
 
-`~/.config/pfm/harvester.config.json` now carries the `scholarly` block (sciHubURL, sciDBURL, annasURL, libGenURL, googleScholarURL) per your values. `pfm config validate` clean; `pfm config show` reflects all five from `(file)`. The `com.professor.pfm.mcp` launchd daemon (backs this session's `mcp__harvester__*` tools) was restarted (`launchctl kickstart -k`) so the new config is live for MCP calls too, not just fresh CLI invocations — confirmed via `pfm doctor`: `mcp daemon=running pid=84267`. Re-ran Bloomberg through the daemon post-restart: still the same `jina`-served footer (50,069 chars) — expected, since Bloomberg's homepage never touches the scholarly/DOI path; the scholarly config is for DOI/paper fetches, not general news sites. Not yet live-tested against an actual paywalled DOI to confirm the Sci-Hub/Anna's Archive/LibGen chain resolves end-to-end — worth one before claiming it on stage.
+`~/.config/pfm/harvester.config.json` now carries the `scholarly` block (doiMirrorURL, doiViewerURL, ipfsCatalogURL, md5CatalogURL, googleScholarURL) per your values. `pfm config validate` clean; `pfm config show` reflects all five from `(file)`. The `com.professor.pfm.mcp` launchd daemon (backs this session's `mcp__harvester__*` tools) was restarted (`launchctl kickstart -k`) so the new config is live for MCP calls too, not just fresh CLI invocations — confirmed via `pfm doctor`: `mcp daemon=running pid=84267`. Re-ran Bloomberg through the daemon post-restart: still the same `jina`-served footer (50,069 chars) — expected, since Bloomberg's homepage never touches the scholarly/DOI path; the scholarly config is for DOI/paper fetches, not general news sites. Not yet live-tested against an actual paywalled DOI to confirm the DOI mirror/IPFS catalog/MD5 catalog chain resolves end-to-end — worth one before claiming it on stage.

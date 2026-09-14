@@ -5,7 +5,7 @@ Method: confirmed each site's actual robots.txt disallow rules for AI crawlers v
 ## robots.txt confirmed (curl, live)
 
 | Site | Disallows |
-|---|---|
+| --- | --- |
 | nytimes.com | GPTBot, ClaudeBot, CCBot, Google-Extended, PerplexityBot, Bytespider — all `Disallow: /` |
 | reuters.com | `Disallow: /` for all agents |
 | bloomberg.com | GPTBot, ClaudeBot, CCBot, Google-Extended, PerplexityBot — `Disallow: /`, `Allow: /professional` only |
@@ -18,7 +18,7 @@ Method: confirmed each site's actual robots.txt disallow rules for AI crawlers v
 ## Harvester fetch results
 
 | Site | Result | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | **nytimes.com** | **PASS** — full real front page | 2,930 chars, real headlines ("Celine Dion Returns to the Stage", live sports/politics copy) |
 | **reuters.com** | **BLOCKED, reported honestly** | `ERROR: The source is protected by an access challenge. Choose another copy.` — no silent junk, no fake success |
 | **bloomberg.com** | **DEGRADED** | 50KB returned, but it's the corporate footer/nav shell (Terminal demo links, support numbers) — not the news homepage; the JS-rendered headline layer wasn't captured |
@@ -32,14 +32,14 @@ Method: confirmed each site's actual robots.txt disallow rules for AI crawlers v
 
 Four clean passes on sites that explicitly disallow every AI crawler in robots.txt (NYT, WaPo, Guardian, Glassdoor) — the honor-system file doesn't stop a fetch that never claims to be an AI bot. One honest, explicit failure on Reuters — the app-shell/challenge detector said so instead of returning a blank page as if it were content, which is the "an error never renders as absence" rule working as designed.
 
-Nothing here used the shadow-library or Sci-Hub rungs (Sci-Hub/SciDB/LibGen/Anna's Archive) — those are scholarly-paper rungs, not general news sites, and are config-gated behind mirror URLs this install doesn't have configured.
+Nothing here used the mirror-provider rungs (DOI mirror/DOI viewer/MD5 catalog/IPFS catalog) — those are scholarly-paper rungs, not general news sites, and are config-gated behind mirror URLs this install doesn't have configured.
 
 ## Follow-up: does the browser rung fix Bloomberg and WSJ?
 
 `fetch.browser` is already `true` on this install (`~/.config/pfm/harvester.config.json`). Ground truth pulled straight from `.cache/stats.jsonl` — the harvester's own per-attempt scoreboard, which records which rung actually served each result (`"detail"` field), redacted out of the public MCP/CLI response but visible on disk:
 
 | Site | Rung that actually served the result | Verdict |
-|---|---|---|
+| --- | --- | --- |
 | `wsj.com` | `browser-chrome` — the real headless-Chrome render **already ran** | **No fix available** — this IS the browser rung's output. A real Chrome render of the WSJ homepage returns section headers only ("Top Stories", "Artificial Intelligence", "Homes") with no teaser text; that's what the page serves an unauthenticated visitor, browser or not. The ceiling is the site's paywall structure, not a rendering gap. |
 | `bloomberg.com` | `jina` — on both the homepage and `/news`, every retry | **Browser rung never fires** — `jina`'s proxy read returns enough word count (the corporate footer/nav block) to pass the ladder's `usableContent()` check, so the ladder returns before ever trying `defuddle` or `browser`. Confirmed by re-running against `/news` too: identical jina-sourced footer both times. |
 
@@ -48,10 +48,10 @@ Read on this: WSJ is a closed case — Harvester's best tool already ran and tha
 ## Improvement candidates, ranked (found live, this session — grounded in code, not speculation)
 
 1. **`usableContent()` has almost no bar.** `pfm/internal/harvest/content.go:35-42` — for HTML/txt it's `len(strings.TrimSpace(content)) >= 1`. Any non-empty response wins, including Bloomberg's corporate footer nav. This is the exact, sole cause of today's Bloomberg miss. Fix: a minimum word-count / link-density threshold so a nav-shaped page doesn't out-rank an unrun `browser` attempt.
-2. **The rung that served a result is fully hidden from the caller**, even for legitimate methods. `.cache/stats.jsonl`'s `detail` field (`direct`/`jina`/`browser-chrome`/…) is the only place it's recorded, and `public.go`'s redaction strips it from every public/MCP/CLI response — the same treatment as the shadow-mirror rungs, which SHOULD stay hidden. Diagnosing today's Bloomberg/WSJ split took a direct read of that private file. Splitting the redaction — keep Sci-Hub/LibGen/Annas/SciDB concealed, surface `direct/jina/defuddle/browser/wayback/ocr` as a `method:` field — turns a 10-minute private-file dig into a visible fact.
+2. **The rung that served a result is fully hidden from the caller**, even for legitimate methods. `.cache/stats.jsonl`'s `detail` field (`direct`/`jina`/`browser-chrome`/…) is the only place it's recorded, and `public.go`'s redaction strips it from every public/MCP/CLI response — the same treatment as the mirror-provider rungs, which SHOULD stay hidden. Diagnosing today's Bloomberg/WSJ split took a direct read of that private file. Splitting the redaction — keep the DOI mirror/MD5 catalog/IPFS catalog/DOI viewer providers concealed, surface `direct/jina/defuddle/browser/wayback/ocr` as a `method:` field — turns a 10-minute private-file dig into a visible fact.
 3. **No per-domain rung memory.** Every fetch restarts the ladder from `direct`. A host the ladder has already learned needs `browser` (or already learned is fine at `direct`) pays the same jina-then-fail tax every single time — and on Bloomberg, keeps landing on the same false-positive `jina` result forever, never escalating. A small "last known good rung per host" cache would fix the *recurrence* of today's bug even before #1 lands.
 4. **Sequential short-circuit, no race.** For a `browser`-eligible fetch, only one rung ever runs — the first to clear the (weak) bar. A bounded race between `jina`/`defuddle` and `browser`, keeping the denser result, would catch cases like Bloomberg without abandoning the fast path for the common case where `direct` is already right.
 5. **No content-confidence signal reaches the caller.** WSJ's header-only page and NYT's full front page currently look structurally identical to a downstream caller (`harvest ask` included) — both are just "success". A coarse `content_confidence: low|medium|high` (word count, link density, presence of a story body) would let a caller know to treat a thin result skeptically instead of quoting it as if it were the full article.
-6. **The shadow-library/Sci-Hub rung is entirely dark on this install.** `~/.config/pfm/harvester.config.json` has no `scholarly` block — `sciHubURL`, `sciDBURL`, `libGenURL`, `annasURL`, `googleScholarURL` are all unset. Every fetch tonight ran the legit ladder only (OA fan-out + direct/jina/defuddle/browser/wayback/ocr). Don't claim "bypasses Sci-Hub" live on this machine without configuring it first — and `scihub.go` itself (385 lines) was never deep-read by any tracer, so its correctness is unverified even if it were turned on.
+6. **The mirror-provider rung is entirely dark on this install.** `~/.config/pfm/harvester.config.json` has no `scholarly` block — `doiMirrorURL`, `doiViewerURL`, `md5CatalogURL`, `ipfsCatalogURL`, `googleScholarURL` are all unset. Every fetch tonight ran the legit ladder only (OA fan-out + direct/jina/defuddle/browser/wayback/ocr). Don't claim "bypasses the DOI mirror" live on this machine without configuring it first — and `doi_mirror.go` itself (385 lines) was never deep-read by any tracer, so its correctness is unverified even if it were turned on.
 
 Deliberately NOT recommended: anything that solves an *interactive* challenge (CAPTCHA, Turnstile puzzle). The code comment at `harvest.go:404-408` states the boundary explicitly — the browser rung "never solves anything interactive" — and that's the correct line to hold, not a gap to close.
