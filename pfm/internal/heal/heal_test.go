@@ -185,6 +185,38 @@ func (jail *codexJail) addThreadWithRecords(t *testing.T, id string, records []j
 	return append(offsets, int64(content.Len()))
 }
 
+// addThreadWithLines writes a rollout from raw physical lines — no JSON
+// encoding applied — so a test can plant a line that will not parse at all,
+// which addThreadWithRecords can never produce. It registers the thread and
+// returns offsets matching addThread's / addThreadWithRecords' contract.
+func (jail *codexJail) addThreadWithLines(t *testing.T, id string, lines []string) []int64 {
+	t.Helper()
+	path := filepath.Join(jail.root, "sessions", "rollout-"+id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var content strings.Builder
+	offsets := make([]int64, 0, len(lines))
+	for _, line := range lines {
+		offsets = append(offsets, int64(content.Len()))
+		content.WriteString(line)
+		content.WriteString("\n")
+	}
+	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := openJailDB(t, jail.stores.State)
+	defer state.Close()
+	execJail(
+		t,
+		state,
+		"INSERT INTO threads(id, rollout_path) VALUES(?, ?)",
+		id,
+		path,
+	)
+	return append(offsets, int64(content.Len()))
+}
+
 func (jail *codexJail) setCursor(t *testing.T, id string, offset, ordinal int64) {
 	t.Helper()
 	execJail(
@@ -739,5 +771,115 @@ func TestUnreadableRolloutIsUnscanned(t *testing.T) {
 	}
 	if rows := jail.projectionRows(t, wedged); rows != 3 {
 		t.Fatalf("an UNSCANNED projection lost rows: %d remain, want 3", rows)
+	}
+}
+
+// A record with no "ordinal" key at all is the same NONCANONICAL refusal as
+// a duplicate or a gap: scanOrdinals' "carries no ordinal" Kind, reached
+// through a stale (WEDGED) cursor, and --apply must leave the projection
+// untouched, taking no backup.
+func TestRecordWithoutOrdinalIsNoncanonical(t *testing.T) {
+	jail := newCodexJail(t)
+	const id = "88888888-8888-4888-8888-888888888888"
+	offsets := jail.addThreadWithRecords(t, id, []jailRecord{
+		{Ordinal: int64p(0)},
+		{Ordinal: int64p(1)},
+		{Ordinal: nil, Type: "event_msg", PayloadType: "token_count"},
+		{Ordinal: int64p(2)},
+		{Ordinal: int64p(3)},
+	})
+	// A stale cursor: it claims an ordinal the file does not carry at that
+	// offset, so classify reports WEDGED and the full-file scan runs.
+	jail.setCursor(t, id, offsets[4], 99)
+
+	report, err := Sweep(context.Background(), jail.stores, "")
+	if err != nil {
+		t.Fatalf("Sweep() error = %v", err)
+	}
+	if len(report.Threads) != 1 {
+		t.Fatalf("Sweep() returned %d threads, want 1", len(report.Threads))
+	}
+	thread := report.Threads[0]
+	if thread.Verdict != VerdictNoncanonical {
+		t.Fatalf("verdict = %s (%s), want NONCANONICAL", thread.Verdict, thread.Detail)
+	}
+	if !strings.Contains(thread.Detail, "line 3 carries no ordinal") {
+		t.Fatalf("Detail = %q, want it to name the missing-ordinal line", thread.Detail)
+	}
+	if !strings.Contains(thread.Detail, "event_msg/token_count") {
+		t.Fatalf("Detail = %q, want the anomalous record's type", thread.Detail)
+	}
+
+	runner, err := New(jail.root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := runner.Run(context.Background(), Options{Apply: true})
+	if err != nil {
+		t.Fatalf("Run(--apply) error = %v", err)
+	}
+	if len(applied.Healed) != 0 {
+		t.Fatalf("a NONCANONICAL thread was healed: %v", applied.Healed)
+	}
+	if rows := jail.projectionRows(t, id); rows != 3 {
+		t.Fatalf("a NONCANONICAL projection lost rows: %d remain, want 3", rows)
+	}
+	if applied.BackupDir != "" {
+		t.Fatalf("a run with only a NONCANONICAL thread took a backup: %s", applied.BackupDir)
+	}
+}
+
+// A physical line that will not parse as JSON at all is the same
+// NONCANONICAL refusal as any other anomaly — scanOrdinals' "is unparseable"
+// Kind. An unparseable record carries no type to report, so the Detail's
+// trailing "(%s)" clause must not render as the empty, meaningless "()".
+func TestUnparseableRecordIsNoncanonical(t *testing.T) {
+	jail := newCodexJail(t)
+	const id = "99999999-9999-4999-8999-999999999999"
+	offsets := jail.addThreadWithLines(t, id, []string{
+		`{"ordinal":0,"type":"event_msg","payload":{"type":"message"}}`,
+		`{"ordinal":1,"type":"event_msg","payload":{"type":"message"}}`,
+		`{"ordinal":2,"type":"event_msg"`, // truncated: not valid JSON
+		`{"ordinal":2,"type":"event_msg","payload":{"type":"message"}}`,
+		`{"ordinal":3,"type":"event_msg","payload":{"type":"message"}}`,
+	})
+	// A stale cursor: it claims an ordinal the file does not carry at that
+	// offset, so classify reports WEDGED and the full-file scan runs.
+	jail.setCursor(t, id, offsets[4], 99)
+
+	report, err := Sweep(context.Background(), jail.stores, "")
+	if err != nil {
+		t.Fatalf("Sweep() error = %v", err)
+	}
+	if len(report.Threads) != 1 {
+		t.Fatalf("Sweep() returned %d threads, want 1", len(report.Threads))
+	}
+	thread := report.Threads[0]
+	if thread.Verdict != VerdictNoncanonical {
+		t.Fatalf("verdict = %s (%s), want NONCANONICAL", thread.Verdict, thread.Detail)
+	}
+	if !strings.Contains(thread.Detail, "line 3 is unparseable") {
+		t.Fatalf("Detail = %q, want it to name the unparseable line", thread.Detail)
+	}
+	if strings.Contains(thread.Detail, "()") {
+		t.Fatalf("Detail = %q, an unparseable record has no type to print in parens", thread.Detail)
+	}
+
+	runner, err := New(jail.root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := runner.Run(context.Background(), Options{Apply: true})
+	if err != nil {
+		t.Fatalf("Run(--apply) error = %v", err)
+	}
+	if len(applied.Healed) != 0 {
+		t.Fatalf("a NONCANONICAL thread was healed: %v", applied.Healed)
+	}
+	if rows := jail.projectionRows(t, id); rows != 3 {
+		t.Fatalf("a NONCANONICAL projection lost rows: %d remain, want 3", rows)
+	}
+	if applied.BackupDir != "" {
+		t.Fatalf("a run with only a NONCANONICAL thread took a backup: %s", applied.BackupDir)
 	}
 }

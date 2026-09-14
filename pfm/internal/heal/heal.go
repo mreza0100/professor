@@ -330,10 +330,7 @@ func applyOrdinalScan(
 	}
 	if ok {
 		return VerdictNoncanonical,
-			fmt.Sprintf(
-				"%s; line %d %s ordinal %d at offset %d (%s)",
-				detail, found.Line, found.Kind, found.Ordinal, found.Offset, found.Type,
-			),
+			fmt.Sprintf("%s; %s", detail, found.clause()),
 			size
 	}
 	return verdict, detail, size
@@ -344,10 +341,32 @@ func applyOrdinalScan(
 type anomaly struct {
 	Line     int    // 1-based physical line
 	Offset   int64  // byte offset of the record's first byte
-	Expected int64  // the ordinal a canonical file carries at this line (line-1)
+	Expected int64  // the ordinal the running counter expected at this record
 	Ordinal  int64  // -1 when the record carries none
 	Kind     string // "repeats", "skips to", "carries no ordinal", "is unparseable"
 	Type     string // "event_msg/thread_settings_applied" — record type + payload type
+}
+
+// clause renders one anomaly as the trailing Detail clause a NONCANONICAL
+// verdict appends. "carries no ordinal" has no ordinal to name and
+// "is unparseable" has neither an ordinal nor a record type to name, so each
+// kind gets its own shape rather than a single format string that would
+// print a meaningless "ordinal -1" or an empty "()".
+func (found anomaly) clause() string {
+	switch found.Kind {
+	case "is unparseable":
+		return fmt.Sprintf("line %d is unparseable at offset %d", found.Line, found.Offset)
+	case "carries no ordinal":
+		return fmt.Sprintf(
+			"line %d carries no ordinal at offset %d (%s)",
+			found.Line, found.Offset, found.Type,
+		)
+	default:
+		return fmt.Sprintf(
+			"line %d %s ordinal %d at offset %d (%s)",
+			found.Line, found.Kind, found.Ordinal, found.Offset, found.Type,
+		)
+	}
 }
 
 // openRollout opens a rollout for a full-file ordinal scan. It is a package
