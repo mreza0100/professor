@@ -1,6 +1,6 @@
 # awesome-opencode/awesome-opencode — submission research
 
-Research-only. Read-only GitHub access via `gh` (repo view, contents API, PR list). Nothing opened, forked, starred, or commented. Candidate: **Professor**, <https://github.com/mreza0100/professor> (MIT, ~4 stars, created 2026-04-25, active daily).
+Research-only. Read-only GitHub access via `gh` (repo view, contents API, PR list). Nothing opened, forked, starred, or commented. Candidate: **Professor**, <https://github.com/rezzminator/professor> (MIT, ~4 stars, created 2026-04-25, active daily).
 
 ## 1. Exact mechanics
 
@@ -53,7 +53,7 @@ Sampled via `gh pr list --repo awesome-opencode/awesome-opencode --state {merged
 
 ```yaml
 name: Professor
-repo: https://github.com/mreza0100/professor
+repo: https://github.com/rezzminator/professor
 tagline: Fleet-boost discipline layer for Claude Code, Codex & OpenCode agents
 description: An LLM-harness fleet boost framework that turns your AI coding agents into a disciplined engineering team you can see, message, and hold to the rules. Ships a compiled .opencode/ layer (agents, /commands, skill symlinks, opencode.jsonc with pinned denies) generated from its Claude sources, plus pfm, a Go CLI/TUI that lists OpenCode chats alongside Claude Code and Codex sessions.
 scope:
@@ -65,7 +65,7 @@ tags:
   - multi-agent
   - fleet-management
   - cli
-homepage: https://github.com/mreza0100/professor
+homepage: https://github.com/rezzminator/professor
 ```
 
 (`tagline` is 66 chars, under the 120-char schema cap. `min_version` and `installation` omitted — not verified against a specific OpenCode version pin or a one-shot install command from the repo's own docs; including an unverified value would violate this task's "invent nothing" boundary.)
@@ -81,7 +81,7 @@ homepage: https://github.com/mreza0100/professor
 
 ## Details
 **Name:** Professor
-**Repository:** https://github.com/mreza0100/professor
+**Repository:** https://github.com/rezzminator/professor
 **Tagline:** Fleet-boost discipline layer for Claude Code, Codex & OpenCode agents
 
 ## Checklist
@@ -97,7 +97,7 @@ homepage: https://github.com/mreza0100/professor
 
 - **Staleness:** no PR has been merged in this repo since 2026-07-03 (~10 weeks as of 2026-09-14); zero commits of any kind (not even bot README-regen commits) since that date; 40+ open PRs are unaddressed. A correctly-formed, schema-valid PR is very likely to sit indefinitely rather than merge on any predictable timeline. This is the dominant risk, independent of submission quality.
 - **Scope fit:** `data/projects/` is the right category (Professor is a broader cross-runtime framework, not an OpenCode-only plugin/theme/agent-pack), consistent with how similar multi-purpose entries (e.g. Vestige, eval-harness, opentab) were categorized as "projects."
-- **Repo URL discrepancy:** this task's candidate URL is `https://github.com/mreza0100/professor`; an earlier draft in this repo's `docs/demo/awesome-list-entries.md` §7 used `https://github.com/rezzminator/professor` for the same project and proposed a `<details>`/badge-style entry — that draft predates discovery that the list is YAML-driven (no hand-written `<details>` block is ever committed; the generator produces the README). This file supersedes that entry's format for this specific list; the org/user portion of the URL should be confirmed against the actual live repo before any real submission.
+- **Repo URL:** the account was renamed from `mreza0100` to `rezzminator`; every link here uses `https://github.com/rezzminator/professor`, the live canonical repo. `docs/demo/awesome-list-entries.md` §7 proposed a `<details>`/badge-style entry that predates discovery that the list is YAML-driven (the generator produces the README); this file supersedes that entry's format for this list.
 - **"Maintained" criterion:** contributing.md requires "active commits within the last 6 months" of the *submitted project* (Professor qualifies — daily activity) — not of the awesome-list itself, so this is a pass condition for us, not a blocker, though it doesn't offset the list's own staleness above.
 
 ## Gaps

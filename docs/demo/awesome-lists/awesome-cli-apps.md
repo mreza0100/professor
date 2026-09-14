@@ -2,7 +2,7 @@
 
 Research-only. Read-only on GitHub throughout — no PR, issue, fork, star, or comment was opened. All facts below verified via `gh` and raw file fetches on 2026-09-14.
 
-Candidate: **pfm**, the Go CLI/TUI of Professor — <https://github.com/mreza0100/professor> — MIT, ~4 stars, created 2026-04-25, active daily.
+Candidate: **pfm**, the Go CLI/TUI of Professor — <https://github.com/rezzminator/professor> — MIT, ~4 stars, created 2026-04-25, active daily.
 
 ## 1. Mechanics
 
@@ -92,7 +92,7 @@ pfm's entry is appended **immediately after AgentBridge, before the blank line a
 **Entry to append to `readme.md`, `### Agents`, directly after the AgentBridge line:**
 
 ```
-- [pfm](https://github.com/mreza0100/professor) - Lists and controls every AI coding chat on the machine across accounts, with cross-chat messaging and account-preserving reload.
+- [pfm](https://github.com/rezzminator/professor) - Lists and controls every AI coding chat on the machine across accounts, with cross-chat messaging and account-preserving reload.
 ```
 
 - Starts with a capital, ends with a period, no redundant "CLI"/"terminal" wording — per `contributing.md`.
@@ -110,7 +110,7 @@ pfm's entry is appended **immediately after AgentBridge, before the blank line a
 
 - [x] I've read the contribution guidelines.
 
-**Repo or homepage link:** https://github.com/mreza0100/professor
+**Repo or homepage link:** https://github.com/rezzminator/professor
 
 **Description:** Go CLI/TUI that lists and controls every AI coding chat on the machine — Claude Code, Codex, OpenCode — across accounts, with cross-chat messaging and account-preserving reload.
 
