@@ -35,9 +35,10 @@ type Notice struct {
 }
 
 type semanticVersion struct {
-	major int
-	minor int
-	patch int
+	major      int
+	minor      int
+	patch      int
+	prerelease bool
 }
 
 // Read returns a notice only when the last successful lookup found a release
@@ -71,7 +72,7 @@ func Read(path, current string) (Notice, bool, error) {
 // already-known update disappear.
 func Check(ctx context.Context, path, current, latestURL string, client *http.Client) error {
 	if _, ok := parseVersion(current); !ok {
-		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH", current)
+		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
 	release, err := acquire(path + ".lock")
 	if err != nil {
@@ -219,10 +220,15 @@ func normalizeVersion(value string) string {
 
 func parseVersion(value string) (semanticVersion, bool) {
 	value = strings.TrimPrefix(normalizeVersion(value), "v")
+	var prerelease bool
 	if separator := strings.IndexAny(value, "-+"); separator >= 0 {
 		if separator == 0 || separator == len(value)-1 {
 			return semanticVersion{}, false
 		}
+		// A "-" suffix is a pre-release (SemVer §9); a "+" suffix alone is
+		// build metadata (§10) and carries no ordering weight of its own, so
+		// only a "-" that appears before any "+" counts.
+		prerelease = value[separator] == '-'
 		value = value[:separator]
 	}
 	parts := strings.Split(value, ".")
@@ -240,7 +246,7 @@ func parseVersion(value string) (semanticVersion, bool) {
 		}
 		numbers[index] = number
 	}
-	return semanticVersion{major: numbers[0], minor: numbers[1], patch: numbers[2]}, true
+	return semanticVersion{major: numbers[0], minor: numbers[1], patch: numbers[2], prerelease: prerelease}, true
 }
 
 func parseReleaseVersion(value string) (semanticVersion, bool) {
@@ -258,5 +264,12 @@ func newer(candidate, current semanticVersion) bool {
 	if candidate.minor != current.minor {
 		return candidate.minor > current.minor
 	}
-	return candidate.patch > current.patch
+	if candidate.patch != current.patch {
+		return candidate.patch > current.patch
+	}
+	// Same core version: a release beats its own pre-release (SemVer §11).
+	// Two pre-releases of one core are never newer than each other here —
+	// candidate is always a published tag (parseReleaseVersion rejects any
+	// suffix), so no identifier ordering is needed.
+	return !candidate.prerelease && current.prerelease
 }

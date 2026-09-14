@@ -50,6 +50,58 @@ func TestLocalHotfixVersionStillDiscoversNewRelease(t *testing.T) {
 	}
 }
 
+func TestReadOffersReleaseToItsOwnPrerelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.78.0")
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	cache := filepath.Join(t.TempDir(), "update.json")
+	const current = "0.78.0-alpha"
+	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+		t.Fatalf("Check(prerelease) error = %v", err)
+	}
+	notice, found, err := Read(cache, current)
+	if err != nil || !found || notice.Latest != "v0.78.0" {
+		t.Fatalf("Read(prerelease current vs its own release) notice=%#v found=%t err=%v, want offered", notice, found, err)
+	}
+}
+
+func TestReadDoesNotOfferAnOlderReleaseToAPrerelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.77.0")
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	cache := filepath.Join(t.TempDir(), "update.json")
+	const current = "0.78.0-alpha"
+	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+		t.Fatalf("Check(prerelease vs older release) error = %v", err)
+	}
+	if notice, found, err := Read(cache, current); err != nil || found {
+		t.Fatalf("Read(prerelease vs older release) notice=%#v found=%t err=%v, want no update row", notice, found, err)
+	}
+}
+
+func TestReadDoesNotOfferAReleaseToItsOwnBuildMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.78.0")
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	cache := filepath.Join(t.TempDir(), "update.json")
+	const current = "0.78.0+build.5"
+	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+		t.Fatalf("Check(build metadata current) error = %v", err)
+	}
+	if notice, found, err := Read(cache, current); err != nil || found {
+		t.Fatalf("Read(build metadata current vs same-core release) notice=%#v found=%t err=%v, want no update row (build metadata is not a pre-release)", notice, found, err)
+	}
+}
+
 func TestFailedRefreshPreservesLastSuccessfulNotice(t *testing.T) {
 	good := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.61.2")

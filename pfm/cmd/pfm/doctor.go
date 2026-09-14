@@ -146,6 +146,7 @@ func runDoctor(
 		}
 	}
 	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
+	warnings += installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts)
 	verboseDir := ""
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")

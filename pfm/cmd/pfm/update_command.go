@@ -12,12 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/update"
 )
 
 // These seams keep update tests entirely inside their throwaway repositories;
@@ -29,62 +29,6 @@ var (
 	updateRollbackInstall = applyUpdateInstall
 	updateRollbackDoctor  = runUpdateDoctor
 )
-
-type updateVersion struct {
-	major int
-	minor int
-	patch int
-}
-
-func (version updateVersion) less(other updateVersion) bool {
-	if version.major != other.major {
-		return version.major < other.major
-	}
-	if version.minor != other.minor {
-		return version.minor < other.minor
-	}
-	return version.patch < other.patch
-}
-
-func parseUpdateVersion(tag string) (updateVersion, bool) {
-	parts := strings.Split(strings.TrimSpace(tag), ".")
-	if len(parts) != 3 || !strings.HasPrefix(parts[0], "v") {
-		return updateVersion{}, false
-	}
-	major, err := strconv.Atoi(strings.TrimPrefix(parts[0], "v"))
-	if err != nil || major < 0 {
-		return updateVersion{}, false
-	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil || minor < 0 {
-		return updateVersion{}, false
-	}
-	patch, err := strconv.Atoi(parts[2])
-	if err != nil || patch < 0 {
-		return updateVersion{}, false
-	}
-	return updateVersion{major: major, minor: minor, patch: patch}, true
-}
-
-func selectHighestSemver(tags []string) (string, error) {
-	ordered := append([]string(nil), tags...)
-	sort.Strings(ordered)
-	var selected string
-	var selectedVersion updateVersion
-	for _, tag := range ordered {
-		version, ok := parseUpdateVersion(tag)
-		if !ok {
-			continue
-		}
-		if selected == "" || selectedVersion.less(version) {
-			selected, selectedVersion = tag, version
-		}
-	}
-	if selected == "" {
-		return "", errors.New("no semantic-version tags (expected vMAJOR.MINOR.PATCH)")
-	}
-	return selected, nil
-}
 
 func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
@@ -162,9 +106,6 @@ func updateRepository(
 		return fmt.Errorf("resolve current revision: %w", err)
 	}
 	previousRef = strings.TrimSpace(previousRef)
-	if _, err := updateGitOutput(ctx, repo, "symbolic-ref", "--quiet", "--short", "HEAD"); err != nil {
-		return errors.New("source checkout is detached; checkout its update branch before running pfm update")
-	}
 
 	if err := updateGitRun(ctx, repo, "fetch", "--tags"); err != nil {
 		return fmt.Errorf("fetch tags: %w", err)
@@ -176,11 +117,11 @@ func updateRepository(
 	tags := strings.Fields(tagOutput)
 	target := strings.TrimSpace(requestedTag)
 	if target == "" {
-		target, err = selectHighestSemver(tags)
+		target, err = update.SelectHighest(tags)
 		if err != nil {
 			return fmt.Errorf("resolve latest release: %w", err)
 		}
-	} else if _, ok := parseUpdateVersion(target); !ok {
+	} else if _, ok := update.ParseVersion(target); !ok {
 		return fmt.Errorf("invalid target tag %q (expected vMAJOR.MINOR.PATCH)", target)
 	}
 	if !containsString(tags, target) {
@@ -200,9 +141,9 @@ func updateRepository(
 		}
 	} else {
 		currentTag, describeErr := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
-		currentVersion, currentOK := parseUpdateVersion(strings.TrimSpace(currentTag))
-		targetVersion, targetOK := parseUpdateVersion(target)
-		if describeErr == nil && currentOK && targetOK && targetVersion.less(currentVersion) {
+		currentVersion, currentOK := update.ParseVersion(strings.TrimSpace(currentTag))
+		targetVersion, targetOK := update.ParseVersion(target)
+		if describeErr == nil && currentOK && targetOK && targetVersion.Less(currentVersion) {
 			return fmt.Errorf("target %s would downgrade source from %s", target, strings.TrimSpace(currentTag))
 		}
 	}
@@ -316,7 +257,38 @@ func updateRepository(
 		)
 	}
 	fmt.Fprintf(stdout, "updated %s from %s\n", target, repo)
+	if !sourceAlreadyContainsTarget {
+		previousTag, notePaths, notesErr := releaseNotesForUpdate(ctx, repo, previousRef, target)
+		switch {
+		case notesErr != nil:
+			fmt.Fprintf(stdout, "release notes: cannot list (%v) — read every releases/v*.md in %s newer than your previous install\n", notesErr, repo)
+		case len(notePaths) == 0:
+			fmt.Fprintf(stdout, "release notes: none between %s and %s\n", previousTag, target)
+		default:
+			fmt.Fprintf(stdout, "release notes to read (%s → %s, %d release(s)):\n", previousTag, target, len(notePaths))
+			for _, path := range notePaths {
+				fmt.Fprintf(stdout, "  %s\n", filepath.Join(repo, path))
+			}
+		}
+	}
 	return nil
+}
+
+// releaseNotesForUpdate resolves the two git calls the release-notes report
+// needs — the tag previousRef was installed from, and the releases/ listing
+// at target — then hands the pure filtering off to update.ReleaseNotes.
+func releaseNotesForUpdate(ctx context.Context, repo, previousRef, target string) (previous string, paths []string, err error) {
+	previousTag, err := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
+	if err != nil {
+		return "", nil, fmt.Errorf("describe previous release: %w", err)
+	}
+	previousTag = strings.TrimSpace(previousTag)
+	listing, err := updateGitOutput(ctx, repo, "ls-tree", "--name-only", target, "releases/")
+	if err != nil {
+		return previousTag, nil, fmt.Errorf("list release notes at %s: %w", target, err)
+	}
+	paths, err = update.ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
+	return previousTag, paths, err
 }
 
 type updateReplacement struct {

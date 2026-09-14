@@ -11,9 +11,10 @@ import (
 
 // GlobalAgentsOptions selects the host HOME whose global Codex agents get
 // (re)compiled and installed. The source directory is always
-// {SourceRepo}/templates/global/agents; installs land at {Home}/.claude/agents
-// (a symlink to the raw .md, Claude reads it directly) and {Home}/.codex/agents
-// (a symlink to the compiled .toml, Codex reads it directly).
+// {SourceRepo}/templates/global/agents; installs land at {ClaudeConfigDir}/
+// agents for every configured Claude account (a symlink to the raw .md,
+// Claude reads it directly) and {Home}/.codex/agents (a symlink to the
+// compiled .toml, Codex reads it directly).
 type GlobalAgentsOptions struct {
 	Home string
 	// SourceRepo is the clone the symlink targets and the source-repo
@@ -22,7 +23,13 @@ type GlobalAgentsOptions struct {
 	// caller that never sets it (pfm codex agents has no --source-repo flag)
 	// keeps today's default.
 	SourceRepo string
-	Mode       Mode
+	// ClaudeConfigDirs are the Claude config dirs whose agents/ registry
+	// receives one link per global agent — every account the host has
+	// configured, the same fanout the installer's retire paths already walk.
+	// Nil or empty means {Home}/.claude alone: the legacy single-account
+	// behavior every caller that never learned about accounts still gets.
+	ClaudeConfigDirs []string
+	Mode             Mode
 }
 
 // GlobalAgentCompiled is one desired TOML beside its source .md. Build writes
@@ -85,8 +92,9 @@ var (
 // RunGlobalAgents is the Go port of the retired host script
 // ~/.professor/templates/global/agents/build-global-agents.py: it compiles
 // every {SourceRepo}/templates/global/agents/*.md into a sibling TOML,
-// validates every compiled TOML parses, then SYMLINKS {Home}/.claude/agents
-// to the .md sources and {Home}/.codex/agents to the compiled .toml files —
+// validates every compiled TOML parses, then SYMLINKS every configured
+// Claude agents registry (ClaudeConfigDirs, {Home}/.claude by default) to
+// the .md sources and {Home}/.codex/agents to the compiled .toml files —
 // updates to the source repo propagate through the link, no reinstall
 // required. A regular-file copy already at a desired target (the shape the
 // old copy-based installer left behind) is replaced with the link; a
@@ -149,6 +157,13 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		compiledAgents = append(compiledAgents, compiledAgent{mdSource: src, tomlOutput: out, tomlContent: []byte(content)})
 	}
 
+	// One Claude agents/ registry per configured account; an installer that
+	// never names its accounts keeps the single {Home}/.claude registry.
+	claudeConfigDirs := options.ClaudeConfigDirs
+	if len(claudeConfigDirs) == 0 {
+		claudeConfigDirs = []string{filepath.Join(home, ".claude")}
+	}
+
 	type desiredLink struct {
 		target string
 		source string
@@ -164,8 +179,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		if !same {
 			result.Actions = append(result.Actions, GlobalAgentAction{Kind: "write", Path: agent.tomlOutput})
 		}
+		for _, config := range claudeConfigDirs {
+			links = append(links, desiredLink{target: filepath.Join(config, "agents", filepath.Base(agent.mdSource)), source: agent.mdSource})
+		}
 		links = append(links,
-			desiredLink{target: filepath.Join(home, ".claude", "agents", filepath.Base(agent.mdSource)), source: agent.mdSource},
 			desiredLink{target: filepath.Join(home, ".codex", "agents", filepath.Base(agent.tomlOutput)), source: agent.tomlOutput},
 		)
 	}
@@ -206,7 +223,18 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		}
 	}
 	for _, installed := range result.Installed {
-		if err := ApplyGlobalLink(installed.Path, installed.Source, installed.State); err != nil {
+		// Re-classify against disk: the planning phase described the
+		// filesystem as it was BEFORE any of these links landed, and two
+		// configured accounts can alias one physical registry (the
+		// hand-made {Home}/.claude2/agents -> {Home}/.claude/agents shape),
+		// so a link an earlier iteration wrote already satisfies this
+		// target. Applying the stale "missing" there would fail with
+		// "file exists" on a host that is in fact correctly installed.
+		state, _, err := ClassifyGlobalLink(installed.Path, installed.Source, sourceRepo, GlobalLinkFile)
+		if err != nil {
+			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global agent artifact %s: %w", installed.Path, err)
+		}
+		if err := ApplyGlobalLink(installed.Path, installed.Source, state); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("install global agent artifact %s: %w", installed.Path, err)
 		}
 	}

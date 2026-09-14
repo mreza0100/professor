@@ -84,3 +84,23 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 		t.Fatalf("Find(blank) = %v, want ErrNoExcerpt", err)
 	}
 }
+
+// TestTranscriptRangeSpansALineOverEightMegabytes is a REGRESSION test for
+// transcriptRange's former bufio.Scanner, whose 8 MB max token buffer made it
+// return bufio.ErrTooLong (silently ignored, matching ScanLines's old code)
+// and stop scanning right there — a transcript with a giant single line (a
+// huge tool result) between its first and last timestamped records lost its
+// real First/Last for whatever the scanner had already seen. bytes.Split has
+// no such limit.
+func TestTranscriptRangeSpansALineOverEightMegabytes(t *testing.T) {
+	huge := `{"type":"user","message":{"content":"` + strings.Repeat("x", 9*1024*1024) + `"}}`
+	raw := []byte(
+		`{"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"content":"first"}}` + "\n" +
+			huge + "\n" +
+			`{"type":"user","timestamp":"2026-01-03T00:00:00Z","message":{"content":"last"}}` + "\n",
+	)
+	first, last := transcriptRange(raw)
+	if first != "2026-01-01T00:00:00Z" || last != "2026-01-03T00:00:00Z" {
+		t.Fatalf("transcriptRange() = (%q, %q), want the outer two timestamps around the oversized line", first, last)
+	}
+}
