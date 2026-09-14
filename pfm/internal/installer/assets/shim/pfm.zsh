@@ -81,32 +81,12 @@ cx() {
   fi
 }
 
-# _cx_server <sock> <cwd> <run> — create a Codex chat's tmux server DETACHED with the title
-# plumbing in place before any client draws: the VS Code tab follows '⬢ <window> · <pane title>'
-# (codex owns pane_title — project + busy spinner; pfm converges the window name to the codex
-# thread_name, so a rename shows up in the tab like Claude's /rename does).
-#
-# tmux.titles layer: pfm decides whether it owns the OUTER terminal's title, the shim only
-# relays its line protocol (`<option> <value…>`, name first, value the rest of the line). A host
-# that emits its own OSC title before tmux starts sets tmux.titles.enabled=false and keeps it —
-# pfm then applies NO title option here. Fail-CLOSED on any nonzero exit: a policy we could not
-# read leaves the host's title alone rather than seizing it. automatic-rename is never gated —
-# the window name is the fleet's DNS record and pfm is its only writer.
-_cx_server() {
-  local sock="$1" cwd="$2" run="$3"
-  TMUX= tmux -L "$sock" new-session -d -s "$sock" -c "$cwd" -n Codex "$run" || return 1
-  local _tt_out _tt_line
-  if _tt_out="$("$HOME/.local/bin/pfm" internal tmux-titles 2>&1)"; then
-    while IFS= read -r _tt_line; do
-      [[ -z "$_tt_line" ]] && continue
-      tmux -L "$sock" set -g "${_tt_line%% *}" "${_tt_line#* }"
-    done <<< "$_tt_out"
-  else
-    [[ -n "$_tt_out" ]] && print -u2 "pfm shim: ${_tt_out%%$'\n'*}"
-  fi
-  tmux -L "$sock" setw -g automatic-rename off
-  return 0
-}
+# _cx_server <sock> <cwd> <run> — create the chat's tmux server DETACHED through pfm's one
+# chat-server creator, the same one every other door calls: it is born with the tmux.titles
+# policy (so the VS Code tab follows the window name name-sync converges onto the codex
+# thread_name), automatic-rename off, and its engine's window name. A failure is pfm's own
+# stderr line and a nonzero return, so `cx` never attaches to a server that does not exist.
+_cx_server() { "$HOME/.local/bin/pfm" internal chat-server "$@"; }
 
 # _pfm_in_bunker — true when this shell IS a vsct bunker pane. Chat opens from a bunker exec
 # INTO the tmux client: the viewport dies with the tab instead of lingering as an orphaned

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +81,11 @@ type HarvesterScholarly struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
+	DOIMirrorURL          string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
+	GoogleScholarURL      string
 }
 
 type HarvesterFetch struct {
@@ -142,10 +149,12 @@ type rawHarvesterSearch struct {
 }
 
 type rawHarvesterScholarly struct {
-	ContactEmail          *string `json:"contactEmail,omitempty"`
-	GoogleBooksAPIKey     *string `json:"googleBooksApiKey,omitempty"`
-	CoreAPIKey            *string `json:"coreApiKey,omitempty"`
-	SemanticScholarAPIKey *string `json:"semanticScholarApiKey,omitempty"`
+	ContactEmail          *string           `json:"contactEmail,omitempty"`
+	GoogleBooksAPIKey     *string           `json:"googleBooksApiKey,omitempty"`
+	CoreAPIKey            *string           `json:"coreApiKey,omitempty"`
+	SemanticScholarAPIKey *string           `json:"semanticScholarApiKey,omitempty"`
+	GoogleScholarURL      *string           `json:"googleScholarURL,omitempty"`
+	Mirrors               map[string]string `json:"mirrors,omitempty"`
 }
 
 type rawHarvesterFetch struct {
@@ -199,6 +208,7 @@ var harvesterSourceKeys = []string{
 	"harvester.search.enabled", "harvester.search.searxngURL", "harvester.search.braveApiKey",
 	"harvester.scholarly.contactEmail", "harvester.scholarly.googleBooksApiKey",
 	"harvester.scholarly.coreApiKey", "harvester.scholarly.semanticScholarApiKey",
+	"harvester.scholarly.googleScholarURL",
 	"harvester.fetch.browser", "harvester.fetch.userAgent", "harvester.fetch.proxyURL",
 	"harvester.convert.pdfOcr", "harvester.convert.pdfLayout",
 	"harvester.cache.dir", "harvester.cache.ttlSeconds", "harvester.cache.negativeTtlSeconds",
@@ -234,7 +244,7 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	}
 	harvester.Exists = true
 	var raw rawHarvester
-	if err := decodeStrict(content, &raw); err != nil {
+	if err := decodeStrict(foldRetiredScholarlyKeys(content), &raw); err != nil {
 		return configJSONError(harvester.Path, err, int64(len(content)))
 	}
 	path := harvester.Path
@@ -313,6 +323,32 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		}
 	}
 	if scholarly := raw.Scholarly; scholarly != nil {
+		if scholarly.GoogleScholarURL != nil {
+			value, err := scholarlyBaseURL(path, "googleScholarURL", *scholarly.GoogleScholarURL)
+			if err != nil {
+				return err
+			}
+			harvester.Scholarly.GoogleScholarURL = value
+			file("scholarly.googleScholarURL")
+		}
+		targets := map[string]*string{
+			"doi-mirror":   &harvester.Scholarly.DOIMirrorURL,
+			"doi-viewer":   &harvester.Scholarly.DOIViewerURL,
+			"md5-catalog":  &harvester.Scholarly.MD5CatalogURL,
+			"ipfs-catalog": &harvester.Scholarly.IPFSCatalogURL,
+		}
+		for id, raw := range scholarly.Mirrors {
+			target, ok := targets[id]
+			if !ok {
+				return fmt.Errorf("harvester config %s: scholarly.mirrors: unknown provider %q", path, id)
+			}
+			value, err := scholarlyBaseURL(path, "mirrors."+id, raw)
+			if err != nil {
+				return err
+			}
+			*target = value
+			file("scholarly.mirrors")
+		}
 		for key, pair := range map[string]struct {
 			raw    *string
 			target *string
@@ -451,261 +487,6 @@ func (config Config) MCPServerSource(name string) Source {
 	return config.Source("mcp.servers." + name + ".enabled")
 }
 
-// Migration is the one-time move from the pre-split layout: config.json →
-// pfm.config.json, mcp.servers.harvester → harvester.config.json, and the
-// init-written loopback port 8377 → 18377. `pfm install` plans it in the
-// preview and applies it before it wires clients, so registrations and the
-// daemon agree on the port.
-type Migration struct {
-	LegacyPath string // non-empty: rename this file to Path
-	Path       string
-	// StrayLegacyPath is a pre-split config.json left beside an existing
-	// pfm.config.json — an interrupted migration's leftover; it is parked.
-	StrayLegacyPath string
-	// HarvesterEnabled is the legacy mcp.servers.harvester.enabled to move.
-	HarvesterEnabled *bool
-	MovePort         bool
-	// PortKept names why an init-written 8377 stays: its target collides.
-	PortKept        string
-	harvesterPath   string
-	harvesterExists bool
-}
-
-// Empty reports whether the machine already has the current layout.
-func (migration Migration) Empty() bool {
-	return migration.LegacyPath == "" && migration.StrayLegacyPath == "" && migration.HarvesterEnabled == nil && !migration.MovePort
-}
-
-func (migration Migration) rewrites() bool {
-	return migration.LegacyPath != "" || migration.HarvesterEnabled != nil || migration.MovePort
-}
-
-// Steps renders each planned change as one human line, in apply order.
-func (migration Migration) Steps() []string {
-	var steps []string
-	if migration.LegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, legacyBackupName))
-	}
-	if migration.HarvesterEnabled != nil {
-		steps = append(steps, fmt.Sprintf("move mcp.servers.harvester.enabled=%t → %s", *migration.HarvesterEnabled, migration.harvesterPath))
-	}
-	if migration.MovePort {
-		steps = append(steps, fmt.Sprintf("move mcp.http.port %d → %d (client registrations re-wire in this same install)", legacyDefaultMCPPort, DefaultMCPPort))
-	}
-	if migration.PortKept != "" {
-		steps = append(steps, migration.PortKept)
-	}
-	if migration.StrayLegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, legacyBackupName, migration.Path))
-	}
-	return steps
-}
-
-// Preview returns config as the installer will wire it after ApplyMigration,
-// so an install preview wires exactly the port the apply will. Path stays on
-// the file that exists today: the preview's own reads (the retired authToken
-// probe among them) must see real content, not a file the apply has yet to write.
-func (migration Migration) Preview(config Config) Config {
-	if migration.MovePort {
-		config.MCP.HTTP.Port = DefaultMCPPort
-	}
-	return config
-}
-
-// PlanMigration inspects the machine's pfm config without modifying it.
-func PlanMigration(config Config) (Migration, error) {
-	migration := Migration{Path: config.Path}
-	if !config.Exists {
-		return migration, nil
-	}
-	if filepath.Base(config.Path) == LegacyFileName {
-		migration.LegacyPath = config.Path
-		migration.Path = filepath.Join(filepath.Dir(config.Path), FileName)
-	} else {
-		stray := filepath.Join(filepath.Dir(config.Path), LegacyFileName)
-		exists, err := pathExists(stray)
-		if err != nil {
-			return Migration{}, err
-		}
-		if exists {
-			migration.StrayLegacyPath = stray
-		}
-	}
-	migration.harvesterPath = HarvesterPath(migration.Path)
-	top, err := readTopLevel(config.Path)
-	if err != nil {
-		return Migration{}, err
-	}
-	mcpObject, err := decodeObject(top["mcp"], config.Path, "mcp")
-	if err != nil {
-		return Migration{}, err
-	}
-	servers, err := decodeObject(mcpObject["servers"], config.Path, "mcp.servers")
-	if err != nil {
-		return Migration{}, err
-	}
-	if content, found := servers["harvester"]; found {
-		var server rawMCPServer
-		if err := decodeStrict(content, &server); err != nil {
-			return Migration{}, fmt.Errorf("decode config %s mcp.servers.harvester: %w", config.Path, err)
-		}
-		enabled := false
-		if server.Enabled != nil {
-			enabled = *server.Enabled
-		}
-		migration.HarvesterEnabled = &enabled
-	}
-	if content, found := mcpObject["http"]; found {
-		var httpValue rawMCPHTTP
-		if err := json.Unmarshal(content, &httpValue); err != nil {
-			return Migration{}, fmt.Errorf("decode config %s mcp.http: %w", config.Path, err)
-		}
-		migration.MovePort = httpValue.Port == legacyDefaultMCPPort
-	}
-	if external := config.Harvester.External; migration.MovePort && external.Enabled && external.Port == DefaultMCPPort {
-		// Moving the loopback port onto the external gateway's port would turn
-		// a working machine into one whose config refuses to load.
-		migration.MovePort = false
-		migration.PortKept = fmt.Sprintf("keep mcp.http.port %d: external.port in %s already uses %d", legacyDefaultMCPPort, migration.harvesterPath, DefaultMCPPort)
-	}
-	if _, err := os.Stat(migration.harvesterPath); err == nil {
-		migration.harvesterExists = true
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return Migration{}, fmt.Errorf("inspect harvester config %s: %w", migration.harvesterPath, err)
-	}
-	return migration, nil
-}
-
-// ApplyMigration performs a planned migration. Every write is atomic; the
-// pre-split file is parked only after its successor landed. An interruption
-// between the two leaves both files, which the next PlanMigration reports as
-// StrayLegacyPath and parks — never silently treated as done.
-func ApplyMigration(migration Migration) error {
-	if migration.Empty() {
-		return nil
-	}
-	if migration.rewrites() {
-		if err := rewriteMigratedConfig(migration); err != nil {
-			return err
-		}
-	}
-	park := migration.LegacyPath
-	if park == "" {
-		park = migration.StrayLegacyPath
-	}
-	if park == "" {
-		return nil
-	}
-	backup := filepath.Join(filepath.Dir(park), legacyBackupName)
-	if exists, err := pathExists(backup); err != nil {
-		return err
-	} else if exists {
-		return fmt.Errorf("park pre-split config %s: %s already exists; compare the two, remove the one you no longer need, and rerun", park, backup)
-	}
-	if err := os.Rename(park, backup); err != nil {
-		return fmt.Errorf("park pre-split config %s as %s: %w", park, backup, err)
-	}
-	return nil
-}
-
-func rewriteMigratedConfig(migration Migration) error {
-	source := migration.Path
-	if migration.LegacyPath != "" {
-		source = migration.LegacyPath
-	}
-	top, err := readTopLevel(source)
-	if err != nil {
-		return err
-	}
-	mcpObject, err := decodeObject(top["mcp"], source, "mcp")
-	if err != nil {
-		return err
-	}
-	if migration.HarvesterEnabled != nil {
-		if err := moveHarvesterEnabled(migration); err != nil {
-			return err
-		}
-		servers, err := decodeObject(mcpObject["servers"], source, "mcp.servers")
-		if err != nil {
-			return err
-		}
-		delete(servers, "harvester")
-		if len(servers) == 0 {
-			delete(mcpObject, "servers")
-		} else {
-			mcpObject["servers"], _ = json.Marshal(servers)
-		}
-	}
-	if migration.MovePort {
-		mcpObject["http"], _ = json.Marshal(map[string]int{"port": DefaultMCPPort})
-	}
-	if len(mcpObject) == 0 {
-		delete(top, "mcp")
-	} else {
-		top["mcp"], _ = json.Marshal(mcpObject)
-	}
-	content, err := json.MarshalIndent(top, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode migrated config %s: %w", migration.Path, err)
-	}
-	return writeAtomic(migration.Path, append(content, '\n'))
-}
-
-func pathExists(path string) (bool, error) {
-	if _, err := os.Lstat(path); err == nil {
-		return true, nil
-	} else if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	} else {
-		return false, fmt.Errorf("inspect %s: %w", path, err)
-	}
-}
-
-// moveHarvesterEnabled writes the legacy flag into harvester.config.json. An
-// existing harvester file that already sets enabled wins; its other keys are
-// preserved byte-for-byte in meaning.
-func moveHarvesterEnabled(migration Migration) error {
-	top := map[string]json.RawMessage{}
-	if migration.harvesterExists {
-		existing, err := readTopLevel(migration.harvesterPath)
-		if err != nil {
-			return err
-		}
-		top = existing
-	}
-	if _, set := top["enabled"]; !set {
-		top["enabled"], _ = json.Marshal(*migration.HarvesterEnabled)
-	}
-	content, err := json.MarshalIndent(top, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode harvester config %s: %w", migration.harvesterPath, err)
-	}
-	return writeAtomic(migration.harvesterPath, append(content, '\n'))
-}
-
-func readTopLevel(path string) (map[string]json.RawMessage, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config %s: %w", path, err)
-	}
-	top := map[string]json.RawMessage{}
-	if err := json.Unmarshal(content, &top); err != nil {
-		return nil, configJSONError(path, err)
-	}
-	return top, nil
-}
-
-func decodeObject(content json.RawMessage, path, key string) (map[string]json.RawMessage, error) {
-	object := map[string]json.RawMessage{}
-	if len(content) == 0 {
-		return object, nil
-	}
-	if err := json.Unmarshal(content, &object); err != nil {
-		return nil, fmt.Errorf("decode config %s %s: %w", path, key, err)
-	}
-	return object, nil
-}
-
 // SetHarvesterEnabled atomically flips enabled in harvester.config.json,
 // preserving every other key. Repeating the effective value is a no-op.
 func SetHarvesterEnabled(config Config, enabled bool) (bool, error) {
@@ -762,6 +543,7 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"googleBooksApiKey":     secret(harvester.Scholarly.GoogleBooksAPIKey),
 			"coreApiKey":            secret(harvester.Scholarly.CoreAPIKey),
 			"semanticScholarApiKey": secret(harvester.Scholarly.SemanticScholarAPIKey),
+			"googleScholarURL":      harvester.Scholarly.GoogleScholarURL,
 		},
 		"fetch": map[string]any{
 			"browser": harvester.Fetch.Browser, "userAgent": harvester.Fetch.UserAgent,
@@ -796,4 +578,83 @@ func WriteDefaultHarvester(path string, force bool) error {
 		return fmt.Errorf("encode harvester defaults: %w", err)
 	}
 	return writeAtomic(path, content)
+}
+
+// scholarlyBaseURL trims and validates one scholarly provider base URL; an
+// empty value disables that provider.
+func scholarlyBaseURL(path, key, raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if err := validateHTTPURL(value, true); err != nil {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s %w", path, key, err)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
+	}
+	return value, nil
+}
+
+// retiredScholarlyKeys maps the SHA-256 of each flat per-provider URL key an
+// older harvester.config.json may still carry onto its scholarly.mirrors id.
+var retiredScholarlyKeys = map[string]string{
+	"d60bb4a7d2eb57e2b336ab25e532b8fc127df68256f8572b7f985b30496b9989": "doi-mirror",
+	"005eaee92313cddb07b30ad9c3252ca9daa5296d84e89c291b2cc0130fa44d0c": "doi-viewer",
+	"8819894e6f47fc084419444614f490cd6ab57da1a424f77e9c3fefcddbc7f380": "md5-catalog",
+	"e176c422060328eab8a11936515dd1f5ccd86409eb76b0ceaa11fe7d61198368": "ipfs-catalog",
+}
+
+// foldRetiredScholarlyKeys rewrites retired flat provider keys into
+// scholarly.mirrors so an older config keeps loading unchanged in effect. An
+// explicit mirrors entry wins over a retired key for the same provider.
+// Content that is not a JSON object, or carries no retired key, is returned
+// untouched so decodeStrict reports its errors against the original bytes.
+func foldRetiredScholarlyKeys(content []byte) []byte {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(content, &top); err != nil || top["scholarly"] == nil {
+		return content
+	}
+	var scholarly map[string]json.RawMessage
+	if err := json.Unmarshal(top["scholarly"], &scholarly); err != nil {
+		return content
+	}
+	folded := map[string]json.RawMessage{}
+	for key, value := range scholarly {
+		sum := sha256.Sum256([]byte(key))
+		if id, ok := retiredScholarlyKeys[hex.EncodeToString(sum[:])]; ok {
+			folded[id] = value
+			delete(scholarly, key)
+		}
+	}
+	if len(folded) == 0 {
+		return content
+	}
+	mirrors := map[string]json.RawMessage{}
+	if raw, ok := scholarly["mirrors"]; ok {
+		if err := json.Unmarshal(raw, &mirrors); err != nil {
+			return content
+		}
+	}
+	for id, value := range folded {
+		if _, explicit := mirrors[id]; !explicit {
+			mirrors[id] = value
+		}
+	}
+	var err error
+	if scholarly["mirrors"], err = json.Marshal(mirrors); err != nil {
+		return content
+	}
+	if top["scholarly"], err = json.Marshal(scholarly); err != nil {
+		return content
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return content
+	}
+	return out
 }

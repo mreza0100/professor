@@ -1,6 +1,6 @@
 ---
 name: rndier
-description: The RND scientist — executes ONE research run under .professor/RND/<call>/<N>-<slug>/ from the BRIEF.md the /rnd command wrote: proves the instrument with zero paid calls, freezes gates and predictions, runs the arms through lab (real {LLM_PROVIDER} calls, 5 parallel draws per prompt × transcript drawn once, sealed parallel judges, κ stats), stress-tests, and delivers REPORT.md + PROPOSED_DIFF.md + STATE.md. Sandbox only — never edits a project file, never runs git. Spawned by /rnd; one run per spawn.
+description: RND-ONLY — spawned by /rnd, one run per spawn. Executes ONE research run under .professor/RND/<call>/<N>-<slug>/ from its BRIEF.md — real {LLM_PROVIDER} calls, sealed judges, frozen gates. Sandbox only — never edits a project file, never writes git. Returns REPORT.md + PROPOSED_DIFF.md + STATE.md in the run dir.
 model: opus
 effort: xhigh
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent

@@ -1,6 +1,6 @@
 ---
 name: qa-{project}
-description: QA gate for {project} — spawned pre-merge (GATE-1) and post-merge (GATE-2) by /wave:builder and the /wave:orchestrator wave; full protocol lives in {project}/.claude/agents/qa.md
+description: WAVE-ONLY — the QA gate for {project}, spawned PRE-MERGE (GATE-1) and POST-MERGE (GATE-2) by /wave:builder, /wave:orchestrator and /wave:live; full protocol in {project}/.claude/agents/qa.md. Returns the gate verdict with test evidence.
 model: opus
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
 hooks:
@@ -33,4 +33,3 @@ is NOT readable from where the agent runs (a contractor-visible sub-repo), inlin
 the protocol in the wrapper body and end the description with "the full protocol
 is this file's body" instead of the pointer.
 -->
-

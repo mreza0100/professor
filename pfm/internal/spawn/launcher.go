@@ -42,7 +42,7 @@ func RegisteredLaunchers() []pfmengine.ID {
 func CodexComposerReady(capture string) bool { return composerReady(capture) }
 
 func RenameCodex(ctx context.Context, tmux Tmux, socket, target, name string, timings Timings, trace Trace) (string, error) {
-	named, warning, blocked := nameCodexThread(ctx, tmux, socket, target, name, timings, trace)
+	named, warning, blocked := nameCodexThread(ctx, tmux, socket, target, name, timings, trace, codexRenameProof())
 	if blocked && warning == "" {
 		warning = "composer unavailable; thread was not renamed"
 	}

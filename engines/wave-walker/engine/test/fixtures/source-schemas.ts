@@ -217,7 +217,7 @@ export const WALK = {
         properties: {
           what: { type: 'string' },
           location: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
           failureScenario: {
             type: 'string',
             description: 'the concrete input/state under which this step corrupts, aborts, or lies',
@@ -234,7 +234,7 @@ export const WALK = {
           kind: { type: 'string' },
           where: { type: 'string' },
           detail: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
         },
         required: ['kind', 'where', 'detail'],
       },
@@ -384,7 +384,7 @@ export const FINAL = {
           what: { type: 'string' },
           where: { type: 'string' },
           severity: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
         },
         required: ['what', 'where'],
       },

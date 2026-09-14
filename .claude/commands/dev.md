@@ -1,7 +1,7 @@
 ---
 name: dev
-description: Build, test, typecheck, and inspect this repo's three projects (templates, pfm, walker) through .claude/scripts/dev.sh. Subcommands — status (toolchain + projects + git + install state), install, build, typecheck, verify, test, all — each optionally scoped to one project. Route every build/test invocation here rather than calling go/npm directly, so a missing toolchain reports as TOOLCHAIN-MISSING instead of a silent skip.
-argument-hint: [status|install|build|typecheck|verify|test|all] [templates|pfm|walker]
+description: MANDATORY — route every build, test, typecheck or install here, never go/npm directly. `/dev {status|install|build|typecheck|verify|test|all} [templates|pfm|walker]`, no args = status all; run it before claiming anything works. A missing toolchain reports TOOLCHAIN-MISSING, never a silent skip.
+argument-hint: "[status|install|build|typecheck|verify|test|all] [templates|pfm|walker]"
 ---
 
 # Dev

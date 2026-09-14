@@ -92,7 +92,7 @@ func TestMain(m *testing.M) {
 		}
 		return results
 	}
-	hookProbeOverride = func(home string, machine pfmconfig.Config) []installer.HookProbeResult {
+	installer.HookProbeOverride = func(home string, machine pfmconfig.Config) []installer.HookProbeResult {
 		expected := installer.ExpectedHooks(home, machine)
 		results := make([]installer.HookProbeResult, 0, len(expected))
 		for _, hook := range expected {
@@ -105,7 +105,7 @@ func TestMain(m *testing.M) {
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
-	harnessCaptureOverride = func(_ context.Context, _ pfmconfig.Config, alias string) (harnessCapture, error) {
+	harnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias string) (harnessCapture, error) {
 		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-" + alias + "-5", CLIVersion: "fixture"}, nil
 	}
 	os.Exit(testjail.Run(m))

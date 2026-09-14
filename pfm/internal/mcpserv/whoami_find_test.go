@@ -2,13 +2,15 @@ package mcpserv
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/chat"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -203,35 +205,6 @@ func TestChatInjectCarriesTheThenArgument(t *testing.T) {
 	}
 }
 
-// TestExtractNeedlesMirrorsTheShellAwkPass pins the needle rules themselves:
-// decoration stripped, 20+ characters only, five longest, longest first.
-func TestExtractNeedlesMirrorsTheShellAwkPass(t *testing.T) {
-	excerpt := strings.Join([]string{
-		"# short",
-		"> aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r",
-		"- bbbbbbbbbbbbbbbbbbbbbbbbb",
-		"* cccccccccccccccccccccc   ",
-		"ddddddddddddddddddddd",
-		"eeeeeeeeeeeeeeeeeeeee",
-		"fffffffffffffffffffff",
-		"nineteen characters",
-	}, "\n")
-	needles := extractNeedles(excerpt)
-	want := []string{
-		strings.Repeat("a", 30),
-		strings.Repeat("b", 25),
-		strings.Repeat("c", 22),
-		strings.Repeat("d", 21),
-		strings.Repeat("e", 21),
-	}
-	if !reflect.DeepEqual(needles, want) {
-		t.Fatalf("extractNeedles() = %q, want %q", needles, want)
-	}
-	if got := extractNeedles("all lines are short\nhere"); len(got) != 0 {
-		t.Fatalf("short excerpt produced needles: %q", got)
-	}
-}
-
 // TestChatCaptureBoundsAreAppliedAfterTheCapture keeps the whole-scrollback
 // capture from returning an unbounded payload.
 func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
@@ -264,5 +237,52 @@ func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
 	// A cut that lands inside a rune advances to the next whole one.
 	if got := tailBytes("héllo", 4); got != "llo" {
 		t.Fatalf("tailBytes() = %q, want a whole-rune tail", got)
+	}
+}
+
+// TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf pins the daemon half of
+// self-exclusion: a shared HTTP daemon's environment names whoever launched
+// it, not the MCP caller, so it must neither drop that launcher's transcript
+// nor report it as self_id — it reports that it excluded nobody.
+func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
+	root := setupBackendFixture(t)
+	line := "the daemon launcher is not the asking chat"
+	writeJSONL(t, filepath.Join(root, "claude", "project-alpha", "launcher.jsonl"), []any{
+		map[string]any{"type": "user", "cwd": "/work/alpha", "message": map[string]any{"content": line}},
+	})
+	t.Setenv(resolve.ClaudeSessionEnv, "launcher")
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewConfigured("test", io.Discard, Runtime{
+		Paths: resolved, Chat: chat.Verbs{Warnings: io.Discard}, AllowAmbientIdentity: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	client := connectInMemory(t, service.Server())
+	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: line})
+	if output.SelfID != "" || output.Count != 1 || output.Candidates[0].ID != "launcher" {
+		t.Fatalf("daemon chat_find = %+v; want the launcher's transcript found and no self_id", output)
+	}
+}
+
+// TestChatFindReportsNoMatchAsAnEmptyAnswer pins that a search which ran and
+// matched nothing answers count 0 — an answer, not a tool failure a caller
+// would read as "the search could not run".
+func TestChatFindReportsNoMatchAsAnEmptyAnswer(t *testing.T) {
+	root := setupBackendFixture(t)
+	writeJSONL(t, filepath.Join(root, "claude", "project-alpha", "other.jsonl"), []any{
+		map[string]any{"type": "user", "cwd": "/work/alpha", "message": map[string]any{"content": "an unrelated conversation entirely"}},
+	})
+	t.Setenv(resolve.ClaudeSessionEnv, "")
+	service := newFixtureService(t)
+	defer service.Close()
+	client := connectInMemory(t, service.Server())
+	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: "a sentence no transcript here holds"})
+	if output.Count != 0 || len(output.Candidates) != 0 || len(output.Needles) != 1 {
+		t.Fatalf("chat_find with no match = %+v; want count 0 with the needle it searched", output)
 	}
 }

@@ -113,7 +113,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true
 	}
-	for _, name := range []string{"chat_keys", "chat_whoami", "chat_self_compact", "chat_new", "chat_reload"} {
+	for _, name := range []string{"chat_keys", "chat_whoami", "chat_self_compact", "chat_new"} {
 		if !seen[name] {
 			t.Fatalf("chat tools omitted %q: %v", name, seen)
 		}

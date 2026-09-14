@@ -1,6 +1,6 @@
 ---
 name: documenter
-description: Documentation source of truth — archives pipeline docs, merges shipped decisions into the docs/agents/ hub and clusters, audits cross-references, updates the doc registry (`registry`), regenerates Mermaid workflow diagrams (`graphs`), and bootstraps missing docs. Route permanent documentation updates here. Subcommand `epic` consolidates the current session's work into the active epic for "Load epic" continuation — trigger /documenter epic {epic-name?}.
+description: Source of truth for permanent docs — merges shipped decisions into the docs/agents/ hub and clusters (ARCHIVE after a pipeline, FIX-UPDATE after a fix lands on main); `audit` checks cross-references, `registry` updates the doc registry, `graphs` regenerates Mermaid diagrams, `epic {name?}` consolidates the session into the active epic for "Load epic" continuation. Route permanent-doc updates here.
 argument-hint: [request]
 ---
 
@@ -17,36 +17,36 @@ Read and apply `.claude/commands/quality/doc.md` before creating or editing ANY 
 
 ## Orchestration
 
-ARCHIVE and JC-UPDATE parallelize along **disjoint write-sets**. **Canonical engine: `.claude/workflows/documenter-fanout.js`** — a `mono-documenter` scout maps the blast radius into the scopes below, a collector-tier no-op check drops zero-hit scopes pre-spawn, then one worker per scope merges its slice in parallel. Each worker's merge spec is its **scope card** `docs/commands/documenter/references/scopes/{key}.md` plus the write-rules/Approval card `docs/commands/documenter/references/doc-approval.md`; workers read the two cards, never this file.
+ARCHIVE and FIX-UPDATE parallelize along **disjoint write-sets**. **Canonical engine: `.claude/workflows/documenter-fanout.js`** — a `mono-documenter` scout maps the blast radius into the scopes below, a collector-tier no-op check drops zero-hit scopes pre-spawn, then one worker per scope merges its slice in parallel. Each worker's merge spec is its **scope card** `docs/commands/documenter/references/scopes/{key}.md` plus the write-rules/Approval card `docs/commands/documenter/references/doc-approval.md`; workers read the two cards, never this file.
 
 **Scope table** (the card index — two scopes never name the same file; each key's card is `scopes/{key}.md`):
 
-| Scope           | Owns (write targets)                                   |
+| Scope | Owns (write targets) |
 | --------------- | ------------------------------------------------------ |
-| `{project}`     | `{project}/docs/**` + `docs/agents/graph/{project}/**` |
-| `root-arch`     | `docs/agents/architecture/**`                          |
-| `root-api`      | `docs/agents/api/**`                                   |
-| `root-map`      | `docs/agents/map/**`                                   |
+| `{project}` | `{project}/docs/**` + `docs/agents/graph/{project}/**` |
+| `root-arch` | `docs/agents/architecture/**` |
+| `root-api` | `docs/agents/api/**` |
+| `root-map` | `docs/agents/map/**` |
 | `root-features` | `docs/agents/features/**` + `docs/dev/backlog/backlog.md` |
-| `root-db`       | `docs/agents/db/**` + `docs/agents/graph/db/**`        |
-| `epic`          | `docs/epics/{name}/**`                                 |
+| `root-db` | `docs/agents/db/**` + `docs/agents/graph/db/**` |
+| `epic` | `docs/epics/{name}/**` |
 
 <!-- Install-time: the `{project}` row is a PATTERN — SETUP expands one such row (and one `scopes/{project}.md` card) per roster entry (single-project install = one row); the root-* rows are fixed cross-project scopes. Each card's merge steps are canonical — documenter.md defers to the card, it does not carry its own step menu. -->
 
-Several scopes read the same pipeline doc, but each writes only its own slice — every worker owns one target. The `epic` scope is emitted only for a standalone build with a resolving epic — never a wave-owned build (the wave consolidates the epic) and never in JC-UPDATE.
+Several scopes read the same pipeline doc, but each writes only its own slice — every worker owns one target. The `epic` scope is emitted only for a standalone build with a resolving epic — never a wave-owned build (the wave consolidates the epic) and never in FIX-UPDATE.
 
 **Where it runs:**
 
-- **Main-loop sites** (standalone `/documenter` ARCHIVE/JC-UPDATE, `/jc` Step 6, `/wave:orchestrator` § O6) size the response to the blast radius: an obviously small change (one project or one cluster) → spawn the worker(s) directly, each briefed on its two cards (the `DOC_BRIEF` contract in the workflow) — no workflow ceremony. Wider or unclear → `Workflow({ name: 'documenter-fanout', args })`. Worker count tracks the blast radius — never manufacture scopes to parallelize.
+- **Main-loop sites** (standalone `/documenter` ARCHIVE/FIX-UPDATE, the fix-core card § Step 6, `/wave:orchestrator` § O6) size the response to the blast radius: an obviously small change (one project or one cluster) → spawn the worker(s) directly, each briefed on its two cards (the `DOC_BRIEF` contract in the workflow) — no workflow ceremony. Wider or unclear → `Workflow({ name: 'documenter-fanout', args })`. Worker count tracks the blast radius — never manufacture scopes to parallelize.
 
 ## Owned Documents
 
-| Document         | Path                                    | Purpose                                                                   | When to update                                                                    |
+| Document | Path | Purpose | When to update |
 | ---------------- | ---------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Doc Registry** | § Document Registry below               | Master inventory of all permanent docs                                    | When docs are added, removed, renamed, or ownership changes                       |
-| **Sync Rules**   | `$CDOCS/documenter/$REFS/sync-rules.md` | Cross-reference rules the audit checks                                    | When new sync relationships are discovered                                        |
-| **Backlog**      | `docs/dev/backlog/backlog.md`           | Roadmap-candidate feature ideas parked for later                          | Every ARCHIVE and JC-UPDATE mode (cleanup); AUDIT mode (rot detection)            |
-| **Epic docs**    | `docs/epics/*/`                         | Consolidate shipped/session work into active epics — current-state merges | ARCHIVE `epic` scope card (pipeline matches an active epic); EPIC mode (`/documenter epic`) |
+| **Doc Registry** | § Document Registry below | Master inventory of all permanent docs | When docs are added, removed, renamed, or ownership changes |
+| **Sync Rules** | `$CDOCS/documenter/$REFS/sync-rules.md` | Cross-reference rules the audit checks | When new sync relationships are discovered |
+| **Backlog** | `docs/dev/backlog/backlog.md` | Roadmap-candidate feature ideas parked for later | Every ARCHIVE and FIX-UPDATE mode (cleanup); AUDIT mode (rot detection) |
+| **Epic docs** | `docs/epics/*/` | Consolidate shipped/session work into active epics — current-state merges | ARCHIVE `epic` scope card (pipeline matches an active epic); EPIC mode (`/documenter epic`) |
 
 **Scope guard (single rule — applies everywhere):**
 
@@ -60,7 +60,7 @@ Permanent reference docs are **clusters** — a directory holding an `_index.md`
 
 ## Document Registry
 
-Map of permanent doc surfaces and owners. **Main-loop/direct invocations (REGISTRY, AUDIT, or ARCHIVE/JC-UPDATE with no scope) read this first and update it last** when docs are added, removed, renamed, or ownership changes; **fanned-out scope workers** follow the Registry duty in `doc-approval.md` § Boundaries instead. Owner is `mono-documenter` unless noted.
+Map of permanent doc surfaces and owners. **Main-loop/direct invocations (REGISTRY, AUDIT, or ARCHIVE/FIX-UPDATE with no scope) read this first and update it last** when docs are added, removed, renamed, or ownership changes; **fanned-out scope workers** follow the Registry duty in `doc-approval.md` § Boundaries instead. Owner is `mono-documenter` unless noted.
 
 <!-- Install-time: rewrite this registry from your actual `docs/` tree. List every permanent doc surface (root cross-project clusters + each subproject's `docs/`), and the non-`mono-documenter` owners (`/pm`, `/officer`, `/mentor`, `/km`, `/pfm` own their command reference/research directories; gitter owns its Living Reference; the Professor owns `docs/epics/`). Keep `.claude/` and `.codex/` instruction surfaces OUT — they are pipeline infrastructure, not registry entries. -->
 
@@ -78,7 +78,7 @@ Determine the mode from `$ARGUMENTS`:
 
 - Audit: starts with "audit" → full cross-reference sync check.
 - Archive: orchestrator supplies `$PIPELINE` and says ARCHIVE → merge pipeline decisions into permanent docs.
-- JC-Update: orchestrator describes a hotfix → update only the affected permanent docs.
+- FIX-UPDATE: the caller describes a fix that landed on `main` → update only the affected permanent docs.
 - Registry: "registry", "update registry", "add doc" → update the doc registry.
 - Graphs: "graphs", "graph update", "update graphs" → generate/update Mermaid workflow diagrams.
 - Epic: starts with "epic" → consolidate this session's work into the active epic.
@@ -155,10 +155,8 @@ Read `$CDOCS/documenter/$REFS/sync-rules.md` for the full rule set. Then execute
 5. **Command table** (Rule 4) — Compare root CLAUDE.md table ↔ actual `.claude/commands/*.md` files. Flag orphans/phantoms.
 6. **Agent table** (Rule 8) — Compare root CLAUDE.md agent tables ↔ actual agent files.
 7. **Developer reference vs CLAUDE.md** (Rule 5) — Standards match? No contradictions? Flag `DRIFT`.
-8. **Stale pipelines** (Rule 10) — Check `docs/dev/builds/` for non-archived pipeline dirs.
-   8.5. **Backlog rot** (Rule 13) — Cross-reference `docs/dev/backlog/backlog.md` sections against the `docs/agents/features/` cluster. Spot-check 5-10 sections. Flag `STALE-ROADMAP`. Do NOT fix during audit.
-9. **Ownership enforcement** (Rule 11) — Verify each doc sits under its owner's path; when an edit looks out of bounds, confirm the last editor with `git log -1 <file>`. Flag violations.
-   9.5. **Epic consistency** (Rule 14) — Check `docs/epics/` for active manifests. Verify pipeline references resolve. Flag `STALE-EPIC` if no activity in 30 days.
+8. **Stale pipelines** (Rule 10) — Check `docs/dev/builds/` for non-archived pipeline dirs. 8.5. **Backlog rot** (Rule 13) — Cross-reference `docs/dev/backlog/backlog.md` sections against the `docs/agents/features/` cluster. Spot-check 5-10 sections. Flag `STALE-ROADMAP`. Do NOT fix during audit.
+9. **Ownership enforcement** (Rule 11) — Verify each doc sits under its owner's path; when an edit looks out of bounds, confirm the last editor with `git log -1 <file>`. Flag violations. 9.5. **Epic consistency** (Rule 14) — Check `docs/epics/` for active manifests. Verify pipeline references resolve. Flag `STALE-EPIC` if no activity in 30 days.
 
 ### Step 10 — Report
 
@@ -182,9 +180,9 @@ Documentation audit complete.
 
 If audit discovered new/removed docs or changed ownership, update the registry.
 
-## Mode: JC-UPDATE (after a /jc hotfix — fanned out per scope, see § Orchestration)
+## Mode: FIX-UPDATE (after a fix lands on `main` — fanned out per scope, see § Orchestration)
 
-As in ARCHIVE, you are normally one per-scope worker: your scope card's JC-UPDATE section is your spec — same merge logic over only the affected docs, blast radius verified against the changed source (read-only `git diff`), no `$DOCS` dir. The scout maps the (usually small) radius — often one or two scopes; always consider `root-map` and `root-features`, plus `root-db` if DB or infra ops changed. A hotfix that shipped a parked feature triggers the `root-features` card's backlog-clean procedure. Confirm in the ARCHIVE Step 4 format with a `(jc)` label.
+As in ARCHIVE, you are normally one per-scope worker: your scope card's FIX-UPDATE section is your spec — same merge logic over only the affected docs, blast radius verified against the changed source (read-only `git diff`), no `$DOCS` dir. The scout maps the (usually small) radius — often one or two scopes; always consider `root-map` and `root-features`, plus `root-db` if DB or infra ops changed. A hotfix that shipped a parked feature triggers the `root-features` card's backlog-clean procedure. Confirm in the ARCHIVE Step 4 format with a `(jc)` label.
 
 ## Mode: REGISTRY
 

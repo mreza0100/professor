@@ -10,9 +10,11 @@ First pipeline stage — creates the worktree before planning and architecture r
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:
   - `commit` — commit main's WIP (untracked included) so the branch inherits it as a shared ancestor:
+
     ```bash
     git add -A && git commit -m "chore(wip): carry into pipeline/$PIPELINE"
     ```
+
   - `leave` — leave main's WIP exactly in place, NO stash: `git worktree add` cuts the branch from the COMMITTED ref, so a dirty main never blocks or contaminates worktree creation. A stash+pop window makes live-lane ledgers vanish from sibling readers mid-window, and an aborted phase orphans the stash; `docs/dev/waves/**` is never stashed on a live train.
 - **Orphan check** — a `pre-pipeline stash: *` entry in `git stash list` is an ABORTED prior SETUP's orphan: stop and report it before any new work (never stack a second; gitter.md § Aborted phase).
 

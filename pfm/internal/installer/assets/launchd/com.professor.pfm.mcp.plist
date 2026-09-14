@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Serve pfm chat and Harvester MCP over loopback HTTP (pfm mcp serve).
+
+  PATH is rendered at install from the one service
+  search path every pfm unit shares (installer servicePath): launchd starts
+  agents on /usr/bin:/bin:/usr/sbin:/sbin, which cannot see ~/.local/bin (pfm,
+  claude) or Homebrew — where tmux lives — and without it every chat tool a
+  Codex chat calls over the daemon answers as if no chat were live.
+
+  KeepAlive restarts the daemon on any exit, including the one it takes when
+  its own binary is replaced by a new install. __PFM_HOME__ is substituted at
+  install time — launchd has no %h.
+
+  StandardOutPath / StandardErrorPath land the daemon's own stdout/stderr in
+  __PFM_HOME__/Library/Logs/pfm/mcp.log — launchd otherwise discards a
+  background agent's output, so a crash or a logged error was silent. The
+  installer creates ~/Library/Logs/pfm before loading this agent.
+-->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
@@ -10,9 +28,18 @@
 		<string>mcp</string>
 		<string>serve</string>
 	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>__PFM_SERVICE_PATH__</string>
+	</dict>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>StandardOutPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/mcp.log</string>
+	<key>StandardErrorPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/mcp.log</string>
 </dict>
 </plist>

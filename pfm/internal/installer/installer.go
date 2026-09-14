@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/codexappendix"
 	"hostops/pfm/internal/codexgen"
 	"hostops/pfm/internal/harvestpy"
@@ -205,6 +206,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.installHarvest(ctx); err != nil {
 		return err
 	}
+	if err := installer.installMarkdownTool(ctx); err != nil {
+		return err
+	}
 	installer.installThemes(ctx)
 	assets, err := assetFiles()
 	if err != nil {
@@ -285,6 +289,9 @@ func (installer *engine) install(ctx context.Context) error {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
 		}
+		if err := installer.ensureLaunchdLogDir(); err != nil {
+			return err
+		}
 		if err := installer.wireLaunchAgent(ctx); err != nil {
 			return err
 		}
@@ -348,9 +355,10 @@ func (installer *engine) wireCodexAgents() error {
 		return fmt.Errorf("inspect Codex global agents source %s: %w", source, err)
 	}
 	plan, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
-		Home:       installer.options.Home,
-		SourceRepo: sourceRepo,
-		Mode:       codexgen.ModeCheck,
+		Home:             installer.options.Home,
+		SourceRepo:       sourceRepo,
+		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		Mode:             codexgen.ModeCheck,
 	})
 	if err != nil {
 		return fmt.Errorf("plan pfm codex agents: %w", err)
@@ -370,7 +378,12 @@ func (installer *engine) wireCodexAgents() error {
 	if !installer.apply {
 		return nil
 	}
-	result, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{Home: installer.options.Home, SourceRepo: sourceRepo, Mode: codexgen.ModeBuild})
+	result, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
+		Home:             installer.options.Home,
+		SourceRepo:       sourceRepo,
+		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		Mode:             codexgen.ModeBuild,
+	})
 	if err != nil {
 		return fmt.Errorf("run pfm codex agents: %w", err)
 	}
@@ -392,17 +405,7 @@ func (installer *engine) globalSourceRepoRoot() (string, error) {
 		}
 		return filepath.Clean(abs), nil
 	}
-	marker := SourceRepoPath(installer.options.Home)
-	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
-		return filepath.Clean(filepath.Join(installer.options.Home, ".professor")), nil
-	} else if err != nil {
-		return "", fmt.Errorf("inspect source repository marker: %w", err)
-	}
-	repo, err := ReadSourceRepoMarker(installer.options.Home)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(repo), nil
+	return GlobalSourceRepo(installer.options.Home)
 }
 
 // retireOrphanCodexAgents deletes the exactly two known strays a retired
@@ -427,7 +430,10 @@ func (installer *engine) retireOrphanCodexAgents() error {
 }
 
 // wireGlobalCommands links every top-level entry of
-// <sourceRepo>/templates/global/commands/ into {ConfigDir}/commands/: one
+// <sourceRepo>/templates/global/commands/ into the commands/ registry of
+// EVERY configured Claude account (claudeConfigDirs — the same roster
+// retireOrphanGlobalCommands prunes from; a registry this installer would
+// retire from is a registry it must install into): one
 // file link per file entry, one whole-directory link per directory entry
 // (wave/, quality/, h/, rnd/, tokens/). An absent or empty source directory is
 // reported and never an error — populating it is a parallel lane's job. The
@@ -452,15 +458,17 @@ func (installer *engine) wireGlobalCommands() error {
 		installer.skip("global commands source empty at " + source + " (0 entries)")
 		return nil
 	}
-	target := filepath.Join(installer.options.ConfigDir, "commands")
-	for _, entry := range entries {
-		if err := installer.wireGlobalLink(
-			filepath.Join(source, entry.Name()),
-			filepath.Join(target, entry.Name()),
-			sourceRepo,
-			entry.IsDir(),
-		); err != nil {
-			return err
+	for _, config := range installer.claudeConfigDirs() {
+		target := filepath.Join(config, "commands")
+		for _, entry := range entries {
+			if err := installer.wireGlobalLink(
+				filepath.Join(source, entry.Name()),
+				filepath.Join(target, entry.Name()),
+				sourceRepo,
+				entry.IsDir(),
+			); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -542,76 +550,6 @@ func (installer *engine) retireOrphanGlobalCommands() error {
 		}
 	}
 	return nil
-}
-
-// wireGlobalSkills links every machine-global skill into
-// {Home}/.claude/skills/: the in-tree engines/deep-rr directory, and each
-// skill directory shipped under templates/global/skills/.
-// ghostwriter/vision-factory clone management is explicitly out of scope
-// here — a different owner entirely.
-func (installer *engine) wireGlobalSkills() error {
-	sourceRepo, err := installer.globalSourceRepoRoot()
-	if err != nil {
-		return fmt.Errorf("resolve global skills source repository: %w", err)
-	}
-	if err := installer.wireGlobalSkill(sourceRepo, filepath.Join(sourceRepo, "engines", "deep-rr"), "deep-rr"); err != nil {
-		return err
-	}
-	return installer.wireTemplateSkills(sourceRepo)
-}
-
-// wireTemplateSkills links every top-level DIRECTORY of
-// <sourceRepo>/templates/global/skills/ into {Home}/.claude/skills/: one
-// whole-directory link per entry, the same idiom wireGlobalCommands uses for
-// its directory entries. The registry file that sits beside them
-// (sources.json, naming the skills fetched from their own public repos) is
-// not itself a skill and is never linked. An absent or empty source
-// directory is reported and never an error — the same carve-out the global
-// commands source gets.
-func (installer *engine) wireTemplateSkills(sourceRepo string) error {
-	source := filepath.Join(sourceRepo, "templates", "global", "skills")
-	entries, err := os.ReadDir(source)
-	if errors.Is(err, fs.ErrNotExist) {
-		installer.skip("global skills source absent at " + source + " (0 entries)")
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect global skills source %s: %w", source, err)
-	}
-	linked := 0
-	for _, entry := range entries {
-		path := filepath.Join(source, entry.Name())
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			return fmt.Errorf("inspect global skill source %s: %w", path, statErr)
-		}
-		if !info.IsDir() {
-			continue
-		}
-		linked++
-		if err := installer.wireGlobalSkill(sourceRepo, path, entry.Name()); err != nil {
-			return err
-		}
-	}
-	if linked == 0 {
-		installer.skip("global skills source empty at " + source + " (0 skill directories)")
-	}
-	return nil
-}
-
-// wireGlobalSkill links one skill source directory to
-// {Home}/.claude/skills/{name}. A source without a SKILL.md is not a skill
-// any engine can load: it is reported as SKILL-SOURCE-MISSING and no link is
-// ever created for it.
-func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error {
-	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); errors.Is(err, fs.ErrNotExist) {
-		installer.skip("SKILL-SOURCE-MISSING " + name + " (" + filepath.Join(source, "SKILL.md") + " absent)")
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect %s skill source: %w", name, err)
-	}
-	target := filepath.Join(installer.options.Home, ".claude", "skills", name)
-	return installer.wireGlobalLink(source, target, sourceRepo, true)
 }
 
 // wireGlobalLink classifies target against source with codexgen's shared
@@ -762,7 +700,7 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 		if err != nil {
 			return fail(fmt.Errorf("read planned command asset %s: %w", asset.path, err))
 		}
-		if err := atomicWrite(filepath.Join(target, relative), content, asset.mode); err != nil {
+		if err := atomicfile.Write(filepath.Join(target, relative), content, asset.mode); err != nil {
 			return fail(fmt.Errorf("stage planned command %s: %w", relative, err))
 		}
 	}
@@ -835,7 +773,7 @@ func copyPlanTree(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(target, content, info.Mode().Perm())
+	return atomicfile.Write(target, content, info.Mode().Perm())
 }
 
 func (installer *engine) uninstall(ctx context.Context) error {
@@ -964,6 +902,8 @@ func (installer *engine) writeUpdateMetadata() error {
 		} else {
 			installer.ok(path)
 		}
+	} else if err := installer.reportSourceRepoMarker(); err != nil {
+		return err
 	}
 	content, err := canonicalBinaryOwnershipContent(installer.options.Home)
 	if err != nil {
@@ -1168,6 +1108,8 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			content, err = renderReloadCommandAsset(content)
 		} else if asset.path == "systemd/"+nameSyncTimerUnit {
 			content, err = renderNameSyncTimerAsset(content, installer.options)
+		} else if strings.HasPrefix(asset.path, "systemd/") {
+			content, err = renderServicePath(content, installer.options.Home)
 		}
 		if err != nil {
 			return false, fmt.Errorf("render embedded asset %s: %w", asset.path, err)
@@ -1181,7 +1123,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			systemdChanged = true
 		}
 		if err := installer.change("write "+target, func() error {
-			return atomicWrite(target, content, asset.mode)
+			return atomicfile.Write(target, content, asset.mode)
 		}); err != nil {
 			return false, err
 		}
@@ -1496,15 +1438,17 @@ func (installer *engine) commandTarget(asset string) (string, bool) {
 }
 
 func (installer *engine) wireSkills(assets []assetFile) error {
-	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
-	for _, asset := range assets {
-		target, found := installer.skillTarget(asset.path)
-		if !found {
-			continue
-		}
-		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-		if _, err := installer.ensureLink(source, target); err != nil {
-			return err
+	installer.say("skills -> %s", installer.claudeRegistries("skills"))
+	for _, config := range installer.claudeConfigDirs() {
+		for _, asset := range assets {
+			target, found := installer.skillTarget(config, asset.path)
+			if !found {
+				continue
+			}
+			source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+			if _, err := installer.ensureLink(source, target); err != nil {
+				return err
+			}
 		}
 	}
 	installer.say("")
@@ -1512,28 +1456,33 @@ func (installer *engine) wireSkills(assets []assetFile) error {
 }
 
 func (installer *engine) unwireSkills(assets []assetFile) error {
-	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
-	for _, asset := range assets {
-		target, found := installer.skillTarget(asset.path)
-		if !found {
-			continue
-		}
-		if err := installer.unlinkOne(target); err != nil {
-			return err
-		}
-		// The skill's own directory (e.g. skills/handoff/) is created by
-		// ensureLink's MkdirAll on link; remove it here once its one link is
-		// gone, tolerantly — an operator file left beside it must survive.
-		if err := installer.retireEmptyDirectoryTolerant(filepath.Dir(target)); err != nil {
-			return err
+	installer.say("skills -> %s", installer.claudeRegistries("skills"))
+	for _, config := range installer.claudeConfigDirs() {
+		for _, asset := range assets {
+			target, found := installer.skillTarget(config, asset.path)
+			if !found {
+				continue
+			}
+			if err := installer.unlinkOne(target); err != nil {
+				return err
+			}
+			// The skill's own directory (e.g. skills/handoff/) is created by
+			// ensureLink's MkdirAll on link; remove it here once its one link is
+			// gone, tolerantly — an operator file left beside it must survive.
+			if err := installer.retireEmptyDirectoryTolerant(filepath.Dir(target)); err != nil {
+				return err
+			}
 		}
 	}
 	installer.say("")
 	return nil
 }
 
-func (installer *engine) skillTarget(asset string) (string, bool) {
-	skills := filepath.Join(installer.options.ConfigDir, "skills")
+// skillTarget names where one embedded skill asset installs inside ONE
+// Claude config dir; its callers walk claudeConfigDirs so every configured
+// account gets the skill, never the primary alone.
+func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
+	skills := filepath.Join(configDir, "skills")
 	switch asset {
 	case "handoff.skill.md":
 		return filepath.Join(skills, "handoff", "SKILL.md"), true
@@ -2004,7 +1953,7 @@ func (installer *engine) wireSettings() error {
 			if err := copyBackup(candidate, backup); err != nil {
 				return fmt.Errorf("backup %s: %w", candidate, err)
 			}
-			return atomicWrite(physical, updated, 0o600)
+			return atomicfile.Write(physical, updated, 0o600)
 		}); err != nil {
 			return err
 		}
@@ -2047,7 +1996,7 @@ func (installer *engine) writeSettingsHookOwnership(
 		return nil
 	}
 	return installer.change("write "+path, func() error {
-		return atomicWrite(path, encoded, 0o600)
+		return atomicfile.Write(path, encoded, 0o600)
 	})
 }
 
@@ -2112,7 +2061,7 @@ func (installer *engine) wireCodexHooks() error {
 					return fmt.Errorf("backup %s: %w", path, err)
 				}
 			}
-			return atomicWrite(physical, updated, 0o600)
+			return atomicfile.Write(physical, updated, 0o600)
 		}); err != nil {
 			return err
 		}
@@ -2192,7 +2141,7 @@ func (installer *engine) wireShell(uninstall bool) error {
 		if uninstall && updated == "" {
 			return os.Remove(zshrc)
 		}
-		return atomicWrite(zshrc, []byte(updated), 0o600)
+		return atomicfile.Write(zshrc, []byte(updated), 0o600)
 	})
 }
 

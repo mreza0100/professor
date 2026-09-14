@@ -1,7 +1,6 @@
 # Documentation Sync Rules
 
-Rules that `/documenter audit` uses to verify cross-reference consistency.
-Each rule defines a source, target, and what "in sync" means.
+Rules that `/documenter audit` uses to verify cross-reference consistency. Each rule defines a source, target, and what "in sync" means.
 
 <!-- Install-time: the per-project references below name roster-example roles ({BACKEND_PROJECT} produces the API, {FRONTEND_PROJECT} consumes it, {AI_PROJECT} owns the async chains/{QUEUE} producers, {INFRA_PROJECT} owns services, {WEB_PROJECT} the content site). Expand or prune these to the actual roster; a single-project install collapses the producer/consumer rules to that one project plus root. -->
 
@@ -9,8 +8,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 1: Architecture Hierarchy
 
-**Source:** `docs/agents/architecture/_index.md` (cross-project big picture; cluster)
-**Targets:** each roster project's `{project}/docs/architecture/_index.md` (all clusters)
+**Source:** `docs/agents/architecture/_index.md` (cross-project big picture; cluster) **Targets:** each roster project's `{project}/docs/architecture/_index.md` (all clusters)
 
 **Check:**
 
@@ -23,8 +21,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 2: API Surface Consistency
 
-**Source:** `docs/agents/api/` (consolidated API surface; cluster)
-**Targets:** each API-exposing project's `{project}/docs/api-reference` (flat file or cluster)
+**Source:** `docs/agents/api/` (consolidated API surface; cluster) **Targets:** each API-exposing project's `{project}/docs/api-reference` (flat file or cluster)
 
 **Check:**
 
@@ -38,8 +35,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 3: System Map vs Reality
 
-**Source:** `docs/agents/map/` (system map; cluster)
-**Targets:** Actual codebase files, routes, tables, services
+**Source:** `docs/agents/map/` (system map; cluster) **Targets:** Actual codebase files, routes, tables, services
 
 **Check:**
 
@@ -54,8 +50,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 4: Command Table Accuracy
 
-**Source:** Root `CLAUDE.md` command table
-**Targets:** `.claude/commands/*.md` (actual command files)
+**Source:** Root `CLAUDE.md` command table **Targets:** `.claude/commands/*.md` (actual command files)
 
 **Check:**
 
@@ -69,8 +64,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 5: Developer Reference vs CLAUDE.md Standards
 
-**Source:** Child `CLAUDE.md` files (coding standards, conventions)
-**Targets:** Each roster project's `{project}/docs/developer-reference/_index.md` cluster indices (all clusters)
+**Source:** Child `CLAUDE.md` files (coding standards, conventions) **Targets:** Each roster project's `{project}/docs/developer-reference/_index.md` cluster indices (all clusters)
 
 **Check:**
 
@@ -82,8 +76,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 6: Runbook vs Package Config
 
-**Source:** Child `docs/runbook.md` files
-**Targets:** Dependency manifest (`package.json` / `pyproject.toml`), `.env.local`, `.env.test`
+**Source:** Child `docs/runbook.md` files **Targets:** Dependency manifest (`package.json` / `pyproject.toml`), `.env.local`, `.env.test`
 
 **Check:**
 
@@ -96,8 +89,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 7: QA Reference vs Test Infrastructure
 
-**Source:** Child `docs/qa-reference.md` files
-**Targets:** Actual test files, test configs, Makefile targets
+**Source:** Child `docs/qa-reference.md` files **Targets:** Actual test files, test configs, Makefile targets
 
 **Check:**
 
@@ -109,8 +101,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 8: Agent Table Accuracy
 
-**Source:** Root `CLAUDE.md` agent tables (root + child)
-**Targets:** `.claude/agents/*.md`, each roster project's `{project}/.claude/agents/*.md`
+**Source:** Root `CLAUDE.md` agent tables (root + child) **Targets:** `.claude/agents/*.md`, each roster project's `{project}/.claude/agents/*.md`
 
 **Check:**
 
@@ -125,13 +116,13 @@ Each rule defines a source, target, and what "in sync" means.
 
 **Expected docs per project** (rows are roster-example roles — expand/prune to the actual roster):
 
-| Project             | Required Docs                                                                                                                                                        |
+| Project | Required Docs |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **{BACKEND_PROJECT}**  | `architecture/_index.md` (cluster), `api-reference.md`, `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook/_index.md` (cluster)                  |
-| **{FRONTEND_PROJECT}** | `architecture/_index.md` (cluster), `api-reference.md`, `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook.md`, `ui-ux.md`                       |
-| **{AI_PROJECT}**       | `architecture/_index.md` (cluster), `api-reference/_index.md` (cluster), `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook/_index.md` (cluster) |
-| **{INFRA_PROJECT}**    | `runbook-local.md`, `runbook-test.md`                                                                                                                                |
-| **Root**            | `docs/agents/architecture/_index.md` (cluster), `docs/agents/api/_index.md` (cluster), `docs/agents/map/_index.md` (cluster), `docs/agents/features/_index.md` (cluster) |
+| **{BACKEND_PROJECT}** | `architecture/_index.md` (cluster), `api-reference.md`, `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook/_index.md` (cluster) |
+| **{FRONTEND_PROJECT}** | `architecture/_index.md` (cluster), `api-reference.md`, `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook.md`, `ui-ux.md` |
+| **{AI_PROJECT}** | `architecture/_index.md` (cluster), `api-reference/_index.md` (cluster), `developer-reference/_index.md` (cluster), `qa-reference.md`, `runbook/_index.md` (cluster) |
+| **{INFRA_PROJECT}** | `runbook-local.md`, `runbook-test.md` |
+| **Root** | `docs/agents/architecture/_index.md` (cluster), `docs/agents/api/_index.md` (cluster), `docs/agents/map/_index.md` (cluster), `docs/agents/features/_index.md` (cluster) |
 
 **Check:** All required docs exist. Flag missing docs as `MISSING`.
 
@@ -139,8 +130,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 12: Feature Registry Completeness
 
-**Source:** `docs/agents/features/` (feature registry; cluster)
-**Targets:** Actual codebase — {API_PROTOCOL} resolvers, REST routes, {FRONTEND_PROJECT} screens, {AI_PROJECT} chains/consumers, {INFRA_PROJECT} services
+**Source:** `docs/agents/features/` (feature registry; cluster) **Targets:** Actual codebase — {API_PROTOCOL} resolvers, REST routes, {FRONTEND_PROJECT} screens, {AI_PROJECT} chains/consumers, {INFRA_PROJECT} services
 
 **Check:**
 
@@ -154,8 +144,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 13: Backlog Cleanliness
 
-**Source:** `docs/dev/backlog/backlog.md` (parked roadmap candidates)
-**Targets:** `docs/agents/features/` (shipped feature registry; cluster)
+**Source:** `docs/dev/backlog/backlog.md` (parked roadmap candidates) **Targets:** `docs/agents/features/` (shipped feature registry; cluster)
 
 **Check:**
 
@@ -165,16 +154,15 @@ Each rule defines a source, target, and what "in sync" means.
 - Refactor/Cleanup rows at the bottom → same rule (if refactor landed, row is removed)
 - Archived pipeline references (`tmp/dev/archive/builds/{pipeline}/`) → must still resolve; broken references flagged
 
-**Severity:** `STALE-ROADMAP` — not critical (nothing breaks), but file rot causes future pipelines to re-research solved problems. Clean up during ARCHIVE/JC-UPDATE every time; audit flags accumulated rot.
+**Severity:** `STALE-ROADMAP` — not critical (nothing breaks), but file rot causes future pipelines to re-research solved problems. Clean up during ARCHIVE/FIX-UPDATE every time; audit flags accumulated rot.
 
-**Who enforces:** the `root-features` scope card's Clean-backlog section, during ARCHIVE and JC-UPDATE. Audit detects rot; cleanup happens in pipeline/hotfix modes.
+**Who enforces:** the `root-features` scope card's Clean-backlog section, during ARCHIVE and FIX-UPDATE. Audit detects rot; cleanup happens in pipeline/hotfix modes.
 
 ---
 
 ## Rule 14: Epic Manifest Consistency
 
-**Source:** `docs/epics/*/manifest.md` (active epic manifests)
-**Targets:** `docs/agents/features/`, `tmp/dev/archive/builds/`
+**Source:** `docs/epics/*/manifest.md` (active epic manifests) **Targets:** `docs/agents/features/`, `tmp/dev/archive/builds/`
 
 **Check:**
 
@@ -191,8 +179,7 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Rule 10: No Stale Pipelines
 
-**Source:** `docs/dev/builds/` (non-archive)
-**Check:**
+**Source:** `docs/dev/builds/` (non-archive) **Check:**
 
 - Any pipeline directory that has a `7-post-merge-qa.md` (or equivalent completion marker) but hasn't been archived → flag as `STALE-UNARCHIVED`
 - Any pipeline directory with no recent activity → flag as `STALE-ABANDONED`
@@ -218,13 +205,13 @@ Each rule defines a source, target, and what "in sync" means.
 
 ## Severity Levels
 
-| Level             | Meaning                                                       | Action                                                                         |
+| Level | Meaning | Action |
 | ----------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **CRITICAL**      | Doc contradicts code or another doc                           | Must fix immediately                                                           |
-| **MISSING**       | Required doc doesn't exist                                    | Create stub or full doc                                                        |
-| **STALE**         | Doc exists but is outdated vs codebase                        | Update to match reality                                                        |
-| **DRIFT**         | Two docs that should sync have diverged                       | Reconcile                                                                      |
-| **ORPHAN**        | Doc/command/agent exists without registry entry               | Add to registry or delete                                                      |
-| **PHANTOM**       | Registry/table entry for something that doesn't exist         | Remove entry                                                                   |
+| **CRITICAL** | Doc contradicts code or another doc | Must fix immediately |
+| **MISSING** | Required doc doesn't exist | Create stub or full doc |
+| **STALE** | Doc exists but is outdated vs codebase | Update to match reality |
+| **DRIFT** | Two docs that should sync have diverged | Reconcile |
+| **ORPHAN** | Doc/command/agent exists without registry entry | Add to registry or delete |
+| **PHANTOM** | Registry/table entry for something that doesn't exist | Remove entry |
 | **STALE-ROADMAP** | `backlog.md` section describes a feature that already shipped | Remove section (full match) or partial-ship-note the remainder (partial match) |
-| **OK**            | In sync, no issues                                            | No action needed                                                               |
+| **OK** | In sync, no issues | No action needed |

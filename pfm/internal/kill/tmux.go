@@ -3,12 +3,11 @@ package kill
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 // CommandTmux invokes tmux only through an explicit socket pathname.
@@ -160,14 +159,5 @@ func (tmux CommandTmux) command(
 	socketPath string,
 	arguments ...string,
 ) *exec.Cmd {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	commandArguments := make([]string, 0, len(arguments)+2)
-	commandArguments = append(commandArguments, "-S", socketPath)
-	commandArguments = append(commandArguments, arguments...)
-	command := exec.CommandContext(ctx, binary, commandArguments...)
-	command.Env = append(os.Environ(), "TMUX=")
-	return command
+	return pfmtmux.Command(ctx, tmux.Binary, socketPath, arguments...)
 }

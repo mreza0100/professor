@@ -8,7 +8,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"time"
 
+	"hostops/pfm/internal/sqlitedb"
 	"hostops/pfm/internal/store"
 )
 
@@ -37,6 +39,7 @@ type opencodeRow struct {
 	timeUpdatedMS   int64
 	timeArchivedMS  sql.NullInt64
 	promptCount     int64
+	assistantCount  int64
 	firstPrompt     sql.NullString
 	badMessageJSON  int64
 	badMessageShape int64
@@ -99,6 +102,7 @@ part_shape AS MATERIALIZED (
 usage AS MATERIALIZED (
     SELECT session_id,
            SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS prompt_count,
+           SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistant_count,
            SUM(CASE WHEN role = 'assistant' THEN tokens_input ELSE 0 END) AS tokens_input,
            SUM(CASE WHEN role = 'assistant' THEN tokens_output ELSE 0 END) AS tokens_output,
            SUM(CASE WHEN role = 'assistant' THEN cost ELSE 0 END) AS cost
@@ -181,7 +185,7 @@ SELECT 0 AS validation_only,
        COALESCE(usage.tokens_output, 0),
        COALESCE(usage.cost, 0),
        s.time_created, s.time_updated, s.time_archived,
-       COALESCE(usage.prompt_count, 0), first_prompt.text,
+       COALESCE(usage.prompt_count, 0), COALESCE(usage.assistant_count, 0), first_prompt.text,
        validation.bad_message_json, validation.bad_message_shape,
        validation.bad_part_json, validation.bad_part_shape
 FROM session s
@@ -193,7 +197,7 @@ CROSS JOIN validation
 UNION ALL
 SELECT 1 AS validation_only,
        '', '', '', NULL, NULL, '', '', '',
-       0, 0, 0, 0, 0, NULL, 0, NULL,
+       0, 0, 0, 0, 0, NULL, 0, 0, NULL,
        validation.bad_message_json, validation.bad_message_shape,
        validation.bad_part_json, validation.bad_part_shape
   FROM validation
@@ -225,7 +229,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 	// writers or tear state, and the one statement pins one consistent snapshot
 	// across every materialized shape and validation CTE. A bounded busy timeout
 	// converts a hot-writer moment into an error we report, never an unbounded wait.
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, err := sqlitedb.OpenReadOnly(dbPath, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open opencode store read-only: %w", err)
 	}
@@ -260,7 +264,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 			&row.providerID, &row.modelID,
 			&row.tokensInput, &row.tokensOutput, &row.cost,
 			&row.timeCreatedMS, &row.timeUpdatedMS, &row.timeArchivedMS,
-			&row.promptCount, &row.firstPrompt,
+			&row.promptCount, &row.assistantCount, &row.firstPrompt,
 			&row.badMessageJSON, &row.badMessageShape,
 			&row.badPartJSON, &row.badPartShape,
 		); err != nil {
@@ -289,6 +293,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 			Model:          compactModel(row.providerID, row.modelID),
 			FirstPrompt:    clip(nonEmpty(row.firstPrompt)),
 			PromptCount:    row.promptCount,
+			AssistantCount: row.assistantCount,
 			TokensInput:    row.tokensInput,
 			TokensOutput:   row.tokensOutput,
 			CostMillicents: int64(math.Round(row.cost * 100000)),

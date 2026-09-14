@@ -9,7 +9,18 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"hostops/pfm/internal/compose"
+	pfmengine "hostops/pfm/internal/engine"
 )
+
+// sizeBadge is formatSize, but an OpenCode row (no file size, always 0) shows "—" rather than a lying "0B".
+func sizeBadge(row compose.Row) string {
+	if compose.EngineForKind(row.Kind) == pfmengine.Opencode {
+		return "—"
+	}
+	return formatSize(row.Size)
+}
 
 func (picker PlainPicker) Pick(
 	_ context.Context,
@@ -70,7 +81,7 @@ func RenderPlain(snapshot Snapshot) string {
 		parts = append(
 			parts,
 			fmt.Sprintf("%dp", row.PromptCount),
-			formatSize(row.Size),
+			sizeBadge(row),
 			formatAge(row, snapshot.NowNS),
 		)
 		fmt.Fprintln(&output, strings.Join(parts, "  "))

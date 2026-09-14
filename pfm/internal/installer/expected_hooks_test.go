@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -318,5 +319,75 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 	}
 	if !foundClose {
 		t.Fatal("claudeHookTemplates dropped the exit-close hook")
+	}
+}
+
+// TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook pins D2's first row:
+// with Claude absent, every claude[N] target collapses to ONE named skip
+// line instead of nine per-hook rows, and none of it counts a warning —
+// mirroring the installer's own choice never to wire Claude hooks on a host
+// with no Claude Code binary.
+func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
+	home, machine := stageExpectedHookFixtures(t)
+	var output bytes.Buffer
+	warnings := ReportHooks(&output, home, machine, true)
+	if warnings != 0 {
+		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	}
+	if got := strings.Count(output.String(), "doctor: hook claude[2] skipped (no Claude Code binary installed)"); got != 1 {
+		t.Fatalf("want exactly one skip line for claude[2], got %d:\n%s", got, output.String())
+	}
+	if strings.Contains(output.String(), "MISSING") {
+		t.Fatalf("a Claude-absent hook row was still reported MISSING:\n%s", output.String())
+	}
+}
+
+// TestReportHooksClaudePresentStillWarnsOnAMissingHook pins the other half:
+// with Claude present, a missing hook must still warn exactly as before —
+// the absence skip never masks a genuine installer defect.
+func TestReportHooksClaudePresentStillWarnsOnAMissingHook(t *testing.T) {
+	home, machine := stageExpectedHookFixtures(t)
+	hook := findExpectedHook(t, home, machine, "claude[2]", "usage")
+	removeHookFixture(t, hook)
+	var output bytes.Buffer
+	warnings := ReportHooks(&output, home, machine, false)
+	if warnings == 0 {
+		t.Fatalf("a genuinely missing hook must still warn with Claude present:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install") {
+		t.Fatalf("missing the expected MISSING row:\n%s", output.String())
+	}
+}
+
+// TestReportHooksRowsCountMissingBrokenAndDriftWarnings pins every row shape
+// ReportHooks prints and which states earn a warning — ok is silent, while
+// missing, broken, drift, and stale each count one.
+func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
+	saved := HookProbeOverride
+	t.Cleanup(func() { HookProbeOverride = saved })
+	home := t.TempDir()
+	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
+		return []HookProbeResult{
+			{Hook: ExpectedHook{Target: "claude[1]", File: filepath.Join(home, ".claude", "settings.json"), Event: "SessionEnd", Name: "clear-kill"}, State: "ok"},
+			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
+			{Hook: ExpectedHook{Target: "claude[2]", File: filepath.Join(home, ".cc", "2", "settings.json"), Event: "UserPromptSubmit", Name: "usage"}, State: "broken", Error: "parse error"},
+			{Hook: ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
+			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "Stop", Name: "usage"}, State: "stale"},
+		}
+	}
+	var output bytes.Buffer
+	if warnings := ReportHooks(&output, home, pfmconfig.Config{}, false); warnings != 4 {
+		t.Fatalf("warnings=%d, want 4\n%s", warnings, output.String())
+	}
+	for _, wanted := range []string{
+		"doctor: hook claude[1] settings.json SessionEnd clear-kill ok",
+		"doctor: hook codex hooks.json SessionStart clear-kill MISSING — run pfm install",
+		"doctor: hook claude[2] settings.json UserPromptSubmit usage broken error=parse error",
+		"doctor: hook ownership ledger.json SessionEnd unexpected drift error=ledger owns 1 hook absent from expectations",
+		"doctor: hook codex hooks.json Stop usage stale — run pfm install",
+	} {
+		if !strings.Contains(output.String(), wanted) {
+			t.Errorf("output missing %q:\n%s", wanted, output.String())
+		}
 	}
 }

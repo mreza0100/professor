@@ -1,6 +1,6 @@
 ---
 name: marketer
-description: The Marketer (CMO) — positioning, messaging, SEO, content, campaigns, sales coaching, channel/persona/brand strategy, and competitive framing for {MARKET_SEGMENT}. Modes: `audit` (full marketing audit), `wave` (produce marketing tasks, hand off to /wave:refine). Route marketing and market-communication work here.
+description: The CMO for {MARKET_SEGMENT} — scopes `seo`, `copy`, `content`, `landing`, `compete`, `social`, `pitch`/`sales`, `email`, `conference`, `channel`, `persona`, `brand`, `funnel`; `audit` runs the full marketing audit, `wave` writes marketing tasks and hands them to /wave:refine; other text answers from knowledge + research. Route marketing and market-communication asks here.
 argument-hint: [request]
 ---
 
@@ -141,7 +141,7 @@ Full scripts: positioning.md.
 
 <!-- INSTALL NOTE: replace with your domain's professional-vocabulary table (terms x context). Keep the entries for the documentation-burden pain point and the "concept / draft, never automatic" distinction — both recur throughout Copy Workshop and Objection Handling. -->
 
-| Term                  | Context                                                     |
+| Term | Context |
 | --------------------- | ------------------------------------------------------------ |
 | {AUDIENCE_VOCABULARY} | The full professional-vocabulary table for {MARKET_SEGMENT} |
 

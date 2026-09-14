@@ -20,6 +20,7 @@ import (
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestpy"
@@ -45,7 +46,6 @@ type pinnedHarvestDoctor struct{}
 var harvestDoctorOverride harvestDoctor
 
 var dependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
-var hookProbeOverride func(string, config.Config) []installer.HookProbeResult
 
 func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
 	return harvestpy.Inspect(root, platform)
@@ -121,7 +121,7 @@ func runDoctor(
 		stdout,
 		resolved,
 		runtime.Config,
-		readPrimaryAccount(resolved, runtime.Config),
+		fleet.PrimaryAccount(resolved, runtime.Config),
 	)
 	// INFO only, and it adds no warnings: both title owners are legitimate.
 	printTmuxTitlesDoctor(context.Background(), stdout, resolved, runtime.Config)
@@ -144,15 +144,17 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
-	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
 	verboseDir := ""
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
-	warnings += printDependencyDoctor(ctx, stdout, deps.Registry(deps.Options{
+	depWarnings, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
-	warnings += printHookDoctor(stdout, resolved.Home, runtime.Config)
+	warnings += depWarnings
+	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
+	warnings += installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts, claudeAbsent)
+	warnings += installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {
@@ -247,28 +249,7 @@ func runDoctor(
 		fmt.Fprintf(stdout, "doctor: process_table readable pids=%d\n", len(pids))
 	}
 
-	rootWarnings := 0
-	roots := make([]string, 0, len(runtime.Config.Accounts)+len(runtime.Config.CodexAccounts))
-	for _, account := range runtime.Config.Accounts {
-		roots = append(roots, account.ProjectDir)
-	}
-	for _, account := range runtime.Config.CodexAccounts {
-		roots = append(roots, account.Home)
-	}
-	for _, root := range roots {
-		info, err := os.Stat(root)
-		if err != nil || !info.IsDir() {
-			rootWarnings++
-			fmt.Fprintf(stdout, "doctor: warning unreachable_root=%s\n", root)
-		}
-	}
-	warnings += rootWarnings
-	fmt.Fprintf(
-		stdout,
-		"doctor: roots reachable=%d total=%d\n",
-		len(roots)-rootWarnings,
-		len(roots),
-	)
+	warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
 	warnings += printProfessorDoctor(stdout, ".", resolved.Home)
 
 	warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
@@ -294,6 +275,7 @@ func runDoctor(
 		warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
 	}
 	warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
+	warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
 	if warnings != 0 {
 		fmt.Fprintf(stdout, "doctor: warnings=%d\n", warnings)
 		return 1
@@ -321,7 +303,7 @@ func printCodexPaneBindingDoctor(
 	database *store.Store,
 	runtime commandRuntime,
 ) int {
-	manager, err := kill.New(database, killDependencies(runtime))
+	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: warning codex_pane_bindings=unreadable error=%v\n", err)
 		return 1
@@ -438,7 +420,7 @@ func printCodexPaneBindingDoctor(
 				"which is the one input Codex renders as a bare thread id; a CONTESTED binding "+
 				"resolves as soon as either pane shows a bare thread id, which happens on its next "+
 				"/clear\n",
-			codexPaneNameRetired,
+			fleet.CodexPaneNameRetired,
 		)
 	}
 	return warnings
@@ -482,7 +464,7 @@ func printCodexPaneFollowDoctor(
 	}
 	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 	silent := func(message string) { fmt.Fprintf(stdout, "doctor: warning %s\n", message) }
-	_, actions := observeCodexPanes(
+	_, actions := fleet.ObserveCodexPanes(
 		ctx, database, manager, capturer, snapshot, runtime, cxNames, silent,
 	)
 
@@ -490,7 +472,7 @@ func printCodexPaneFollowDoctor(
 	warnings := 0
 	for _, action := range actions {
 		switch action.Skip {
-		case "", codexPaneSameLineage:
+		case "", fleet.CodexPaneSameLineage:
 			continue
 		}
 		unfollowable++
@@ -652,8 +634,9 @@ func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, option
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps.Entry, options deps.ProbeOptions) int {
+func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) (int, bool) {
 	warnings := 0
+	claudeAbsent := false
 	for _, result := range configuredDependencyProbe(ctx, entries, options) {
 		entry := result.Entry
 		switch result.State {
@@ -671,7 +654,11 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps
 			}
 			fmt.Fprintf(stdout, "doctor: dep %s path=(none) MISSING %s — install: %s\n", entry.Name, requirement, entry.InstallHint)
 		case deps.StateBroken:
-			if entry.Required {
+			if entry.Engine == pfmengine.Claude && installer.ClaudeAbsent(home, result.Path, result.ExitCode) {
+				claudeAbsent = true
+				fmt.Fprintf(stdout, "doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n", entry.Name, result.Path)
+				continue
+			} else if entry.Required {
 				warnings++
 			}
 			raw := deps.FirstLine(result.Raw)
@@ -721,45 +708,7 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, entries []deps
 			fmt.Fprintf(stdout, "doctor: dep %s verbose broken error=%s\n", entry.Name, result.VerboseErr)
 		}
 	}
-	return warnings
-}
-
-func printHookDoctor(stdout io.Writer, home string, machine config.Config) int {
-	var results []installer.HookProbeResult
-	if hookProbeOverride != nil {
-		results = hookProbeOverride(home, machine)
-	} else {
-		results = installer.ProbeExpectedHooks(home, machine)
-	}
-	warnings := 0
-	for _, result := range results {
-		hook := result.Hook
-		file := filepath.Base(hook.File)
-		if file == "." || file == "" {
-			file = "(unknown)"
-		}
-		prefix := fmt.Sprintf("doctor: hook %s %s %s %s", hook.Target, file, hook.Event, hook.Name)
-		switch result.State {
-		case "ok":
-			fmt.Fprintln(stdout, prefix+" ok")
-		case "missing":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
-		case "broken":
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
-		case "drift":
-			warnings++
-			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
-		case "stale":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
-		default:
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
-		}
-	}
-	return warnings
+	return warnings, claudeAbsent
 }
 
 // printHostOverlayDoctor checks the two contracted ~/.local/bin overlay
@@ -840,6 +789,20 @@ func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig)
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: harvester_cache dir=%s entries=%d ttl=%s\n", root, entries, ttlText)
+	return 0
+}
+
+// printHarvestSearchDoctor prints the search tool's one health line; the
+// probe itself (OFF/reachable/UNREACHABLE/configured classification) lives in
+// harvest.ProbeSearch, never here — cmd/pfm is dispatch, not policy (C3).
+func printHarvestSearchDoctor(ctx context.Context, stdout io.Writer, harvester config.HarvesterConfig) int {
+	probe := harvest.ProbeSearch(ctx, harvest.SearchOptions{
+		SearXNGURL: harvester.Search.SearXNGURL, BraveAPIKey: harvester.Search.BraveAPIKey, DisableSearch: !harvester.Search.Enabled,
+	}, nil)
+	fmt.Fprintf(stdout, "doctor: harvester search state=%s backend=%s detail=%s\n", probe.State, probe.Backend, probe.Detail)
+	if probe.Warning {
+		return 1
+	}
 	return 0
 }
 
@@ -1079,18 +1042,18 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	for _, candidate := range []string{strings.TrimSpace(liveChrome), strings.TrimSpace(chromePath)} {
 		if candidate == "" || strings.ContainsRune(candidate, filepath.Separator) {
 			if info, statErr := os.Stat(candidate); candidate != "" && statErr == nil && info.Mode().IsRegular() {
-				fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, candidate)
+				fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
 				return warnings
 			}
 			continue
 		}
 		if _, lookErr := exec.LookPath(candidate); lookErr == nil {
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, candidate)
+			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
 			return warnings
 		}
 	}
 	if fallback := doctorChromeResolver(); fallback != "" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=ok\n", fingerprint, fallback)
+		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, fallback, harvestpy.BrowserSourceState(digest))
 		return warnings
 	}
 	fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=MISSING error=environment provisioned but no system Chrome binary resolves\n", fingerprint)
@@ -1443,7 +1406,7 @@ func liveCodexSnapshot(ctx context.Context, runtime commandRuntime, manager *kil
 	if err != nil || len(panes) == 0 {
 		return snapshot, err
 	}
-	roots := codexHomes(runtime.Config)
+	roots := runtime.Config.CodexHomes()
 	resolver := store.NewCodexThreadResolverRoots(ctx, roots, manager.CodexPaneBound(ctx))
 	snapshot.Codex, err = gather.DetectCodexThreadsInRoots(gather.NewProcFS(runtime.Paths.ProcRoot), roots, panes, resolver, runtime.Config.Codex.Binary)
 	return snapshot, err

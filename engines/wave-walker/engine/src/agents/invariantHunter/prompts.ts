@@ -31,4 +31,4 @@ export const buildInvariantHunter = ({ invariant, matchedFiles }: InvariantHunte
   RO +
   ' Structured output: invariantId="' +
   invariant.id +
-  '", findings (each {what, location=file:line, expected, got, failureScenario, severity, fix=`/jc {fix}`}), coverage.';
+  '", findings (each {what, location=file:line, expected, got, failureScenario, severity, fix=`{one-line fix}`}), coverage.';

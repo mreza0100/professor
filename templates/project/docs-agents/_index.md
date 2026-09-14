@@ -12,13 +12,13 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
 
 ## Cross-Project Reference (`docs/agents/`)
 
-| Area         | Index                                             | Covers                                                                  |
+| Area | Index | Covers |
 | ------------ | ------------------------------------------------- | ----------------------------------------------------------------------- |
-| Architecture | [architecture/\_index.md](architecture/_index.md) | Topology, service boundaries, integration contracts, data flow          |
-| API          | [api/\_index.md](api/_index.md)                   | Operation surface, endpoints, inter-service contracts, shared types     |
-| System Map   | [map/\_index.md](map/_index.md)                   | Components, workflows, DB schema, access control, ports/env/tests       |
-| Features     | [features/\_index.md](features/_index.md)         | Feature inventory by category                                           |
-| Standards    | [standards.md](standards.md)                      | Architecture source-of-truth — invariants every architect reads (owned by `/pfm`) |
+| Architecture | [architecture/\_index.md](architecture/_index.md) | Topology, service boundaries, integration contracts, data flow |
+| API | [api/\_index.md](api/_index.md) | Operation surface, endpoints, inter-service contracts, shared types |
+| System Map | [map/\_index.md](map/_index.md) | Components, workflows, DB schema, access control, ports/env/tests |
+| Features | [features/\_index.md](features/_index.md) | Feature inventory by category |
+| Standards | [standards.md](standards.md) | Architecture source-of-truth — invariants every architect reads (owned by `/pfm`) |
 
 ## Child Projects (`{project}/docs/`)
 
@@ -26,7 +26,7 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
      project earns them): architecture/_index.md, developer-reference/_index.md,
      api-reference.md, qa-reference.md, runbook.md. Only list files that exist. -->
 
-| Project   | Index / Doc                                        | Covers                                  |
+| Project | Index / Doc | Covers |
 | --------- | -------------------------------------------------- | ---------------------------------------- |
 | {project} | [architecture/\_index.md]({project}/docs/architecture/_index.md) | Project-internal architecture |
 

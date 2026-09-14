@@ -13,8 +13,11 @@ import (
 
 	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/spawn"
+	"hostops/pfm/internal/stale"
 	"hostops/pfm/internal/store"
 )
 
@@ -31,18 +34,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stderr)
 		return 2
 	}
-	runtime, err := loadCommandRuntime(configPath)
+	runtime, err := config.LoadRuntime(configPath)
 	if err != nil {
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1
 		}
-		runtime, err = loadDiagnosticRuntime(configPath)
+		runtime, err = config.LoadDiagnosticRuntime(configPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1
 		}
 	}
+	// The one place the machine config reaches a Codex rename's proof.
+	spawn.UseCodexHomes(runtime.Config.CodexHomes())
 	if len(args) == 0 {
 		return runLS(nil, stdout, stderr, runtime)
 	}
@@ -188,11 +193,7 @@ func runMCP(
 		fmt.Fprintf(stderr, "pfm mcp %s: registered server has no implementation\n", name)
 		return 1
 	}
-	chatRuntime := mcpRuntime(runtime)
-	// Stdio is launched by one chat and inherits that caller deliberately. The
-	// shared HTTP daemon uses mcpRuntime's fail-closed default instead.
-	chatRuntime.AllowAmbientIdentity = true
-	service, err := mcpserv.NewConfigured(version, stderr, chatRuntime)
+	service, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, true))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
 		return 1
@@ -307,7 +308,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		// for exactly the ids the picker would let you ⌃X, and nothing else.
 		// The same pass hands back the row's live tmux address so a kill of
 		// a live-but-unindexed row still ends it, not just hides it.
-		engine, rolloutPath, socket, paneID = resolveRowTarget(ctx, database, id, stderr, runtime)
+		engine, rolloutPath, socket, paneID = fleet.ResolveRow(ctx, database, id, stderr, &runtime)
 	}
 	target, err := manager.Kill(ctx, kill.Request{
 		ID:          id,
@@ -429,11 +430,14 @@ func runInternal(
 		return runInternalUpdateCheck(args[1:], stderr)
 	}
 	if len(args) != 0 && args[0] == "primary-get" {
-		fmt.Fprintln(stdout, readPrimaryAccount(runtime.Paths, runtime.Config))
+		fmt.Fprintln(stdout, fleet.PrimaryAccount(runtime.Paths, runtime.Config))
 		return 0
 	}
-	if len(args) != 0 && args[0] == "tmux-titles" {
-		return runInternalTmuxTitles(args[1:], stdout, stderr, runtime)
+	if len(args) != 0 && args[0] == "chat-server" {
+		return runInternalChatServer(args[1:], stderr, runtime)
+	}
+	if len(args) != 0 && args[0] == "stale" {
+		return stale.Run(args[1:], stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := newFlagSet(
@@ -453,15 +457,24 @@ func runInternal(
 			flags.Usage()
 			return 2
 		}
-		if err := writePrimaryAccount(runtime.Paths, runtime.Config, account); err != nil {
+		if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, account); err != nil {
 			fmt.Fprintf(stderr, "pfm internal primary-set: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	if len(args) == 0 || args[0] != "kill-exit" {
-		fmt.Fprintln(stderr, "usage: pfm internal clear-kill|exit-close|exit-intercept|kill-exit|then|update-check|explore-deny|epic-inject [options]")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
 		return 2
+	}
+	if args[0] != "kill-exit" {
+		// Hooks and units are the only callers of an internal name, and exit 2
+		// is Claude Code's BLOCKING hook code: a hook a different pfm version
+		// registered (a rollback, a stale binary on PATH) would erase every
+		// prompt or deny every tool call. An unknown name is a non-blocking
+		// error that says what happened and how to converge.
+		fmt.Fprintf(stderr, "pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n", args[0], displayVersion())
+		return 1
 	}
 	flags := newFlagSet(
 		"internal kill-exit",
@@ -496,7 +509,7 @@ func runInternal(
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Config.ProjectRoots(),
-		CodexRoots:  codexHomes(runtime.Config),
+		CodexRoots:  runtime.Config.CodexHomes(),
 	})
 	if err == nil {
 		err = finisher.Run(context.Background(), kill.ExitArgs{
@@ -529,7 +542,7 @@ func openKillManager(
 		fmt.Fprintf(stderr, "pfm: %v\n", err)
 		return nil, nil, 1
 	}
-	manager, err := kill.New(database, killDependencies(runtime))
+	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
 		_ = database.Close()
 		fmt.Fprintf(stderr, "pfm: %v\n", err)

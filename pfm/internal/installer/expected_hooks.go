@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -332,4 +333,62 @@ func inspectExpectedHookDocument(document map[string]any) (settingsHookCounts, s
 
 func codexHookTemplate(home string) ExpectedHook {
 	return ExpectedHook{Event: "SessionStart", Matcher: codexappendix.Matcher, Command: codexappendix.Command(home), Name: "codex-appendix"}
+}
+
+// HookProbeOverride is nil in production; a fleet test main may swap it for
+// a deterministic stub exactly like ReportHooks' own probe (the same seam
+// dependencyProbeOverride uses in cmd/pfm), so a jail can pin every hook "ok"
+// without staging real settings.json content for it.
+var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
+
+// ReportHooks prints one doctor line per expected hook, and returns the
+// warnings they earned. When claudeAbsent, every claude[N] target collapses
+// to ONE named skip line per account instead of nine per-hook MISSING rows,
+// and earns no warning — the installer never wires Claude hooks on a host
+// with no Claude Code binary, so doctor must not fault it for that. Codex
+// targets are reported exactly as before regardless of Claude's presence.
+func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) int {
+	var results []HookProbeResult
+	if HookProbeOverride != nil {
+		results = HookProbeOverride(home, machine)
+	} else {
+		results = ProbeExpectedHooks(home, machine)
+	}
+	warnings := 0
+	skipped := map[string]bool{}
+	for _, result := range results {
+		hook := result.Hook
+		if claudeAbsent && strings.HasPrefix(hook.Target, "claude[") {
+			if !skipped[hook.Target] {
+				skipped[hook.Target] = true
+				fmt.Fprintf(stdout, "doctor: hook %s skipped (no Claude Code binary installed)\n", hook.Target)
+			}
+			continue
+		}
+		file := filepath.Base(hook.File)
+		if file == "." || file == "" {
+			file = "(unknown)"
+		}
+		prefix := fmt.Sprintf("doctor: hook %s %s %s %s", hook.Target, file, hook.Event, hook.Name)
+		switch result.State {
+		case "ok":
+			fmt.Fprintln(stdout, prefix+" ok")
+		case "missing":
+			warnings++
+			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
+		case "broken":
+			warnings++
+			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
+		case "drift":
+			warnings++
+			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
+		case "stale":
+			warnings++
+			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
+		default:
+			warnings++
+			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
+		}
+	}
+	return warnings
 }

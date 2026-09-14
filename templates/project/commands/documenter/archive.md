@@ -1,6 +1,6 @@
 ---
 name: documenter:archive
-description: ARCHIVE mode — merge a completed pipeline's decisions into permanent docs (hub + clusters), clean the backlog, consolidate the active epic, then leave $DOCS for gitter. Invoked by mono-documenter from the build/wave pipeline.
+description: PIPELINE-ONLY — merges a shipped pipeline's decisions into permanent docs (hub + clusters), cleans the backlog, consolidates the active epic (standalone builds only), then leaves $DOCS for gitter DOCS-COMMIT. Follows the mono-documenter scope map.
 argument-hint: [PIPELINE archive directive]
 allowed-tools: Bash(cat:*)
 ---

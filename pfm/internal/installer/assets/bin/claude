@@ -1,4 +1,6 @@
 #!/bin/sh
+# Contract: exit 127 = no real Claude binary found on this host; any other
+# non-zero exit = the real binary itself failed.
 set -eu
 
 configured=__PFM_CONFIGURED_CLAUDE__
@@ -37,7 +39,7 @@ fi
 
 if [ -z "$real" ]; then
 	printf '%s\n' 'pfm claude launcher: no real Claude binary found' >&2
-	exit 1
+	exit 127
 fi
 
 exec "$HOME/.local/bin/pfm" internal launch --real "$real" -- "$@"

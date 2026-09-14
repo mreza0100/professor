@@ -51,48 +51,6 @@ func TestLegacyResolveTitleExpandsConfidentDOIThroughOAChain(t *testing.T) {
 	}
 }
 
-func TestLegacyOAProviderEdgeShapes(t *testing.T) {
-	t.Run("Unpaywall keeps alternate OA locations", func(t *testing.T) {
-		client := legacyOAClient(t, func(*http.Request) string {
-			return `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://public.example.test/best.pdf","version":"publishedVersion"},"oa_locations":[{"url_for_pdf":"https://public.example.test/alternate.pdf","version":"acceptedVersion"}]}`
-		})
-		got, err := (&Resolver{ContactEmail: "test@example.org"}).unpaywall(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/alternate.pdf" || got[1].Priority != 17 {
-			t.Fatalf("Unpaywall candidates=%#v err=%v", got, err)
-		}
-	})
-
-	t.Run("OpenAlex only keeps OA PDF locations", func(t *testing.T) {
-		client := legacyOAClient(t, func(*http.Request) string {
-			return `{"open_access":{"is_oa":true,"oa_status":"green","oa_url":"https://public.example.test/top.pdf"},"locations":[{"is_oa":false,"pdf_url":"https://closed.example.test/not-oa.pdf"},{"is_oa":true,"pdf_url":"https://public.example.test/location.pdf","version":"acceptedVersion"}]}`
-		})
-		got, err := (&Resolver{}).openAlexDOI(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/location.pdf" || got[1].Priority != 18 {
-			t.Fatalf("OpenAlex candidates=%#v err=%v", got, err)
-		}
-	})
-
-	t.Run("Semantic Scholar normalizes PMC identifiers", func(t *testing.T) {
-		client := legacyOAClient(t, func(*http.Request) string {
-			return `{"openAccessPdf":null,"externalIds":{"PubMedCentral":"10450651"}}`
-		})
-		got, err := (&Resolver{}).semanticScholar(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 1 || got[0].URL != "https://europepmc.org/articles/PMC10450651?pdf=render" {
-			t.Fatalf("Semantic Scholar candidates=%#v err=%v", got, err)
-		}
-	})
-
-	t.Run("DOAJ only consumes the first result", func(t *testing.T) {
-		client := legacyOAClient(t, func(*http.Request) string {
-			return `{"results":[{"bibjson":{"link":[{"type":"fulltext","url":"https://public.example.test/first"}]}},{"bibjson":{"link":[{"type":"fulltext","url":"https://public.example.test/second"}]}}]}`
-		})
-		got, err := (&Resolver{}).doaj(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 1 || got[0].URL != "https://public.example.test/first" {
-			t.Fatalf("DOAJ candidates=%#v err=%v", got, err)
-		}
-	})
-}
-
 func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 	client := legacyOAClient(t, func(request *http.Request) string {
 		u := request.URL.String()

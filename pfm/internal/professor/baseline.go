@@ -2,13 +2,13 @@ package professor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const BaselineVersion = 1
@@ -82,7 +82,7 @@ func normalizeIgnored(values []string) []string {
 	return deduped
 }
 
-func Save(root string, baseline Baseline) (resultErr error) {
+func Save(root string, baseline Baseline) error {
 	if baseline.Version != BaselineVersion {
 		return fmt.Errorf("BASELINE-VERSION %d: unsupported", baseline.Version)
 	}
@@ -99,27 +99,5 @@ func Save(root string, baseline Baseline) (resultErr error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create baseline directory %s: %w", filepath.Dir(path), err)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".baseline-")
-	if err != nil {
-		return fmt.Errorf("create baseline temporary file: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer func() {
-		if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove baseline temporary file %s: %w", temporaryPath, removeErr))
-		}
-	}()
-	if err := temporary.Chmod(0o644); err != nil {
-		return errors.Join(fmt.Errorf("chmod baseline temporary file: %w", err), temporary.Close())
-	}
-	if _, err := temporary.Write(raw); err != nil {
-		return errors.Join(fmt.Errorf("write baseline temporary file: %w", err), temporary.Close())
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close baseline temporary file: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace baseline %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, raw, 0o644)
 }

@@ -1,7 +1,6 @@
 # RR — Engine Design
 
-> How a run actually flows, stage by stage, and why each piece is built the way it is.
-> Audience: anyone modifying `engine/src/` or debugging a run. The operator-facing interface lives in `SKILL.md`; this is the machinery.
+> How a run actually flows, stage by stage, and why each piece is built the way it is. Audience: anyone modifying `engine/src/` or debugging a run. The operator-facing interface lives in `SKILL.md`; this is the machinery.
 
 ## 0. The three invariants everything else serves
 
@@ -95,7 +94,7 @@ Lane selection is **calibration-weighted**: each lead-kind (seed/gap/citation/at
 `retryAgent` wraps every agent call (2 retries): a transient structured-output failure often clears on a clean re-spawn. **The harness resolves terminal API errors (safety-classifier blocks, mid-run skips) to `null` without throwing** — so a null return is routed through the SAME retry ladder as a thrown error; otherwise the ladder never engages on exactly the failure class it exists for. A borderline classifier block is often probabilistic; a fresh spawn frequently passes. Only after exhaustion does the call degrade to null — and then the engine's per-agent fallback table takes over:
 
 | dead agent | fallback |
-|---|---|
+| --- | --- |
 | scout planner | single direct probe on the naive query (v2 behavior) |
 | scout probe | dropped; ALL probes dead → fatal (`scout died`) |
 | scout merger | deterministic JS merge |
@@ -123,7 +122,7 @@ The single-brainer path is the proven default and is left untouched; the tree is
 ## 11. Model tiering — why each agent sits where it sits
 
 | tier | agents | rationale |
-|---|---|---|
+| --- | --- | --- |
 | opus/xhigh | brainer, initiator, judge, synthesiser | global judgment: scoring, grouping, skepticism, synthesis — "measured: a Haiku brainer scored erratically + drifted off-goal" |
 | opus/high | prospector | one global venue decision, domain expertise |
 | sonnet/high | scout planner, scout merger, scheduler | mid-weight judgment: decomposition, tension-naming, source-value triage + batched tool I/O |

@@ -21,6 +21,8 @@ func writeProvisionedBrowserEnv(t *testing.T, root string, platform harvestpy.Pl
 	t.Helper()
 	sum := sha256.Sum256(harvestpy.BrowserWorkerSource())
 	digest.SourceSHA256 = hex.EncodeToString(sum[:])
+	lock := sha256.Sum256(harvestpy.BrowserLockMetadata())
+	digest.LockSHA256 = hex.EncodeToString(lock[:])
 	env := harvestpy.BrowserRuntimeRoot(root, platform)
 	if err := os.MkdirAll(filepath.Join(env, "project", ".venv", "bin"), 0o700); err != nil {
 		t.Fatal(err)
@@ -340,6 +342,49 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
 		if warnings != 1 || !strings.Contains(output.String(), "SOURCE_MISMATCH") {
 			t.Fatalf("tampered-worker row=%q warnings=%d", output.String(), warnings)
+		}
+	})
+
+	root = newRoot()
+	t.Run("gate on with a worker provisioned by an older pfm reports SOURCE STALE", func(t *testing.T) {
+		liveChrome := filepath.Join(t.TempDir(), "live-chrome")
+		if err := os.WriteFile(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		restoreSmoke(func(_ context.Context, _, _ string) (map[string]any, error) {
+			return map[string]any{"ok": true, "patchright": true, "chrome_path": liveChrome}, nil
+		})
+		digest := doctorHarvestDigest()
+		digest.Digest = "abcdef1234567890"
+		writeProvisionedBrowserEnv(t, root, platform, digest)
+		// Record and disk agree with EACH OTHER (no tamper) but not with
+		// the worker this binary embeds — the state an upgrade leaves.
+		older := []byte("# browser worker from an older pfm\n")
+		envDir := harvestpy.BrowserRuntimeRoot(root, platform)
+		if err := os.WriteFile(filepath.Join(envDir, "project", "browser.py"), older, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		record, err := harvestpy.InspectBrowser(root, platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		olderSum := sha256.Sum256(older)
+		record.SourceSHA256 = hex.EncodeToString(olderSum[:])
+		body, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(envDir, "environment.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var output strings.Builder
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		if !strings.Contains(output.String(), "SOURCE_STALE") || strings.Contains(output.String(), "source_hash=ok") {
+			t.Fatalf("an older pfm's worker read as current: %q", output.String())
+		}
+		// Self-healing on the next browser fetch: named, never an update-blocking warning.
+		if warnings != 0 {
+			t.Fatalf("stale-but-self-healing worker counted %d warning(s), want 0: %q", warnings, output.String())
 		}
 	})
 

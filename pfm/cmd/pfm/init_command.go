@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/professor"
 )
@@ -22,6 +23,7 @@ var initTemplatePaths = []struct {
 }{
 	{source: "project/CLAUDE.md", target: "CLAUDE.md"},
 	{source: "project/settings.json", target: ".claude/settings.json"},
+	{source: "project/rumdl-policy.toml", target: ".rumdl.toml"},
 	{source: "project/commands", target: ".claude/commands"},
 	{source: "project/agents", target: ".claude/agents", skip: "per-project"},
 	{source: "project/scripts", target: ".claude/scripts"},
@@ -118,7 +120,7 @@ func initScaffold(source, target string, force bool, stdout io.Writer) (int, err
 			return 0, fmt.Errorf("read template %s: %w", entry.template, err)
 		}
 		raw = addScaffoldMarker(entry.local, entry.template, store.SHA, raw)
-		if err := writeInitFile(targetPath, raw, entry.mode); err != nil {
+		if err := atomicfile.Write(targetPath, raw, entry.mode); err != nil {
 			return 0, fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err)
 		}
 		hash, err := professor.HashTemplate(entry.source)
@@ -215,32 +217,6 @@ func addScaffoldMarker(local, template, sha string, raw []byte) []byte {
 	return raw
 }
 
-func writeInitFile(target string, raw []byte, mode os.FileMode) (resultErr error) {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".pfm-init-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer func() {
-		if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			resultErr = errors.Join(resultErr, fmt.Errorf("remove temporary scaffold file %s: %w", temporaryPath, removeErr))
-		}
-	}()
-	if err := temporary.Chmod(mode.Perm()); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if _, err := temporary.Write(raw); err != nil {
-		return errors.Join(err, temporary.Close())
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, target)
-}
-
 // discoverSourceRepo finds the clone when install is launched from it. It is
 // deliberately filesystem-only: installation never shells out to git.
 func discoverSourceRepo() string {
@@ -255,7 +231,7 @@ func discoverSourceRepo() string {
 	}
 	for {
 		if isSourceRepo(current) {
-			return current
+			return mainWorktreeOf(current)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -263,6 +239,42 @@ func discoverSourceRepo() string {
 		}
 		current = parent
 	}
+}
+
+// mainWorktreeOf maps a linked git worktree of the source clone to the clone
+// itself. A worktree carries every file isSourceRepo checks, yet it is deleted
+// when its wave merges — recording it would leave the source marker, `pfm
+// update`, and the global links pointing at nothing. A linked worktree's .git
+// is a FILE ("gitdir: <common>/worktrees/<name>") whose gitdir holds a
+// commondir file naming the shared .git; that directory's parent is the main
+// checkout. Every other shape — a real .git directory, a submodule's gitdir
+// with no commondir, a main checkout that is not a source repo — returns root
+// unchanged.
+func mainWorktreeOf(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, ".git"))
+	if err != nil {
+		return root
+	}
+	gitdir, found := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !found {
+		return root
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	common, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
+	if err != nil {
+		return root
+	}
+	commonDir := strings.TrimSpace(string(common))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(gitdir, commonDir)
+	}
+	main := filepath.Dir(filepath.Clean(commonDir))
+	if !isSourceRepo(main) {
+		return root
+	}
+	return main
 }
 
 func isSourceRepo(root string) bool {

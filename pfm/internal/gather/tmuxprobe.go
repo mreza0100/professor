@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/tmuxfmt"
 )
 
@@ -401,6 +402,45 @@ func (tmux CommandTmux) ApplyGlobalOptions(
 	return nil
 }
 
+// ConvergeGlobalOptions brings one live server onto options — argument vectors
+// in the shape config.ChatServerOptions returns, name second-to-last and value
+// last — reading each option, applying only the ones that diverge, and reading
+// every applied one back. It returns one `name "was" -> "now"` transition per
+// option it changed. An option that could not be read, applied or verified is
+// an error naming it, never an empty "nothing to converge".
+func (tmux CommandTmux) ConvergeGlobalOptions(
+	ctx context.Context,
+	socket string,
+	options [][]string,
+) ([]string, error) {
+	var transitions []string
+	for _, option := range options {
+		if len(option) < 2 {
+			return transitions, fmt.Errorf("tmux option vector %v names no option and value", option)
+		}
+		name, want := option[len(option)-2], option[len(option)-1]
+		actual, err := tmux.ShowGlobalOption(ctx, socket, name)
+		if err != nil {
+			return transitions, fmt.Errorf("could not read %s: %w", name, err)
+		}
+		if actual == want {
+			continue
+		}
+		if err := tmux.ApplyGlobalOptions(ctx, socket, [][]string{option}); err != nil {
+			return transitions, err
+		}
+		verified, err := tmux.ShowGlobalOption(ctx, socket, name)
+		if err != nil {
+			return transitions, fmt.Errorf("could not verify %s after apply: %w", name, err)
+		}
+		if verified != want {
+			return transitions, fmt.Errorf("%s read back %q after apply, wanted %q", name, verified, want)
+		}
+		transitions = append(transitions, fmt.Sprintf("%s %q -> %q", name, actual, want))
+	}
+	return transitions, nil
+}
+
 // NudgeTitlesString flips a live server's set-titles-string away from value
 // and back to it — the identical "flip and restore" mechanism
 // tmux-title-renudge performs (internal/installer/assets/bin/tmux-title-renudge),
@@ -508,6 +548,14 @@ func probeTmux(
 			}
 			if groupCtx.Err() != nil {
 				return groupCtx.Err()
+			}
+			// tmux itself never started, so no socket in this pass can be
+			// read: the whole probe fails, naming why. Filing it per socket
+			// returned zero panes and no error — "no chats" when the truth is
+			// "could not look" — and the MCP daemon on a service manager's bare
+			// PATH answered every chat tool that way.
+			if pfmtmux.CouldNotRun(err) {
+				return fmt.Errorf("tmux could not run to probe socket %s: %w", socket.name, err)
 			}
 
 			// A socket with no server behind it is a chat that ended, not a

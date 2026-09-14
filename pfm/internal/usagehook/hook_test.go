@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 func TestUsageParsesScopedFableAndDropsUnknownWindows(t *testing.T) {
@@ -260,7 +262,7 @@ func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
 	}
 	// Pre-arm the warned flag: without it, a low-utilization cache never
 	// enters the recovery branch at all — it is simply quiet.
-	if err := AtomicWrite(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
+	if err := atomicfile.Write(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	passed := now.Add(-90 * time.Minute)
@@ -294,7 +296,7 @@ func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
 	// Mirror case: a window whose reset is still in the future, at a genuine
 	// low percentage, must still render its real number rather than the
 	// "reset passed" phrase.
-	if err := AtomicWrite(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
+	if err := atomicfile.Write(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
@@ -425,7 +427,7 @@ func TestEvaluateWarningRecoveryRequiresTheSameConfigDirectory(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := AtomicWrite(filepath.Join(cacheDir, "warned-2"), []byte(configA), 0o600); err != nil {
+	if err := atomicfile.Write(filepath.Join(cacheDir, "warned-2"), []byte(configA), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	message, err := Evaluate(context.Background(), Options{

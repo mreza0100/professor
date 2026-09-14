@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {
@@ -38,5 +40,5 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 			return err
 		}
 	}
-	return atomicWrite(path, wanted, 0600)
+	return atomicfile.Write(path, wanted, 0600)
 }

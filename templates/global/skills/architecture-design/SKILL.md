@@ -1,6 +1,6 @@
 ---
 name: architecture-design
-description: "Designs or re-designs a codebase's layout for agent maintainers — which directory owns each unit of change, the fixed file anatomy inside it, grep-true names, where tests, prompts, config and registries live, which cross-cutting calls hide behind one façade, plus the reader's path around the tree (brief anchors, consumer index, work-tree anatomy, ceiling ratchet) — and emits the target tree, glossary, mechanical checks and metric baseline before any build. Use for `$architecture-design <feature|LLM call|project|path>`, for any 'architect / design the structure / where should X live / re-architect' request, before /wave:refine on a feature that touches 3+ directories, and for every new LLM call. Greenfield mode designs a tree; brownfield mode measures the existing tree and writes the migration plan. Produces a design document; edits no code."
+description: Lays out a codebase for agent maintainers — one directory per unit of change, grep-true names, no parallel registries. Use for `$architecture-design <feature|LLM call|project|path>`, "where should X live", before /wave:refine on a feature touching 3+ directories, and every new LLM call; greenfield designs a tree, brownfield measures then migrates. Returns a design document; edits no code.
 ---
 
 # Architecture Design

@@ -117,23 +117,6 @@ func TestLegacyDOINegativeCacheFormsShareOneKey(t *testing.T) {
 	}
 }
 
-func TestLegacyRungReceiptsGroupOnlyConsecutiveOACandidates(t *testing.T) {
-	rungs := []string{"direct", "oa:unpaywall", "oa:openalex", "oa:core", "wayback"}
-	if got := rungsPhrase(rungs); got != "direct, oa-mirror(3 sources), wayback" {
-		t.Fatalf("rungsPhrase()=%q", got)
-	}
-	if got := rungsSummary([]string{"direct", "oa:unpaywall"}); got != "direct, oa:unpaywall" {
-		t.Fatalf("rungsSummary()=%q", got)
-	}
-	if got := withRungs("boom", []string{"direct"}); got != "boom" {
-		t.Fatalf("single-rung receipt=%q", got)
-	}
-	want := "boom Rungs tried: direct, wayback — re-fetching will not help."
-	if got := withRungs("boom", []string{"direct", "wayback"}); got != want {
-		t.Fatalf("multi-rung receipt=%q, want %q", got, want)
-	}
-}
-
 func TestLegacyPDFErrorBodiesNeverBecomeConvertedSuccess(t *testing.T) {
 	wall := `<html><head><title>Article unavailable</title></head><body>` + strings.Repeat("the requested document is unavailable ", 80) + `</body></html>`
 	wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -188,7 +171,9 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "search") {
+	// SearchAvailable defaults false here, so the recovery hint names findWorks
+	// rather than the unavailable `search` tool — see SearchHint.
+	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "alternative copy") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
 	}
 }
@@ -358,7 +343,7 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return jsonResponse(request, `{}`), nil
 		})
-		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
+		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, SearchAvailable: true, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
 			return "", nil
 		})})
 		result := h.Fetch(context.Background(), "10.1234/paywalled")

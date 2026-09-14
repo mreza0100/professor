@@ -28,13 +28,13 @@
 
 ## Scripts
 
-| Script      | Command         | Description |
+| Script | Command | Description |
 | ----------- | --------------- | ----------- |
-| `dev`       | {PROJECT_RUN_CMD}       | Dev server  |
-| `build`     | {BUILD_CMD}     | Build       |
-| `test`      | {PROJECT_TEST_RUNNER}      | Run tests   |
-| `lint`      | {PROJECT_LINT}      | Lint        |
-| `typecheck` | {PROJECT_TYPECHECK} | Type check  |
+| `dev` | {PROJECT_RUN_CMD} | Dev server |
+| `build` | {BUILD_CMD} | Build |
+| `test` | {PROJECT_TEST_RUNNER} | Run tests |
+| `lint` | {PROJECT_LINT} | Lint |
+| `typecheck` | {PROJECT_TYPECHECK} | Type check |
 
 ## Code Standards
 
@@ -107,10 +107,10 @@
 <!-- Add a row per extra tier THIS project needs beyond root's two (e.g. a demo/staging env with its
      own flag defaults) — most projects need none. -->
 
-| File         | Purpose           | Infrastructure                                        |
+| File | Purpose | Infrastructure |
 | ------------ | ----------------- | ----------------------------------------------------- |
-| `.env.local` | Local development | {INFRA_PROJECT} local — {DB_PORT}                     |
-| `.env.test`  | Integration tests | {INFRA_PROJECT} test — {DB_PORT_TEST}, fully isolated |
+| `.env.local` | Local development | {INFRA_PROJECT} local — {DB_PORT} |
+| `.env.test` | Integration tests | {INFRA_PROJECT} test — {DB_PORT_TEST}, fully isolated |
 
 ### Access Control
 

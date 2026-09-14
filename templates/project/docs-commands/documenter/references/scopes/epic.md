@@ -2,8 +2,7 @@
 
 Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration scope table is the card index). Read `docs/commands/documenter/references/doc-approval.md` FIRST — write rules, sacred boundaries, Approval gate, finish steps.
 
-**Write set (yours alone):** `docs/epics/{name}/**`.
-**Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md` (legacy: `1-plan.md`/`3-architecture.md`). Read only what exists.
+**Write set (yours alone):** `docs/epics/{name}/**`. **Sources:** `$DOCS/5-dev-report-*.md`, `$DOCS/0-task.md` (legacy: `1-plan.md`/`3-architecture.md`). Read only what exists.
 
 **Governing write contract:** `documenter.md` § Epic consolidation contract — read that section before writing (it stays canonical there; `wave.md` Step 3.5 and `wave/orchestrator.md` also cite it).
 
@@ -15,6 +14,6 @@ Resolve the epic: use the `Epic:` value from your invocation (build Step 10 pass
 
 Consolidate the pipeline into the matched epic per the Epic consolidation contract: merge what shipped (dev reports + the features the `root-features` scope added) into `update.md` — `## Delivered` per area, `## State of work` refreshed; fold new architectural/scope decisions from `$DOCS/0-task.md` (legacy trails: `1-plan.md`/`3-architecture.md`) into `## Key Decisions` (deduped); add one `## Progress Log` line; add `{PIPELINE}` to `pipelines:`; bump `updated:`. `## Discoveries` and `## Open Questions` stay untouched in this mode.
 
-## JC-UPDATE
+## FIX-UPDATE
 
-Never emitted in JC-UPDATE mode — this scope is standalone-ARCHIVE only.
+Never emitted in FIX-UPDATE mode — this scope is standalone-ARCHIVE only.

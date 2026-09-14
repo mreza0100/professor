@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:refine
-description: Wave refinement — walks the code and writes ONE zero-gap, feature-scoped wave spec (tasks inside-out) to docs/dev/trains/queue/{YYYY-MM-DD}-{slug}.md, asking the user only what the code cannot answer; partitioning belongs to the scheduler agent, which also invokes merge mode (two+ specs in, one out, non-interactive). Subcommand `poc <goal>` refines AND builds it under .professor/RND/POC/{name}/. Triggers: "refine", "refine this", "/wave:refine", "refine tasks", "refine poc".
+description: Writes ONE zero-gap wave spec — to docs/dev/trains/queue/{date}-{slug}.md, asking only what the code cannot answer. Chain head — refine → /wave:orchestrator → /wave:builder → /wave:walker. `poc <goal>` refines AND builds under .professor/RND/POC/{name}/; merge mode (scheduler-invoked, non-interactive) unifies two+ specs into one. Triggers "refine", "refine this/tasks/poc".
 argument-hint: [tasks | poc <goal>]
 ---
 
@@ -54,7 +54,7 @@ Header: `# Wave: {slug}` · `**Status:** QUEUED` · `**Refined:** {YYYY-MM-DD} �
 6. `**File plan:**`
 7. `**Boundaries & anchors:**` what's NOT included + existing files/identifiers to reuse, every parity claim with its exact anchor. Every fact the builder's hand depends on is quoted here with its `file:line` — a pointer to a ledger, walk-notes or evidence directory in place of the quoted fact is a gap; the hand's first command is its target file.
 
-Rules blocks binding a subset of tasks sit above those tasks; all-task rules sit in the header. `[CMD: /km]` / `[CMD: /jc]` tags route non-builder tasks. Tag `[MILESTONE]` on checkpoint task headings.
+Rules blocks binding a subset of tasks sit above those tasks; all-task rules sit in the header. `[CMD: /km]` tags route non-builder tasks. Tag `[MILESTONE]` on checkpoint task headings.
 
 ### RND findings (when RND/POC fed the wave)
 
@@ -63,7 +63,7 @@ Write `## RND-Validated Mandatory Rules` before the task list: every validated p
 ## R4 — Review + user gate
 
 - **Officer (MANDATORY on sacred ground):** a wave touching sensitive data, consent, retention, auth, or a role boundary gets a fresh-context `/officer` Advisory pass (opus agent); its flags fold in as `[WATCH:]` tags. Anything mandating a new consent scope or schema goes to the user, never auto-encoded. _(When the Officer archetype is installed.)_
-- **Architect (always):** fresh-context `Agent(subagent_type: "architect")` on the spec path only, briefed for its zero-gap walk. Gap findings (false edge, missing file-plan entry, unpinned external field, undecided branch) fold in as spec deltas before the spec queues; judgment findings go to the user verbatim, apply what they approve. An amendment or consolidation after this pass re-runs it — verification covers the text that dispatches, never an earlier draft.
+- **Architect (always):** `Agent(subagent_type: "architect")` on the spec path in fill mode: it corrects every gap in the file and recurses (fresh architect per pass) until a pass declares NO MORE GAPS; the refiner reads the `## Open decisions` list from the deltas block and takes it to the user gate, and folds the ratified answers as targeted edits. No hand-fold/re-run loop.
 - **User gate:** present the Scope/Deferred boundary plus one line per task (routing + the key technical and product decisions made for them). Loop until approved; approval queues the spec. Running the train (`/wave:orchestrator`) is their separate decision.
 
 **Legal fence (sacred):** DPIA, DPA, RoPA, privacy policy, consent docs, anything under `$CDOCS/officer/$REFS/` or of legal character — you never edit one and the spec never carries a task or clause ordering any agent to; a paper need is listed in the R4 summary as a user-owned item.

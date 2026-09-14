@@ -24,8 +24,13 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 	// systemd user services get systemd's bare default PATH, which cannot see
 	// ~/.local/bin — where user-installed engine CLIs live. Without this line
 	// every chat the daemon spawns dies at launch on "command not found".
-	if !strings.Contains(unit, "Environment=PATH=%h/.local/bin:") {
-		t.Fatalf("pfm-mcp.service does not extend PATH with %%h/.local/bin; a daemon-spawned chat cannot resolve its engine:\n%s", unit)
+	home := t.TempDir()
+	rendered, err := renderServicePath(raw, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rendered), "Environment=PATH="+filepath.Join(home, ".local", "bin")+":") {
+		t.Fatalf("pfm-mcp.service does not extend PATH with ~/.local/bin; a daemon-spawned chat cannot resolve its engine:\n%s", rendered)
 	}
 }
 

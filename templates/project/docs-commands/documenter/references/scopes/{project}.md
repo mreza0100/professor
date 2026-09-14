@@ -4,8 +4,7 @@
 
 Merge spec for ONE fan-out documenter worker (documenter.md § Orchestration scope table is the card index). Read `docs/commands/documenter/references/doc-approval.md` FIRST — write rules, sacred boundaries, Approval gate, finish steps.
 
-**Write set (yours alone):** `{project}/docs/**` + `docs/agents/graph/{project}/**`.
-**Sources:** `$DOCS/0-task.md` (Contracts), `$DOCS/5-dev-report-{project}.md`; legacy archives: `3-architecture.md`, `3-architecture-{project}.md`. Read only what exists.
+**Write set (yours alone):** `{project}/docs/**` + `docs/agents/graph/{project}/**`. **Sources:** `$DOCS/0-task.md` (Contracts), `$DOCS/5-dev-report-{project}.md`; legacy archives: `3-architecture.md`, `3-architecture-{project}.md`. Read only what exists.
 
 ## Architecture merge (`{project}/docs/architecture/`)
 
@@ -19,6 +18,6 @@ New endpoints → `{project}/docs/api-reference.md`; new patterns → `{project}
 
 Changed diagrammed flow for this project — resolvers, services, {REALTIME_PROTOCOL} handlers, {QUEUE} consumers/publishers, the {SESSION_NOUN} state machine → regenerate the affected `.mmd` per the format contract in `docs/agents/graph/_index.md`; verify each renders (`npx -y -p @mermaid-js/mermaid-cli mmdc -i <f>.mmd -o /tmp/<f>.svg`, exit 0); keep the `_index.md` rows accurate. Skip if no diagrammed flow changed.
 
-## JC-UPDATE
+## FIX-UPDATE
 
-Same merge logic over only the docs the hotfix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir.
+Same merge logic over only the docs the fix affects — verify the blast radius against the changed source (read-only `git diff`); there is no `$DOCS` dir.

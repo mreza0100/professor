@@ -1,15 +1,10 @@
 # Opening a VS Code terminal from outside VS Code
 
-Status: research, not built. Question: can `pfm` (an external process) make a running VS Code
-window open a NEW integrated terminal and run a command in it — e.g. `pfm chat attach <name>`?
-Full trail with sources: `.professor/RR/vscode-open-terminal-run-command-externally-2026-09-11.md`.
+Status: research, not built. Question: can `pfm` (an external process) make a running VS Code window open a NEW integrated terminal and run a command in it — e.g. `pfm chat attach <name>`? Full trail with sources: `.professor/RR/vscode-open-terminal-run-command-externally-2026-09-11.md`.
 
 ## Answer
 
-No zero-setup mechanism exists. VS Code exposes no "open a terminal" surface to outside
-processes: the `code` CLI (1.128) has no flag that runs a workbench command, there is no built-in
-`vscode://` URI for terminals, and generic `command:` URIs are trust-gated after CVE-2022-41034.
-Everything that works is either an extension or UI automation.
+No zero-setup mechanism exists. VS Code exposes no "open a terminal" surface to outside processes: the `code` CLI (1.128) has no flag that runs a workbench command, there is no built-in `vscode://` URI for terminals, and generic `command:` URIs are trust-gated after CVE-2022-41034. Everything that works is either an extension or UI automation.
 
 ## Routes, ranked by what could ship
 
@@ -26,13 +21,9 @@ Everything that works is either an extension or UI automation.
 
 ## Recommendation
 
-Build route 1 if opening the seat in a VS Code tab becomes a pfm feature; route 2 only as a
-darwin-gated convenience on a single machine. Never routes 3–8.
+Build route 1 if opening the seat in a VS Code tab becomes a pfm feature; route 2 only as a darwin-gated convenience on a single machine. Never routes 3–8.
 
 ## Local findings
 
-- `code --help` (1.128) lists no command-execution flag; `--locate-shell-integration-path` is the
-  only terminal-related option.
-- `osascript` with `activate` + ⌃⇧` reached VS Code on this host without an Accessibility denial;
-  in a multi-root workspace the keystroke lands on the "select a folder for the new terminal"
-  picker, so the automation must answer it before typing the command.
+- `code --help` (1.128) lists no command-execution flag; `--locate-shell-integration-path` is the only terminal-related option.
+- `osascript` with `activate` + ⌃⇧` reached VS Code on this host without an Accessibility denial; in a multi-root workspace the keystroke lands on the "select a folder for the new terminal" picker, so the automation must answer it before typing the command.

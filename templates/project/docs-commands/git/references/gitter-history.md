@@ -9,7 +9,7 @@ Every gitter phase ends with the matching confirmation:
 - **SETUP** — `Worktrees ready. Pipeline: $PIPELINE.\n  Branch: pipeline/$PIPELINE -> $WORKTREE (ports {per-roster-project})`
 - **MERGE** — `Merge complete. Pipeline: $PIPELINE.\n  Merged: pipeline/$PIPELINE -> main\n  Worktrees: cleaned up\n  Commit: <short-hash>`
 - **DOCS-COMMIT** — `Docs committed. Pipeline: $PIPELINE.\n  Docs: committed or no changes\n  Archived to tmp: {paths or none}`
-- **JC-COMMIT** — `Committed.` (+ both commit hashes if two commits made)
+- **COMMIT** — `Committed.` (+ both commit hashes when a doc commit was made too)
 - **WORKTREE-CHECKPOINT** — `Checkpoint T{n}: {sha} on pipeline/$PIPELINE.`
 - **SYNC** — `Synced main -> pipeline/$PIPELINE. Merged: {files}. Conflicts resolved: {files or none}.`
 - **PUSH** — `Pushed. Here's what went up:\n  Commit: <short-hash>\n  Message: "$MESSAGE"`
@@ -46,9 +46,9 @@ git blame {project}/{file}           # works through the merge boundary
 
 Candidates for a future `git filter-repo` / BFG pass if repo size becomes a problem. Seed the table from your repo, or delete this section.
 
-| File                | Size | Location  | Introduced | Purpose |
+| File | Size | Location | Introduced | Purpose |
 | ------------------- | ---- | --------- | ---------- | ------- |
-| {path/to/large.bin} | {MB} | {project} | {when}     | {why}   |
+| {path/to/large.bin} | {MB} | {project} | {when} | {why} |
 
 **To nuke from history later** (if migrating to LFS or removing):
 

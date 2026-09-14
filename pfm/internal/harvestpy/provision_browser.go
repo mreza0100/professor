@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // BrowserRuntimeRoot is the stable current pointer for the opt-in real-browser
@@ -201,6 +203,69 @@ func InspectBrowser(root string, platform Platform) (EnvironmentDigest, error) {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
 	}
 	return ReadEnvironmentDigest(filepath.Join(BrowserRuntimeRoot(root, platform), "environment.json"))
+}
+
+// ensureProvision is the provisioner EnsureBrowser converges with; tests swap it.
+var ensureProvision = ProvisionBrowser
+
+// EnsureBrowser resolves the browser worker's runtime for one fetch,
+// provisioning first when the environment is missing, its record unreadable,
+// or it is stale. Presence alone is not enough: an environment an older pfm
+// provisioned keeps its interpreter, and running it runs THAT pfm's worker.
+// An empty Platform{} stringifies to "-", a path provisioning never writes,
+// so the platform is always normalized. It NEVER downloads Chromium.
+func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, error) {
+	if options.Platform.GOOS == "" {
+		options.Platform = Platform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	}
+	current := BrowserRuntimeRoot(options.Root, options.Platform)
+	resolved := Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "browser.py")}
+	reason := ""
+	if _, statErr := os.Stat(resolved.Python); errors.Is(statErr, os.ErrNotExist) {
+		reason = "NOT provisioned"
+	} else if statErr != nil {
+		return Runtime{}, fmt.Errorf("probe browser environment interpreter %s: %w", resolved.Python, statErr)
+	} else if digest, inspectErr := InspectBrowser(options.Root, options.Platform); inspectErr != nil {
+		reason = fmt.Sprintf("UNREADABLE (%v)", inspectErr)
+	} else if stale := BrowserEnvironmentStale(digest); stale != "" {
+		reason = "STALE (" + stale + ")"
+	}
+	if reason == "" {
+		return resolved, nil
+	}
+	log.Printf("harvestpy: browser environment is %s — provisioning before this fetch", reason)
+	if _, err := ensureProvision(ctx, options); err != nil {
+		return Runtime{}, fmt.Errorf("browser environment is %s and provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry", reason, err)
+	}
+	return resolved, nil
+}
+
+// BrowserEnvironmentStale names why a provisioned browser environment was
+// built from a different worker source or lock than this binary embeds, or
+// returns "" when it is current. An upgrade leaves the old environment
+// intact — interpreter present, record and on-disk worker agreeing with each
+// other — so only this comparison sees that the worker is not this pfm's.
+func BrowserEnvironmentStale(digest EnvironmentDigest) string {
+	var drift []string
+	if digest.SourceSHA256 != browserSourceSHA256() {
+		drift = append(drift, "worker source")
+	}
+	if digest.LockSHA256 != browserLockSHA256() {
+		drift = append(drift, "dependency lock")
+	}
+	if len(drift) == 0 {
+		return ""
+	}
+	return "provisioned from a different browser " + strings.Join(drift, " and ") + " than this pfm embeds"
+}
+
+// BrowserSourceState is doctor's source_hash value: "ok" for a current
+// environment, SOURCE_STALE naming the drift for one an older pfm left behind.
+func BrowserSourceState(digest EnvironmentDigest) string {
+	if reason := BrowserEnvironmentStale(digest); reason != "" {
+		return "SOURCE_STALE(" + reason + "; the next browser fetch re-provisions it)"
+	}
+	return "ok"
 }
 
 func browserLockSHA256() string { return sha256Hex(BrowserLockMetadata()) }

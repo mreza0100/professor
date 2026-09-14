@@ -35,6 +35,11 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	if !warn || !strings.Contains(line, "CHECK FAILED") || strings.Contains(line, "DRIFT") || strings.Contains(line, "matches") {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
+
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.257.md", "", errClaudeAbsent)
+	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
+		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
+	}
 }
 
 func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
@@ -130,8 +135,8 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 	stageBaseline := func(t *testing.T, home, captured, name string) {
 		stageModelHarnessPromptBaseline(t, home, harnessPromptModels[0], captured, name)
 	}
-	refuseCapture := func(t *testing.T) func(context.Context, config.Config, string) (harnessCapture, error) {
-		return func(context.Context, config.Config, string) (harnessCapture, error) {
+	refuseCapture := func(t *testing.T) func(context.Context, string, config.Config, string) (harnessCapture, error) {
+		return func(context.Context, string, config.Config, string) (harnessCapture, error) {
 			t.Fatal("capture must not run before the baseline is readable and well-formed")
 			return harnessCapture{}, nil
 		}
@@ -170,7 +175,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override content matching the staged baseline reports clean",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, config.Config, string) (harnessCapture, error) {
+				harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
 					return harnessCapture{Prompt: "captured-fixture\n", ResolvedModel: "claude-sonnet-5", CLIVersion: "fixture"}, nil
 				}
 			},
@@ -181,7 +186,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override content diverging from the staged baseline reports DRIFT",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, config.Config, string) (harnessCapture, error) {
+				harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
 					return harnessCapture{Prompt: "a different live prompt\n", ResolvedModel: "claude-sonnet-5", CLIVersion: "fixture"}, nil
 				}
 			},
@@ -192,12 +197,23 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override capture error reports CHECK FAILED, never DRIFT or matches",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, config.Config, string) (harnessCapture, error) {
+				harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
 					return harnessCapture{}, errors.New("no API request reached the capture sink")
 				}
 			},
 			wantWarn: true,
 			want:     "doctor: harness-prompt: CHECK FAILED to run",
+		},
+		{
+			name: "Claude absence reports skipped, never CHECK FAILED, and no warning",
+			setup: func(t *testing.T, home string) {
+				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
+				harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
+					return harnessCapture{}, errClaudeAbsent
+				}
+			},
+			wantWarn: false,
+			want:     "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare",
 		},
 	}
 

@@ -1,14 +1,14 @@
 ---
 name: audit:ai-output
 version: "1.0.0"
-description: "AI pipeline output validation — three-angle faithfulness audit of the AI/LLM-generated data read from its store against the source input that produced it and the pipeline code + prompts/knowledge. Triggered by 'audit ai output', 'validate output fidelity', 'audit output against source', 'check what the pipeline produced'."
+description: Audits AI pipeline output for faithfulness — the LLM-generated data read from its store, checked against the source input and the pipeline code + prompts. Triggers "audit ai output", "validate output fidelity", "check what the pipeline produced". Returns a report under .professor/AUDIT/ai-output/, never inline.
 ---
 
 # Audit: AI Output — Pipeline Output Validation
 
 > Three-angle faithfulness audit. Cross-validate the AI-generated data **in its store** against the **source input** that produced it and the **pipeline code + prompts/knowledge** that govern it.
 
-> **Domain-hydrated shell.** This ships the universal faithfulness method — the three angles, the data-first/code-last walk, the per-unit fan-out, the synthesizer contract. The per-project detail (what the output "channels" are, which store tables/collections they write to, which chain and prompt file governs each, how to query the store) is filled in at install by mapping this shell onto your AI pipeline. The worked source instance validated a {DOMAIN_ADJ} analysis engine whose channels wrote to DB tables; keep the structure, swap the channel/table/prompt specifics for yours.
+**Domain-hydrated shell.** This ships the universal faithfulness method — the three angles, the data-first/code-last walk, the per-unit fan-out, the synthesizer contract. The per-project detail (what the output "channels" are, which store tables/collections they write to, which chain and prompt file governs each, how to query the store) is filled in at install by mapping this shell onto your AI pipeline. The worked source instance validated a {DOMAIN_ADJ} analysis engine whose channels wrote to DB tables; keep the structure, swap the channel/table/prompt specifics for yours.
 
 **Trigger:** `audit ai output`, `validate output fidelity`, `audit output against source`, `check what the pipeline produced`, or any request to verify LLM output quality against what was actually in the source input.
 
@@ -125,7 +125,7 @@ Written to `.professor/AUDIT/ai-output/{date}-{channel}.md`, in this order:
 - Verdict: FAITHFUL / MOSTLY FAITHFUL (N issues) / UNFAITHFUL — FIX REQUIRED.
 - Findings by severity (CRITICAL / HIGH / MEDIUM·LOW), each carrying subject · unit · index · field · Got vs Expected · source evidence.
 - Completeness — missed codable content, per subject.
-- The one root confusion that explains the most failures and where a single example would help most; prompt fixes route to `/km`, code/guard fixes to `/jc`.
+- The one root confusion that explains the most failures and where a single example would help most; prompt fixes route to `/km`, code/guard fixes are reported for the user to route.
 
 ---
 
@@ -145,9 +145,7 @@ The `.professor/AUDIT/ai-output/` file is the immutable per-run record; the regi
 
 The closing, human-readable form of the Cross-validation checks table above: each channel gets a short list of yes/no questions a domain expert can read without translation, roughly one per channel category. A synthesizer report that can't answer every question here is not done.
 
-> **KNOWLEDGE BASE EMPTY** — This section needs the project's domain-specific key questions (what a faithful vs. fabricated output looks like in this domain, phrased in the language a domain expert reads).
-> Run the Professor's Analysis Protocol or `.claude/commands/audit/ai-output.md` after the pipeline's output channels are enumerated (§ Step 1).
-> The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
+> **KNOWLEDGE BASE EMPTY** — This section needs the project's domain-specific key questions (what a faithful vs. fabricated output looks like in this domain, phrased in the language a domain expert reads). Run the Professor's Analysis Protocol or `.claude/commands/audit/ai-output.md` after the pipeline's output channels are enumerated (§ Step 1). The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
 
 Illustrative shape (replace with the real per-channel list): "Are the {DOMAIN_NOUN} labels applied to the output grounded in what the {USER_NOUN} actually said or did, or invented?"
 
@@ -159,4 +157,4 @@ Illustrative shape (replace with the real per-channel list): "Are the {DOMAIN_NO
 - **Evidence-based** — every finding references a specific unit index, a specific output field, and the prompt instruction it violates.
 - **Domain lens first** — a technically valid output that's misleading in the domain is still a failure.
 - **Sacred ground** — if the model is producing forbidden output ({FORBIDDEN_DOMAIN_OUTPUTS}), that's CRITICAL regardless of whether the prompt asked for it.
-- **Delegate fixes** — if findings warrant code changes, recommend `/jc` (single chain fix) or `/wave:orchestrator` (systematic migration). This skill diagnoses, it doesn't treat.
+- **Delegate fixes** — if findings warrant code changes, recommend `/wave:orchestrator` (systematic migration) or report the finding for the user to route directly (single chain fix). This skill diagnoses, it doesn't treat.

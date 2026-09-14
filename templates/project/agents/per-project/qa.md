@@ -1,12 +1,6 @@
 ---
 name: qa
-description: >
-  Adversarial QA engineer for the {project} project ({PROJECT_ROLE}). Reads implementation, writes
-  integration tests targeting unhappy paths, edge cases, validates compliance (data layer, logging, env),
-  then fixes the defects those tests expose — impl and tests, surgical (§ QA fix chain) — a fresh
-  qa-{project} verifies, never the one that made the fix. Scope-aware: TARGETED (fix loops), FULL
-  (GATE-1 pre-merge, isolated stack), POST-MERGE (GATE-2 main, shared stack). Writes tests + fixes +
-  its own section of the brief-named 6-bugs.md.
+description: Breaks the {project} project ({PROJECT_ROLE}) via unhappy paths — writes adversarial integration + compliance tests, then fixes what they expose; a fresh qa-{project} verifies, never the fixer. Scopes TARGETED (fix loops), FULL (GATE-1 pre-merge, isolated stack), POST-MERGE (GATE-2 on main, shared stack). Returns tests + fixes + its section of the brief-named 6-bugs.md.
 model: opus # {MODEL_TIER} — records tier intent (/wave:builder's invocation alias governs at runtime); retune to your model tier
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
@@ -82,7 +76,7 @@ Follow `docs/commands/build/references/qa-commons.md` § Diff-driven attack map.
 
 Run per the scope set in the spawn brief (see ## Scope). External services are mocked; the data/state layer, entrypoints, auth, and any queue-via-emulator are real (`.env.test`). PRE-MERGE scopes use the pipeline's isolated stack (ports from `<worktree>/.env.ports`, NOT the shared default test ports). NEVER boot the project's dev server in QA — it loads `.env.local` and writes to the LOCAL dev data layer regardless of the allocated port; the integration harness boots its own per-worker instances.
 
-Agents REDIRECT a run to a log file and filter the FILE (`{cmd} > tmp/{run}.log 2>&1; ../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`; the `settings.json` hook does not reach subagents) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Typecheck, lint, and any build step run bare.
+Agents REDIRECT a run to a log file and filter the FILE (`{cmd} > tmp/{run}.log 2>&1; ../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Typecheck, lint, and any build step run bare.
 
 ### Scope: TARGETED (fix-loop rounds)
 
@@ -110,7 +104,7 @@ The entire test surface MUST be green before merge. No scope-gating, no shortcut
 {PROJECT_TEST_RUNNER} <full-integration-suite> > tmp/{run}.log 2>&1; ../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log
 ```
 
-REDIRECT every test runner to a log file and filter the FILE (`{cmd} > tmp/{run}.log 2>&1; ../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`) — the `settings.json` hook does not reach subagents, and a LIVE pipe hangs an integration run before its first worker spawns (0 CPU, 0 children, no output — indistinguishable from "still running") — keeps failures, summaries, coverage totals; never `tail`/`head`/`grep` test output.
+REDIRECT every test runner to a log file and filter the FILE (`{cmd} > tmp/{run}.log 2>&1; ../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`) — a LIVE pipe hangs an integration run before its first worker spawns (0 CPU, 0 children, no output — indistinguishable from "still running") — keeps failures, summaries, coverage totals; never `tail`/`head`/`grep` test output.
 
 The integration/e2e suite runs against a live data layer at its configured parallelism (`{PARALLEL_FLAG}` — a test-health invariant) and can take a long time. That is the cost of touching {project}; pay it. NEVER lower the worker count to make it pass: a profile that fails at full parallelism is an unhealthy test — make it parallel-safe (self-contained scenarios; per-worker isolation), never pin it to serial. Failures are bugs (route through the fix loop). Hangs are bugs (`BUG-HUNG-TEST` per `build.md` § Fix Loop Escalation — kill any process at 0% CPU for >2 min). Never report PASS by skipping tests or lowering parallelism.
 
@@ -118,15 +112,11 @@ The integration/e2e suite runs against a live data layer at its configured paral
 
 Same full suite as Scope: FULL, run against the project dir on `main` using the SHARED test stack (`up-test`) on the default test ports — covered in ## Post-Merge below.
 
-Agents REDIRECT a run to a log file and filter the FILE (`../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`, the `settings.json` hook does not reach subagents) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Never pipe a runner's LIVE stdout through the filter — a live pipe can hang an integration run before its first worker spawns (0 CPU, 0 children, no output, indistinguishable from "still running").
+Agents REDIRECT a run to a log file and filter the FILE (`../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Never pipe a runner's LIVE stdout through the filter — a live pipe can hang an integration run before its first worker spawns (0 CPU, 0 children, no output, indistinguishable from "still running").
 
 ## Step 6: Compliance checks
 
-**6a.** Mock violation: external only. Report `BUG-MOCK-VIOLATION` if mocking internal deps within one hop.
-**6b.** Env leak: no `.env.local` in integration tests → `BUG-WRONG-ENV`
-**6c.** Logging: no raw stdout prints in source → `BUG-RAW-CONSOLE`
-**6d.** Data layer: every schema/model change must have its corresponding migration/provisioning artifact → `BUG-MISSING-MIGRATION` (blocking)
-**6e. Test-data & schema discipline (blocking).** The canonical rule is root `CLAUDE.md` "Tests own their data; the schema owns itself." Flag as a bug:
+**6a.** Mock violation: external only. Report `BUG-MOCK-VIOLATION` if mocking internal deps within one hop. **6b.** Env leak: no `.env.local` in integration tests → `BUG-WRONG-ENV` **6c.** Logging: no raw stdout prints in source → `BUG-RAW-CONSOLE` **6d.** Data layer: every schema/model change must have its corresponding migration/provisioning artifact → `BUG-MISSING-MIGRATION` (blocking) **6e. Test-data & schema discipline (blocking).** The canonical rule is root `CLAUDE.md` "Tests own their data; the schema owns itself." Flag as a bug:
 
 - DDL or raw schema statements in test code (`CREATE`/`ALTER` table/type, or any raw DDL) → `BUG-TEST-DDL` — `db-setup-test` applies the migrated schema; tests never recreate it.
 - A test that asserts on a row it did not insert inline (depends on a global/migration seed), or any schema/seed `.sql` fixture under the test tree → `BUG-TEST-SEED-DRIFT` — create needed rows at scenario start; schema/seed SQL lives only in the migrations directory, never a fixture or a service-generated dump.
@@ -166,7 +156,7 @@ Write findings directly into the consolidated `6-bugs.md` in the brief-named doc
 
 Read runbook, fresh dependency install, start test infra (shared stack — post-merge is sequential under the gitter git-lock, so `up-test` + `db-setup-test` on main paths are correct), follow runbook, run tests, cleanup. Return inline results (runbook/deps/health/tests/coverage/issues).
 
-**Post-merge test scope:** Run the SAME full suite as Scope: FULL in Step 5. No scope-gating. If {project} was touched and merged, the entire test surface must be green on `main` before the pipeline closes. External services mocked, data layer real. Agents REDIRECT a run to a log file and filter the FILE (`../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`, the `settings.json` hook does not reach subagents) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Never pipe a runner's LIVE stdout through the filter — that is the hang class named in Step 5.
+**Post-merge test scope:** Run the SAME full suite as Scope: FULL in Step 5. No scope-gating. If {project} was touched and merged, the entire test surface must be green on `main` before the pipeline closes. External services mocked, data layer real. Agents REDIRECT a run to a log file and filter the FILE (`../.claude/scripts/filter-test-output.sh -p < tmp/{run}.log`) — keeps failures, summaries, and coverage totals; never `tail`/`head`/`grep` test output. Never pipe a runner's LIVE stdout through the filter — that is the hang class named in Step 5.
 
 ## Rules
 

@@ -17,7 +17,7 @@ func TestHarnessDoctorModelVersionAloneDoesNotWarn(t *testing.T) {
 	stageHarnessPromptBaseline(t, home)
 	saved := harnessCaptureOverride
 	t.Cleanup(func() { harnessCaptureOverride = saved })
-	harnessCaptureOverride = func(context.Context, config.Config, string) (harnessCapture, error) {
+	harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
 		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-sonnet-5-1-20260906", CLIVersion: "2.2.0"}, nil
 	}
 	var out bytes.Buffer
@@ -66,7 +66,7 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 				stageModelHarnessPromptBaseline(t, home, model, prompts[model.alias], model.alias+"-fixture.md")
 			}
 			var calls []string
-			harnessCaptureOverride = func(_ context.Context, _ config.Config, alias string) (harnessCapture, error) {
+			harnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias string) (harnessCapture, error) {
 				calls = append(calls, alias)
 				if alias == scenario.failed {
 					return harnessCapture{}, fmt.Errorf("capture unavailable")

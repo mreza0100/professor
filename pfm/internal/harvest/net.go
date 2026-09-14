@@ -19,6 +19,8 @@ import (
 
 const defaultUA = "Mozilla/5.0 (compatible; harvester/1.0)"
 
+var errResponseTooLarge = errors.New("response exceeds byte limit")
+
 // The Python oracle's curl_cffi DEFAULT_CHROME is chrome146. Keep the UA and
 // client-hint values coupled to the exact tls-client Chrome_146 profile below.
 const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
@@ -28,6 +30,9 @@ const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/53
 func errorKind(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, errResponseTooLarge) {
+		return "too_large"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
@@ -60,24 +65,39 @@ func errorKind(err error) string {
 	return "connect"
 }
 
-func failureMessage(item string, status int, kind string, challenge bool) string {
+func failureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
 	if kind == "invalid" {
-		return fmt.Sprintf("Invalid URL: %s — check it for typos, or use `search` to find the source.", item)
+		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
+			"check it for typos, or use `search` to find the source.",
+			"check it for typos, or find the source via another URL.",
+		))
 	}
 	if kind == "blocked" {
 		return fmt.Sprintf("refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.", item)
 	}
 	if kind == "timeout" {
-		return fmt.Sprintf("Could not reach %s: the server did not respond in time (connection timed out). Retry later, or use `search` to find an alternative copy.", item)
+		return fmt.Sprintf("Could not reach %s: the server did not respond in time (connection timed out). %s", item, SearchHint(searchAvailable,
+			"Retry later, or use `search` to find an alternative copy.",
+			"Retry later, or find an alternative copy with findWorks or another URL.",
+		))
 	}
 	if kind == "dns" {
-		return fmt.Sprintf("Could not reach %s: DNS resolution failed (host not found). Retry later, or use `search` to find an alternative copy.", item)
+		return fmt.Sprintf("Could not reach %s: DNS resolution failed (host not found). %s", item, SearchHint(searchAvailable,
+			"Retry later, or use `search` to find an alternative copy.",
+			"Retry later, or find an alternative copy with findWorks or another URL.",
+		))
 	}
 	if kind == "connect" {
-		return fmt.Sprintf("Could not reach %s: the connection failed (refused or host unreachable). Retry later, or use `search` to find an alternative copy.", item)
+		return fmt.Sprintf("Could not reach %s: the connection failed (refused or host unreachable). %s", item, SearchHint(searchAvailable,
+			"Retry later, or use `search` to find an alternative copy.",
+			"Retry later, or find an alternative copy with findWorks or another URL.",
+		))
 	}
 	if challenge {
-		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. Use `search` to find a mirror or alternative copy.", item)
+		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s", item, SearchHint(searchAvailable,
+			"Use `search` to find a mirror or alternative copy.",
+			"Find a mirror or alternative copy with findWorks or another URL.",
+		))
 	}
 	if status >= 400 {
 		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout"}[status]
@@ -88,16 +108,22 @@ func failureMessage(item string, status int, kind string, challenge bool) string
 		if status == 403 || status == 429 || status == 503 {
 			note = " — likely a bot-block or rate limit"
 		}
-		return fmt.Sprintf("%s returned HTTP %d (%s)%s. Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.", item, status, meaning, note)
+		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(searchAvailable,
+			"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+			"Use `findWorks` if it is a scholarly title, or find an alternative copy at another URL.",
+		))
 	}
-	return fmt.Sprintf("Could not download %s — try `search` for an alternative source.", item)
+	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
+		"try `search` for an alternative source.",
+		"try `findWorks` or another URL for an alternative source.",
+	))
 }
 
 // FailureMessage exposes the transport core's canonical terminal diagnostic
 // to protocol adapters. Keeping one renderer prevents MCP receipts from
 // drifting away from negative-cache and direct-fetch errors.
-func FailureMessage(item string, status int, kind string, challenge bool) string {
-	return failureMessage(item, status, kind, challenge)
+func FailureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
+	return failureMessage(item, status, kind, challenge, searchAvailable)
 }
 
 func safeHTTPClient(chrome bool, resolve ...func(context.Context, string) ([]net.IP, error)) *http.Client {

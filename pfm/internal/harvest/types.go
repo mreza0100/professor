@@ -37,9 +37,10 @@ type OCRConverter interface {
 
 // BrowserFetcher is implemented by adapters that can render one URL in a real
 // browser (the ladder's last wall-bypass rung). Optional: a plain Converter
-// never escalates to it.
+// never escalates to it. headless false asks for a VISIBLE window — the
+// ladder spends that only on a wall the headless render could not pass.
 type BrowserFetcher interface {
-	FetchBrowser(ctx context.Context, source string) (html string, status int, err error)
+	FetchBrowser(ctx context.Context, source string, headless bool) (html string, status int, err error)
 }
 
 // Options configures a Harvester. Nil HTTP clients use safe defaults.
@@ -57,6 +58,7 @@ type Options struct {
 	MaxBytes       int64
 	LocalRoots     []string
 	JinaURL        string
+	DOIMirrorURL   string
 	MaxInlineChars int
 	// ProxyURL, when set, is applied to every default transport (direct,
 	// Chrome, binary, Jina, and OA). UserAgent customizes only direct/Jina;
@@ -83,7 +85,17 @@ type Options struct {
 	SemanticScholarAPIKey string
 	SearXNGURL            string
 	BraveAPIKey           string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
+	GoogleScholarURL      string
 	DisableSearch         bool
+	// SearchAvailable tells the ladder's own failure messages whether the
+	// `search` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
+	// verdict, not re-derived here: the adapter already resolved
+	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
+	// way is how a hint drifts from the tool it names.
+	SearchAvailable bool
 }
 
 // settings is the resolved scholarly/search/browser configuration New takes
@@ -95,7 +107,13 @@ type settings struct {
 	semanticScholarKey string
 	searXNGURL         string
 	braveAPIKey        string
+	doiMirrorURL       string
+	ipfsCatalogURL     string
+	doiViewerURL       string
+	md5CatalogURL      string
+	googleScholarURL   string
 	disableSearch      bool
+	searchAvailable    bool
 	browser            bool
 }
 
@@ -176,6 +194,26 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
+	doiMirrorURL, err := normalizeDOIMirrorURL(options.DOIMirrorURL)
+	if err != nil {
+		return nil, err
+	}
+	ipfsCatalogURL, err := normalizeProviderBaseURL("ipfs-catalog", options.IPFSCatalogURL)
+	if err != nil {
+		return nil, err
+	}
+	doiViewerURL, err := normalizeProviderBaseURL("doi-viewer", options.DOIViewerURL)
+	if err != nil {
+		return nil, err
+	}
+	md5CatalogURL, err := normalizeProviderBaseURL("md5-catalog", options.MD5CatalogURL)
+	if err != nil {
+		return nil, err
+	}
+	googleScholarURL, err := normalizeProviderBaseURL("Google Scholar", options.GoogleScholarURL)
+	if err != nil {
+		return nil, err
+	}
 	resolved := settings{
 		contactEmail:       strings.TrimSpace(options.ContactEmail),
 		googleBooksAPIKey:  strings.TrimSpace(options.GoogleBooksAPIKey),
@@ -183,9 +221,20 @@ func New(options Options) (*Harvester, error) {
 		semanticScholarKey: strings.TrimSpace(options.SemanticScholarAPIKey),
 		searXNGURL:         strings.TrimSpace(options.SearXNGURL),
 		braveAPIKey:        strings.TrimSpace(options.BraveAPIKey),
+		doiMirrorURL:       doiMirrorURL,
+		ipfsCatalogURL:     ipfsCatalogURL,
+		doiViewerURL:       doiViewerURL,
+		md5CatalogURL:      md5CatalogURL,
+		googleScholarURL:   googleScholarURL,
 		disableSearch:      options.DisableSearch,
+		searchAvailable:    options.SearchAvailable,
 		browser:            options.BrowserRung != nil && *options.BrowserRung,
 	}
+	options.DOIMirrorURL = doiMirrorURL
+	options.IPFSCatalogURL = resolved.ipfsCatalogURL
+	options.DOIViewerURL = resolved.doiViewerURL
+	options.MD5CatalogURL = resolved.md5CatalogURL
+	options.GoogleScholarURL = resolved.googleScholarURL
 	if options.CacheDir == "" {
 		dir, err := defaultCacheDir()
 		if err != nil {

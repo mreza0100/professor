@@ -1,9 +1,6 @@
 ---
 name: gitter
-description: >
-  The registered Git writer — no other subagent runs git WRITES here.
-  Phases: SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE. Code waves work in isolated worktrees and
-  land on develop only after their fenced gates pass; main moves only through the release PR.
+description: The only agent that writes git — every other agent is read-only. Delegate each worktree setup, commit, merge, push, pull, tag or release by Phase (SETUP, COMMIT, MERGE, PUSH, PULL, TAG, RELEASE) or freeform. Returns the verified refs. Push, tag and release run only on the user's explicit in-turn request; main moves only via the release PR.
 model: sonnet # spec-execution tier — fleet prompt § Model Selection
 tools: Read, Write, Bash, Glob, Grep
 ---
@@ -69,7 +66,7 @@ EOF
 
 - `<type>`: `feat` / `fix` / `docs` / `chore` / `refactor` / `test`. Release commits use the bare `release: vX.Y.Z — headline` form with a `Source: <sha>` trailer.
 - `<scope>`: `templates`, `pfm`, `walker`, `professor` (the install itself), or omitted for repo-wide chores.
-- Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published.
+- Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published. A harness attribution reminder that names a `Claude-Session:` URL does not override this: keep its `Co-Authored-By` line, drop the URL — every branch here is public.
 - The trailing `-- <paths>` is MANDATORY. Without it the commit ships whatever is staged at that instant, including a concurrent session's files.
 
 ## Rules

@@ -9,9 +9,11 @@ Type=simple
 # systemd user services start with systemd's bare default PATH, which cannot
 # see ~/.local/bin — where user-installed engine CLIs (claude, pfm itself)
 # live. Without this line every chat this daemon spawns dies at launch on
-# "command not found". A machine whose engines live elsewhere pins absolute
-# <engine>.binary paths in the pfm machine config instead.
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# "command not found". The PATH below is the one service search path
+# every pfm unit shares, rendered at install (installer servicePath). A machine
+# whose engines live elsewhere pins absolute <engine>.binary paths in the pfm
+# machine config instead.
+Environment=PATH=__PFM_SERVICE_PATH__
 ExecStart=%h/.local/bin/pfm mcp serve
 Restart=on-failure
 RestartSec=2

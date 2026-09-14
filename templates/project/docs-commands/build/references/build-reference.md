@@ -31,8 +31,7 @@ bash .claude/scripts/worktree.sh prune
 
 It removes `.worktrees/` dirs that are not registered git worktrees and have no active pipeline docs; registered-but-inactive worktrees are reported, never auto-removed.
 
-Then check for abandoned pipeline directories in `docs/dev/builds/`.
-A pipeline directory is **stale** if it has NO corresponding active worktree in `.worktrees/`:
+Then check for abandoned pipeline directories in `docs/dev/builds/`. A pipeline directory is **stale** if it has NO corresponding active worktree in `.worktrees/`:
 
 ```bash
 for dir in docs/dev/builds/*/; do
@@ -45,7 +44,7 @@ done
 
 **For each stale directory found:**
 
-- If it contains a `BLOCKED.md` → it is intentionally preserved (deferred for `/jc` resolution — see § Fix Loop Escalation). **SKIP cleanup.** Do NOT archive, do NOT delete. Print `PRESERVED: $dir (BLOCKED-DEFERRED, awaiting resume)` and move on.
+- If it contains a `BLOCKED.md` → it is intentionally preserved (deferred for manual resolution — see § Fix Loop Escalation). **SKIP cleanup.** Do NOT archive, do NOT delete. Print `PRESERVED: $dir (BLOCKED-DEFERRED, awaiting resume)` and move on.
 - **If it belongs to an active wave** → **SKIP.** Wave-owned builds are NEVER archived individually — they archive together when the wave archives. Detection: `grep -rl "$name" docs/dev/waves/*/report.md 2>/dev/null`. If any match, print `WAVE-OWNED: $dir (belongs to active wave, skipping)` and move on.
 - If it contains a `7-post-merge-qa.md` → it completed but wasn't archived. Archive it to cold storage (see below). **Only for standalone builds (no wave owner).**
 - If it has NO completion markers (no `7-*` file, no `BLOCKED.md`) → it was abandoned mid-pipeline. Add an `ABANDONED.md` marker, then archive. **Only for standalone builds (no wave owner).**
@@ -116,21 +115,21 @@ What each `/wave:builder` step produces and where. Each step in `wave/builder.md
 
 <!-- Install-time: replace `{project}` placeholders with your roster's project suffixes (e.g. `be,fe,cortex,web,infra` or your own names). -->
 
-| #   | Step                            | Who                                         | Produces                                                                                          | Location                         |
+| # | Step | Who | Produces | Location |
 | --- | ------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 1   | Git setup                       | gitter (SETUP)                              | Worktrees, ports, `$DOCS/ports.md`                                                                | root                             |
-| 2a  | Parallel analysis               | child planners (routing-gated)              | `$DOCS/1-analysis-{project}.md`                                                                   | root                             |
-| 2b  | Consolidate plan                | mono-planner                                | `$DOCS/1-plan.md`                                                                                 | root                             |
-| 3   | Cross-project arch + research   | mono-architect                              | `$DOCS/3-architecture.md` (integration contracts + research notes)                                | root                             |
-| 4   | Child arch + research           | child architects                            | `$DOCS/3-architecture-{project}.md` (docs only, no code stubs, inline research)                   | root                             |
-| 5a  | UI/UX _(conditional)_           | ui-ux                                       | `$DOCS/4-ui-ux-spec.md`                                                                           | root                             |
-| 5b  | DB Architecture _(conditional)_ | db-admin                                    | `$DOCS/4-db-architecture.md` + schema/migration changes in worktrees                              | root (docs) + worktrees (schema) |
-| 6   | Develop                         | developers (per-project role)               | Working code in worktrees + `$DOCS/5-dev-report-{project}.md`                                     | worktrees (code) + root (docs)   |
-| 7   | Targeted QA _(pre-merge)_       | child QA (qa-{project} wrapper)             | TARGETED pre-merge QA feeding the fix loop — unit + affected/failing profiles + adversarial, NOT the full suite. Adversarial tests in worktrees + consolidated `$DOCS/6-bugs.md` (one `## {PROJECT}` section each) | worktrees (tests) + root (docs)  |
-| -   | Fix loop                        | developers → targeted QA                    | TARGETED re-run, cap 3. Repeat until `$DOCS/6-bugs.md` = NONE                                     |                                  |
-| -   | Code review _(pre-merge gate)_  | audit:code-hygiene → architects → devs      | `$DOCS/6-code-review.md` (loops until CLEAN, cap 2)                                               | worktrees (code) + root (docs)   |
-| -   | **GATE-1 — pre-merge full**     | child QA (FULL, qa-{project} wrapper)       | Full suite (unit + integration/e2e), zero-tolerance all-green on the worktree branches; one bounded fix pass + re-run, still failing → BLOCKED-DEFERRED. Writes `## {PROJECT}` sections of `$DOCS/6-bugs.md` | worktrees (tests) + root (docs)  |
-| 8   | Merge                           | gitter (MERGE)                              | Commits + merges to main                                                                          |                                  |
-| 9   | **GATE-2 — post-merge full**    | child QA (POST-MERGE, qa-{project} wrapper) | Full suite from project dirs on `main`, zero-tolerance all-green. `$DOCS/7-post-merge-qa.md` (single consolidated file from inline results) | root                             |
-| 10  | Document                        | mono-documenter                             | Merges into permanent docs; `$DOCS/` stays in place                                               | root                             |
-| 11  | Commit docs + archive           | gitter (DOCS-COMMIT)                        | Commits docs incl. `$DOCS/`, moves it to `tmp/dev/archive/builds/`, commits removal (standalone)  | root                             |
+| 1 | Git setup | gitter (SETUP) | Worktrees, ports, `$DOCS/ports.md` | root |
+| 2a | Parallel analysis | child planners (routing-gated) | `$DOCS/1-analysis-{project}.md` | root |
+| 2b | Consolidate plan | mono-planner | `$DOCS/1-plan.md` | root |
+| 3 | Cross-project arch + research | mono-architect | `$DOCS/3-architecture.md` (integration contracts + research notes) | root |
+| 4 | Child arch + research | child architects | `$DOCS/3-architecture-{project}.md` (docs only, no code stubs, inline research) | root |
+| 5a | UI/UX _(conditional)_ | ui-ux | `$DOCS/4-ui-ux-spec.md` | root |
+| 5b | DB Architecture _(conditional)_ | db-admin | `$DOCS/4-db-architecture.md` + schema/migration changes in worktrees | root (docs) + worktrees (schema) |
+| 6 | Develop | developers (per-project role) | Working code in worktrees + `$DOCS/5-dev-report-{project}.md` | worktrees (code) + root (docs) |
+| 7 | Targeted QA _(pre-merge)_ | child QA (qa-{project} wrapper) | TARGETED pre-merge QA feeding the fix loop — unit + affected/failing profiles + adversarial, NOT the full suite. Adversarial tests in worktrees + consolidated `$DOCS/6-bugs.md` (one `## {PROJECT}` section each) | worktrees (tests) + root (docs) |
+| - | Fix loop | developers → targeted QA | TARGETED re-run, cap 3. Repeat until `$DOCS/6-bugs.md` = NONE | |
+| - | Code review _(pre-merge gate)_ | audit:code-hygiene → architects → devs | `$DOCS/6-code-review.md` (loops until CLEAN, cap 2) | worktrees (code) + root (docs) |
+| - | **GATE-1 — pre-merge full** | child QA (FULL, qa-{project} wrapper) | Full suite (unit + integration/e2e), zero-tolerance all-green on the worktree branches; one bounded fix pass + re-run, still failing → BLOCKED-DEFERRED. Writes `## {PROJECT}` sections of `$DOCS/6-bugs.md` | worktrees (tests) + root (docs) |
+| 8 | Merge | gitter (MERGE) | Commits + merges to main | |
+| 9 | **GATE-2 — post-merge full** | child QA (POST-MERGE, qa-{project} wrapper) | Full suite from project dirs on `main`, zero-tolerance all-green. `$DOCS/7-post-merge-qa.md` (single consolidated file from inline results) | root |
+| 10 | Document | mono-documenter | Merges into permanent docs; `$DOCS/` stays in place | root |
+| 11 | Commit docs + archive | gitter (DOCS-COMMIT) | Commits docs incl. `$DOCS/`, moves it to `tmp/dev/archive/builds/`, commits removal (standalone) | root |

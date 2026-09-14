@@ -19,7 +19,7 @@ export const WALK: Schema = {
         properties: {
           what: { type: 'string' },
           location: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
           // INVARIANT REGISTRY FEATURE (tmp/wave-walker-investigation.md § 2.5) — optional, so the field
           // is additive: a defect with none named stays a valid defect.
           failureScenario: {
@@ -38,7 +38,7 @@ export const WALK: Schema = {
           kind: { type: 'string' },
           where: { type: 'string' },
           detail: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
         },
         required: ['kind', 'where', 'detail'],
       },

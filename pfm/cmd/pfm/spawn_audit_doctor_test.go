@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
@@ -59,7 +61,7 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 		},
 		{
 			// Same missing-settings argv, but this seat was born well BEFORE
-			// the prompt layer was staged: it carries the argv of the pfm
+			// the current spawn door went live: it carries the argv of the pfm
 			// that launched it and predates the --settings flag exactly as it
 			// predates the prompt itself. A reload fixes it, not a bug hunt —
 			// this is the exact defect the fix closes (it used to return
@@ -121,7 +123,7 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 				StartedUnix: layer - 3600,
 			},
 			want:       spawnPredatesLayer,
-			wantReason: "before the prompt layer was staged",
+			wantReason: "before this host's current spawn door was installed",
 		},
 		{
 			name: "flagless resume with no usable age signal",
@@ -282,5 +284,56 @@ func TestResolveClaudeProcessMatchesVersionNamedBinary(t *testing.T) {
 	}
 	if len(argv) == 0 || argv[0] != "/srv/seat/.local/share/claude/versions/2.1.250" {
 		t.Fatalf("resolved argv = %q", argv)
+	}
+}
+
+// TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary pins the
+// spawn-audit age regression. The --settings flag shipped after the prompt,
+// and an install that leaves the prompt's bytes alone never moves its mtime,
+// so a stamp read from the prompt alone put every chat an older pfm launched
+// "after the layer": `violations=5` on a healthy host, doctor exit 1, and
+// pfm update rolled itself back.
+func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) {
+	home := t.TempDir()
+	prompt := action.ProfessorPromptPath(home)
+	binary := filepath.Join(t.TempDir(), "pfm")
+	for _, path := range []string{prompt, binary} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	promptAt, binaryAt := time.Unix(1_700_000_000, 0), time.Unix(1_700_500_000, 0)
+	if err := os.Chtimes(prompt, promptAt, promptAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(binary, binaryAt, binaryAt); err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnDoorExecutable
+	t.Cleanup(func() { spawnDoorExecutable = previous })
+	spawnDoorExecutable = func() (string, error) { return binary, nil }
+
+	stamp, signal := spawnDoorStamp(home)
+	if stamp != binaryAt.Unix() || !strings.Contains(signal, prompt) || !strings.Contains(signal, binary) {
+		t.Fatalf("spawnDoorStamp = %d %q; want the binary's %d with both inputs named", stamp, signal, binaryAt.Unix())
+	}
+	// Launched by an older pfm between the prompt and the binary: prompt
+	// carried, --settings not. History, not a broken door.
+	seat := spawnObservation{Argv: []string{"claude", "--system-prompt-file", prompt}, Environ: map[string]string{}, StartedUnix: promptAt.Unix() + 3600}
+	if verdict, reason := classifySpawn(seat, stamp); verdict != spawnPredatesLayer {
+		t.Fatalf("older seat = %s (%s), want %s", verdict, reason, spawnPredatesLayer)
+	}
+	// Born after the binary landed and still flagless: the door is broken.
+	seat.StartedUnix = binaryAt.Unix() + 60
+	if verdict, reason := classifySpawn(seat, stamp); verdict != spawnViolation {
+		t.Fatalf("fresh seat = %s (%s), want %s", verdict, reason, spawnViolation)
+	}
+	// The binary unreadable: the prompt still stands and the signal says why.
+	spawnDoorExecutable = func() (string, error) { return "", errors.New("no executable path") }
+	if stamp, signal := spawnDoorStamp(home); stamp != promptAt.Unix() || !strings.Contains(signal, "no executable path") {
+		t.Fatalf("unreadable binary: spawnDoorStamp = %d %q; want the prompt's %d and the reason", stamp, signal, promptAt.Unix())
 	}
 }

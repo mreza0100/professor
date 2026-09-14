@@ -24,7 +24,7 @@ export const FINAL: Schema = {
           what: { type: 'string' },
           where: { type: 'string' },
           severity: { type: 'string' },
-          jc: { type: 'string' },
+          fix: { type: 'string' },
         },
         required: ['what', 'where'],
       },

@@ -12,6 +12,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/updatecheck"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real
@@ -36,7 +37,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
-	vscode := flags.Bool("vscode", false, "make PFM the default VS Code terminal profile")
+	vscode := flags.Bool("vscode", false, "install the Professor VS Code extension and make the PFM terminal the default")
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip source-fetched Claude Code themes")
@@ -74,7 +75,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	preflight := printDependencyDoctor(context.Background(), stdout, entries, deps.ProbeOptions{
+	preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
 		SkipHarvest: *skipHarvest, SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex}, Provisioning: true,
 	})
 	if preflight != 0 && mode == installer.ModeApply {
@@ -140,7 +141,7 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
 		return runtime, 1
 	}
-	reloaded, err := loadCommandRuntime(migration.Path)
+	reloaded, err := pfmconfig.LoadRuntime(migration.Path)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: reload migrated config %s: %v\n", migration.Path, err)
 		return runtime, 1
@@ -153,7 +154,7 @@ func professorThemeManifestURL(currentVersion string) string {
 	if reference == "" || reference == "dev" {
 		reference = "main"
 	}
-	return "https://raw.githubusercontent.com/mreza0100/professor/" + reference + "/templates/themes/sources.json"
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
 }
 
 func newInstallerOptions(

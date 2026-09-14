@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/headless"
 )
 
@@ -84,6 +85,69 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(output)); got != "after" {
 		t.Fatalf("window name=%q, want after", got)
+	}
+}
+
+// TestRenameChatWindowClipsNamesLongerThanWindowNameRunes pins a
+// regression: renameChatWindow used to hand tmux rename-window the raw chat
+// name, unclipped — every OTHER window-name writer clips through
+// gather.WindowNameFor (see that function's own doc: two writers that
+// clipped differently would rename the window back and forth forever). This
+// drives the same real-tmux probe socket as the test above with a name past
+// gather.WindowNameRunes AND leading with a multi-byte rune, so a
+// byte-index clip and a rune-index clip would disagree, and reads the
+// window name back through tmux itself.
+func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.MkdirTemp(base, "probe-pfm-rename-clip-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Errorf("remove probe jail: %v", err)
+		}
+	})
+
+	socketPath := filepath.Join(root, "probe-clip.sock")
+	session := "probe-clip"
+	start := exec.Command(
+		"tmux", "-S", socketPath, "-f", "/dev/null",
+		"new-session", "-d", "-s", session, "-n", "before", "sleep 120",
+	)
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start probe server: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
+	})
+
+	// 41 runes, well past gather.WindowNameRunes (24), leading with a
+	// multi-byte rune so a byte-index clip would slice mid-rune while a
+	// rune-index clip does not.
+	name := "界" + strings.Repeat("x", 40)
+	// chatSocketPath -> paths.SocketPath returns an absolute socket path
+	// unchanged, so the jail socket goes straight through.
+	if err := renameChatWindow(context.Background(), socketPath, session, name); err != nil {
+		t.Fatalf("renameChatWindow: %v", err)
+	}
+
+	output, err := exec.Command(
+		"tmux", "-S", socketPath,
+		"display-message", "-p", "-t", session, "#{window_name}",
+	).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := gather.WindowNameFor(name)
+	if got := strings.TrimSpace(string(output)); got != want {
+		t.Fatalf("window name=%q, want clipped %q", got, want)
 	}
 }
 

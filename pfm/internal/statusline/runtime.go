@@ -75,7 +75,7 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 	if id == pfmengine.Codex {
 		configDir = os.Getenv(descriptor.HomeEnv)
 		if configDir == "" {
-			configDir = firstRoot(resolved.Roots[pfmengine.Codex])
+			configDir = resolved.FirstRoot(pfmengine.Codex)
 		}
 	} else if configDir == "" {
 		configDir = filepath.Join(resolved.Home, ".claude")
@@ -102,13 +102,6 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 // A live Codex thread is authoritative even when a Codex-launched Claude child
 // inherited CODEX_HOME; an explicit Claude config otherwise wins that tie.
 var ErrNoEngineInEnvironment = errors.New("no engine in environment")
-
-func firstRoot(roots []string) string {
-	if len(roots) == 0 {
-		return ""
-	}
-	return roots[0]
-}
 
 func EngineFromEnvironment(getenv func(string) string) (pfmengine.ID, error) {
 	for _, id := range pfmengine.All() {

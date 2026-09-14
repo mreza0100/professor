@@ -7,15 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/update"
 )
 
 // These seams keep update tests entirely inside their throwaway repositories;
@@ -27,62 +29,6 @@ var (
 	updateRollbackInstall = applyUpdateInstall
 	updateRollbackDoctor  = runUpdateDoctor
 )
-
-type updateVersion struct {
-	major int
-	minor int
-	patch int
-}
-
-func (version updateVersion) less(other updateVersion) bool {
-	if version.major != other.major {
-		return version.major < other.major
-	}
-	if version.minor != other.minor {
-		return version.minor < other.minor
-	}
-	return version.patch < other.patch
-}
-
-func parseUpdateVersion(tag string) (updateVersion, bool) {
-	parts := strings.Split(strings.TrimSpace(tag), ".")
-	if len(parts) != 3 || !strings.HasPrefix(parts[0], "v") {
-		return updateVersion{}, false
-	}
-	major, err := strconv.Atoi(strings.TrimPrefix(parts[0], "v"))
-	if err != nil || major < 0 {
-		return updateVersion{}, false
-	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil || minor < 0 {
-		return updateVersion{}, false
-	}
-	patch, err := strconv.Atoi(parts[2])
-	if err != nil || patch < 0 {
-		return updateVersion{}, false
-	}
-	return updateVersion{major: major, minor: minor, patch: patch}, true
-}
-
-func selectHighestSemver(tags []string) (string, error) {
-	ordered := append([]string(nil), tags...)
-	sort.Strings(ordered)
-	var selected string
-	var selectedVersion updateVersion
-	for _, tag := range ordered {
-		version, ok := parseUpdateVersion(tag)
-		if !ok {
-			continue
-		}
-		if selected == "" || selectedVersion.less(version) {
-			selected, selectedVersion = tag, version
-		}
-	}
-	if selected == "" {
-		return "", errors.New("no semantic-version tags (expected vMAJOR.MINOR.PATCH)")
-	}
-	return selected, nil
-}
 
 func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
@@ -160,9 +106,6 @@ func updateRepository(
 		return fmt.Errorf("resolve current revision: %w", err)
 	}
 	previousRef = strings.TrimSpace(previousRef)
-	if _, err := updateGitOutput(ctx, repo, "symbolic-ref", "--quiet", "--short", "HEAD"); err != nil {
-		return errors.New("source checkout is detached; checkout its update branch before running pfm update")
-	}
 
 	if err := updateGitRun(ctx, repo, "fetch", "--tags"); err != nil {
 		return fmt.Errorf("fetch tags: %w", err)
@@ -174,11 +117,11 @@ func updateRepository(
 	tags := strings.Fields(tagOutput)
 	target := strings.TrimSpace(requestedTag)
 	if target == "" {
-		target, err = selectHighestSemver(tags)
+		target, err = update.SelectHighest(tags)
 		if err != nil {
 			return fmt.Errorf("resolve latest release: %w", err)
 		}
-	} else if _, ok := parseUpdateVersion(target); !ok {
+	} else if _, ok := update.ParseVersion(target); !ok {
 		return fmt.Errorf("invalid target tag %q (expected vMAJOR.MINOR.PATCH)", target)
 	}
 	if !containsString(tags, target) {
@@ -198,9 +141,9 @@ func updateRepository(
 		}
 	} else {
 		currentTag, describeErr := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
-		currentVersion, currentOK := parseUpdateVersion(strings.TrimSpace(currentTag))
-		targetVersion, targetOK := parseUpdateVersion(target)
-		if describeErr == nil && currentOK && targetOK && targetVersion.less(currentVersion) {
+		currentVersion, currentOK := update.ParseVersion(strings.TrimSpace(currentTag))
+		targetVersion, targetOK := update.ParseVersion(target)
+		if describeErr == nil && currentOK && targetOK && targetVersion.Less(currentVersion) {
 			return fmt.Errorf("target %s would downgrade source from %s", target, strings.TrimSpace(currentTag))
 		}
 	}
@@ -278,6 +221,10 @@ func updateRepository(
 		}
 		replacements = append(replacements, updateReplacement{target: targetPath, backup: backup})
 	}
+	hookSnapshots, err := snapshotUpdateHookFiles(runtime)
+	if err != nil {
+		return fmt.Errorf("snapshot hook files before install: %w", err)
+	}
 	sourceAdvanced := false
 	if !sourceAlreadyContainsTarget {
 		if err := updateGitRun(ctx, repo, "merge", "--ff-only", "--quiet", target); err != nil {
@@ -288,27 +235,60 @@ func updateRepository(
 	for index := range replacements {
 		if err := replaceUpdateFile(candidateA, replacements[index].target); err != nil {
 			rollbackErr := rollbackUpdateState(
-				ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, runtime, skipHarvest, stdout, stderr,
+				ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, nil, runtime, skipHarvest, stdout, stderr,
 			)
 			return updateFailure(fmt.Errorf("replace owned binary %s: %w", replacements[index].target, err), rollbackErr)
 		}
 		replacements[index].replaced = true
 	}
 
-	if err := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr); err != nil {
+	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
+	recordUpdateHookAfter(hookSnapshots)
+	if installErr != nil {
 		return updateFailure(
-			fmt.Errorf("install --yes after staging: %w", err),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, runtime, skipHarvest, stdout, stderr),
+			fmt.Errorf("install --yes after staging: %w", installErr),
+			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
 	if err := updateRunDoctor(ctx, candidateA, runtime, skipHarvest, stdout, stderr); err != nil {
 		return updateFailure(
 			fmt.Errorf("doctor after update: %w", err),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, runtime, skipHarvest, stdout, stderr),
+			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
 	fmt.Fprintf(stdout, "updated %s from %s\n", target, repo)
+	if !sourceAlreadyContainsTarget {
+		previousTag, notePaths, notesErr := releaseNotesForUpdate(ctx, repo, previousRef, target)
+		switch {
+		case notesErr != nil:
+			fmt.Fprintf(stdout, "release notes: cannot list (%v) — read every releases/v*.md in %s newer than your previous install\n", notesErr, repo)
+		case len(notePaths) == 0:
+			fmt.Fprintf(stdout, "release notes: none between %s and %s\n", previousTag, target)
+		default:
+			fmt.Fprintf(stdout, "release notes to read (%s → %s, %d release(s)):\n", previousTag, target, len(notePaths))
+			for _, path := range notePaths {
+				fmt.Fprintf(stdout, "  %s\n", filepath.Join(repo, path))
+			}
+		}
+	}
 	return nil
+}
+
+// releaseNotesForUpdate resolves the two git calls the release-notes report
+// needs — the tag previousRef was installed from, and the releases/ listing
+// at target — then hands the pure filtering off to update.ReleaseNotes.
+func releaseNotesForUpdate(ctx context.Context, repo, previousRef, target string) (previous string, paths []string, err error) {
+	previousTag, err := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
+	if err != nil {
+		return "", nil, fmt.Errorf("describe previous release: %w", err)
+	}
+	previousTag = strings.TrimSpace(previousTag)
+	listing, err := updateGitOutput(ctx, repo, "ls-tree", "--name-only", target, "releases/")
+	if err != nil {
+		return previousTag, nil, fmt.Errorf("list release notes at %s: %w", target, err)
+	}
+	paths, err = update.ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
+	return previousTag, paths, err
 }
 
 type updateReplacement struct {
@@ -340,15 +320,19 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 	return rollbackErr
 }
 
-// rollbackUpdateState first restores every owned binary, then uses the prior
-// binary's embedded installer to converge all installer-owned host wiring back
-// to the previous release. A clean doctor is part of rollback proof; without
-// it, updateFailure reports residue instead of claiming a safe rollback.
+// rollbackUpdateState first restores every owned binary and the source, then
+// the hook files the candidate's install rewrote, and only then uses the prior
+// binary's embedded installer to converge installer-owned host wiring back to
+// the previous release. The hook restore has to come first: that installer
+// recognises only hooks IT generates, so a hook only the newer release knows
+// would survive it. A clean doctor is part of rollback proof; without it,
+// updateFailure reports residue instead of claiming a safe rollback.
 func rollbackUpdateState(
 	ctx context.Context,
 	repo, installSourceRepo, previousRef string,
 	sourceAdvanced bool,
 	replacements []updateReplacement,
+	hookSnapshots []updateHookSnapshot,
 	runtime commandRuntime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
@@ -360,6 +344,7 @@ func rollbackUpdateState(
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back source to %s\n", previousRef)
 	}
+	rollbackErr = errors.Join(rollbackErr, restoreUpdateHookFiles(hookSnapshots, stderr))
 	if len(replacements) == 0 {
 		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
 	}
@@ -371,6 +356,114 @@ func rollbackUpdateState(
 		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", err))
 	}
 	return rollbackErr
+}
+
+// updateHookSnapshot is one hook-bearing file captured around the candidate's
+// `install --yes`: its bytes before (the state rollback returns to) and right
+// after (the only state rollback may overwrite).
+type updateHookSnapshot struct {
+	path          string // physical path: a symlinked account settings file is written through, never replaced
+	before        []byte
+	beforeExisted bool
+	beforeMode    fs.FileMode
+	after         []byte
+	afterExisted  bool
+	afterErr      error
+}
+
+// snapshotUpdateHookFiles captures every file whose hooks the installer owns
+// (installer.ExpectedHooks: each account's Claude settings, each Codex hooks
+// file) plus the ownership ledger they reconcile against. That is the class
+// whose rollback residue is acute — a hook naming a subcommand only the newer
+// release implements runs on every prompt against the restored binary.
+func snapshotUpdateHookFiles(runtime commandRuntime) ([]updateHookSnapshot, error) {
+	home := runtime.Paths.Home
+	candidates := []string{filepath.Join(filepath.Dir(installer.SourceRepoPath(home)), "settings-hook-ownership.json")}
+	for _, hook := range installer.ExpectedHooks(home, runtime.Config) {
+		candidates = append(candidates, hook.File)
+	}
+	seen := make(map[string]bool, len(candidates))
+	snapshots := make([]updateHookSnapshot, 0, len(candidates))
+	for _, candidate := range candidates {
+		physical, err := filepath.EvalSymlinks(candidate)
+		if errors.Is(err, fs.ErrNotExist) {
+			physical = filepath.Clean(candidate)
+		} else if err != nil {
+			return nil, fmt.Errorf("resolve hook file %s: %w", candidate, err)
+		}
+		if seen[physical] {
+			continue
+		}
+		seen[physical] = true
+		content, mode, existed, err := readUpdateHookFile(physical)
+		if err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, updateHookSnapshot{path: physical, before: content, beforeExisted: existed, beforeMode: mode})
+	}
+	sort.Slice(snapshots, func(left, right int) bool { return snapshots[left].path < snapshots[right].path })
+	return snapshots, nil
+}
+
+// recordUpdateHookAfter captures each file exactly as the candidate's install
+// left it. A file that cannot be read keeps its error, and restore then
+// refuses to touch it.
+func recordUpdateHookAfter(snapshots []updateHookSnapshot) {
+	for index := range snapshots {
+		snapshot := &snapshots[index]
+		snapshot.after, _, snapshot.afterExisted, snapshot.afterErr = readUpdateHookFile(snapshot.path)
+	}
+}
+
+// restoreUpdateHookFiles returns each hook file to its pre-install bytes, but
+// only while it still holds exactly what the candidate's install left: a file
+// something else rewrote since — a live chat saving its settings — is never
+// clobbered. It is named as residue instead.
+func restoreUpdateHookFiles(snapshots []updateHookSnapshot, stderr io.Writer) error {
+	var residue error
+	for _, snapshot := range snapshots {
+		current, _, existed, err := readUpdateHookFile(snapshot.path)
+		if err != nil {
+			residue = errors.Join(residue, err)
+			continue
+		}
+		if existed == snapshot.beforeExisted && bytes.Equal(current, snapshot.before) {
+			continue
+		}
+		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
+			residue = errors.Join(residue, fmt.Errorf("hook file %s changed after the update's install wrote it; left as is — reconcile it by hand", snapshot.path))
+			continue
+		}
+		if snapshot.beforeExisted {
+			err = atomicfile.Write(snapshot.path, snapshot.before, snapshot.beforeMode)
+		} else {
+			err = os.Remove(snapshot.path)
+		}
+		if err != nil {
+			residue = errors.Join(residue, fmt.Errorf("restore hook file %s: %w", snapshot.path, err))
+			continue
+		}
+		fmt.Fprintf(stderr, "pfm update: restored %s to its pre-update state\n", snapshot.path)
+	}
+	return residue
+}
+
+func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, false, nil
+	}
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("stat hook file %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, 0, false, fmt.Errorf("hook file %s is not a regular file", path)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("read hook file %s: %w", path, err)
+	}
+	return content, info.Mode().Perm(), true, nil
 }
 
 func preferredUpdateSourceRepo(home, repo string) string {
@@ -423,11 +516,17 @@ func buildUpdateCandidate(ctx context.Context, repo, version, output string) err
 	if _, err := os.Stat(filepath.Join(repo, "pfm", "go.mod")); err == nil {
 		moduleRoot = filepath.Join(repo, "pfm")
 	}
+	// -buildvcs=false: the stage is a git worktree, whose .git is a FILE that
+	// cmd/go does not accept as a VCS root, so VCS stamping walks up and dies
+	// on any stray .git directory above it ("error obtaining VCS status").
+	// The version is stamped through -ldflags, and displayVersion reads VCS
+	// info only for an unstamped "dev" build, so nothing is lost. GOFLAGS is
+	// cleared below, so the flag must be an argument.
 	command := exec.CommandContext(
 		ctx,
 		deps.Executable("go"),
 		"-C", moduleRoot,
-		"build", "-trimpath", "-ldflags", "-X main.version="+version,
+		"build", "-trimpath", "-buildvcs=false", "-ldflags", "-X main.version="+version,
 		"-o", output,
 		"./cmd/pfm",
 	)
@@ -468,7 +567,7 @@ func copyUpdateFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return writeUpdateFile(target, raw, info.Mode().Perm())
+	return atomicfile.Write(target, raw, info.Mode().Perm())
 }
 
 func replaceUpdateFile(source, target string) error {
@@ -480,31 +579,7 @@ func replaceUpdateFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return writeUpdateFile(target, raw, info.Mode().Perm())
-}
-
-func writeUpdateFile(path string, raw []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".pfm-update-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode.Perm()); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(raw); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
+	return atomicfile.Write(target, raw, info.Mode().Perm())
 }
 
 func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) error {

@@ -102,3 +102,35 @@ func TestSpawnWithoutAConfigStillOwnsTheTitle(t *testing.T) {
 		t.Fatalf("set-titles = %q, want on for a nil policy", got)
 	}
 }
+
+// The picker's doors create a server that a client attaches to the moment it
+// exists, so they state no size and let that first client size the window.
+// A zero size must reach tmux as NO -x/-y — `-x 0` is a size tmux refuses.
+func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root, err := os.MkdirTemp("/tmp", "pfmsize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
+	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	socket := "probe-cc-1800000014-1-1"
+	tmux := CommandTmux{TmuxDir: tmuxDir}
+	if err := tmux.NewSession(context.Background(), SessionSpec{
+		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "sleep 120",
+	}); err != nil {
+		t.Fatalf("create an unsized chat server: %v", err)
+	}
+	socketPath := filepath.Join(tmuxDir, socket)
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
+		kill.Env = append(os.Environ(), "TMUX=")
+		_ = kill.Run()
+	})
+	if got := showOption(t, socketPath, "display-message", "-p", "-t", socket, "#{window_name}"); got != "Claude" {
+		t.Fatalf("window name = %q, want the name the door gave it", got)
+	}
+}

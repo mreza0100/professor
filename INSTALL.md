@@ -23,24 +23,18 @@ Shortest path first.
 
 ## Runtime prerequisites for the `pfm` install paths
 
-Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`,
-plus `tmux` ≥ 1.8, `git`, `jq`, a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires
-`setsid`; macOS requires `ps`, `lsof`, and `launchctl`. `systemd` on Linux is optional when
-user units are unavailable, but the scheduler surface cannot be enabled without it.
+Paths 1 and 2 use the same host runtime. Both require Linux or macOS on `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `jq`, a POSIX `sh`, `bash`, `zsh`, and `sleep`. Linux also requires `setsid`; macOS requires `ps`, `lsof`, and `launchctl`. `systemd` on Linux is optional when user units are unavailable, but the scheduler surface cannot be enabled without it.
 
-The `claude` and `codex` executables are not installed by `pfm`. Their self-doctors are optional
-engine diagnostics even when accounts are configured: a broken engine capability stays visible,
-but it cannot block unrelated host installation. Use `--skip-engine codex` to skip the Codex
-probe and leave Codex mirror and hook surfaces unmanaged for this run.
+The `claude` and `codex` executables are not installed by `pfm`. Their self-doctors are optional engine diagnostics even when accounts are configured: a broken engine capability stays visible, but it cannot block unrelated host installation. Use `--skip-engine codex` to skip the Codex probe and leave Codex mirror and hook surfaces unmanaged for this run.
 
 ## 1. Binary install — `pfm` only (2 minutes)
 
 No clone, no Go toolchain. The installer's own assets (command cards, launcher shim, scheduler units) are embedded in the binary.
 
-Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/mreza0100/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
+Prerequisites: the shared runtime listed above and `git` (to resolve the latest tag — or read it off the [Releases page](https://github.com/rezzminator/professor/releases) by hand). The binary path does not require a Go toolchain or access to a Go module proxy.
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
 OS=linux      # or darwin
@@ -63,44 +57,31 @@ install -m 0755 "${BINARY}" "$HOME/.local/bin/pfm"
 
 The checksum only catches a corrupted/incomplete download — releases don't publish a separate signature.
 
-For a filtered network that cannot reach a Go module host or proxy, use this binary path: it
-only needs access to the release assets and the Git tag lookup above, not the module downloads
-needed by a source build.
+For a filtered network that cannot reach a Go module host or proxy, use this binary path: it only needs access to the release assets and the Git tag lookup above, not the module downloads needed by a source build.
 
 ### Preview, optional components, and harvest footprint
 
-Bare `pfm install` is a read-only preview. Review its planned writes and the harvest line before
-applying the identical flag set with `--yes`:
+Bare `pfm install` is a read-only preview. Review its planned writes and the harvest line before applying the identical flag set with `--yes`:
 
 ```bash
 pfm install --skip-harvest --skip-engine codex --skip-themes
 pfm install --yes --skip-harvest --skip-engine codex --skip-themes
 ```
 
-- `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download
-  and its disk footprint. It does not hide a failed provision.
-- `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not
-  alter Claude or OpenCode surfaces.
-- `--skip-themes` suppresses source-fetched theme installation. Theme entries come from
-  `templates/themes/sources.json` and the current Tokyo Night target is
-  `~/.claude/themes/tokyo-night.json`.
+- `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download and its disk footprint. It does not hide a failed provision.
+- `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
+- `--skip-themes` suppresses source-fetched theme installation. Theme entries come from `templates/themes/sources.json` and the current Tokyo Night target is `~/.claude/themes/tokyo-night.json`.
 
-The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`,
-the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about
-**5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly
-57 MB, and temporary files or caches can require more free space. Other platforms and future
-lock revisions vary; the preview is the authoritative plan for the host.
+The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`, the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about **5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly 57 MB, and temporary files or caches can require more free space. Other platforms and future lock revisions vary; the preview is the authoritative plan for the host.
 
-Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A
-locally modified theme is preserved and reported as drift rather than overwritten. On uninstall,
-only theme files recorded as installer-owned in the ownership ledger are removed.
+Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
 
 Add `$HOME/.local/bin` to `PATH` if it isn't already, then:
 
 ```bash
 pfm install             # preview — the default mode, no writes
 pfm install --yes       # apply the preview
-pfm install --vscode    # opt-in preview: make PFM the default VS Code terminal
+pfm install --vscode    # opt-in preview: the Professor VS Code extension + the PFM default terminal
 pfm install --yes --vscode
 ```
 
@@ -110,49 +91,28 @@ pfm install --yes --vscode
 2. Command symlinks — `~/.claude/commands/` (`/reload`); skill symlinks — `~/.claude/skills/` (`deep-rr`, `architecture-design`, `/handoff`)
 3. The `pfm-name-sync` scheduler — three systemd user units (Linux) or one launchd agent (macOS)
 4. Every Claude account settings file it finds (`~/.claude/settings.json` and each `~/.cc/N/settings.json`) — adds the usage, group, and `/clear` `SessionEnd` hooks; adopts the statusline only if none is already set
-5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from
-   the installed global Claude commands and host-global agent sources; only marker-owned command
-   outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
-6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and
-   Dream/STM hooks; it installs no automatic Codex hook
+5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; only marker-owned command outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
+6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and Dream/STM hooks; it installs no automatic Codex hook
 7. One source line appended to `~/.zshrc` — restart your shell (or `source ~/.zshrc`) for it to take effect
-8. `~/.claude/themes/` — source-fetched themes declared by `templates/themes/sources.json`; a
-   failed cosmetic fetch is reported and skipped without aborting the other surfaces
-9. **Opt-in:** the VS Code user or remote-machine `settings.json` — adds a `PFM` terminal profile
-   and selects it as the platform default. The profile opens a login zsh, then the installed shim
-   opens the PFM picker at the shell's first prompt. PFM edits JSONC surgically, so comments and
-   unrelated profiles survive; later installs retain ownership, and uninstall restores the prior
-   default unless the operator changed it after installation.
+8. `~/.claude/themes/` — source-fetched themes declared by `templates/themes/sources.json`; a failed cosmetic fetch is reported and skipped without aborting the other surfaces
+9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install), and in the user or remote-machine `settings.json` adds a `PFM` terminal profile and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links still pointing at PFM's copy and restores the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension.
 
 Every rewritten file is backed up before it's touched.
 
-Run `pfm` for the interactive picker. Its colors are enabled independently of inherited
-`NO_COLOR` or `CLICOLOR=0`; `pfm ls --plain` and `pfm ls --tsv` remain uncolored. The managed
-terminal profile uses `PFM_AUTO_OPEN=pfm` to open the picker once at the first prompt.
+Run `pfm` for the interactive picker. Its colors are enabled independently of inherited `NO_COLOR` or `CLICOLOR=0`; `pfm ls --plain` and `pfm ls --tsv` remain uncolored. The managed terminal profile uses `PFM_AUTO_OPEN=pfm` to open the picker once at the first prompt.
 
-The Professor `cc*` shell commands are retired. Use `pfm`, `pfm chat open <target>`, and the
-picker's account selector. Installation removes the named legacy launch/account scripts,
-backing up regular files outside `PATH` under `~/.local/state/pfm/retired-commands/`;
-source the updated shim or start a new shell to unload old functions and aliases. Account
-credentials, transcripts, live chat socket names, and the system C compiler are preserved.
+The Professor `cc*` shell commands are retired. Use `pfm`, `pfm chat open <target>`, and the picker's account selector. Installation removes the named legacy launch/account scripts, backing up regular files outside `PATH` under `~/.local/state/pfm/retired-commands/`; source the updated shim or start a new shell to unload old functions and aliases. Account credentials, transcripts, live chat socket names, and the system C compiler are preserved.
 
-Optional `cc-memory-wire.sh` and `cc-memory-consolidate.sh` helpers become `memory-wire.sh`
-and `memory-consolidate.sh`. Installation migrates recognized historical copies and exact
-hook paths without executing either helper or changing memory data. Customized helpers,
-conflicting destinations, and unsupported hook commands stop migration with an error;
-hosts without these helpers remain opted out.
+Optional `cc-memory-wire.sh` and `cc-memory-consolidate.sh` helpers become `memory-wire.sh` and `memory-consolidate.sh`. Installation migrates recognized historical copies and exact hook paths without executing either helper or changing memory data. Customized helpers, conflicting destinations, and unsupported hook commands stop migration with an error; hosts without these helpers remain opted out.
 
-**Known gate — read before you run it.** A mutating install refuses with exit 97 only while
-PFM's name-sync job is actively running, so it cannot replace the job or binary mid-execution.
-On Linux, wait or run `systemctl --user stop pfm-name-sync.service`; on macOS, wait or run
-`launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync`. The preview remains read-only.
+**Known gate — read before you run it.** A mutating install refuses with exit 97 only while PFM's name-sync job is actively running, so it cannot replace the job or binary mid-execution. On Linux, wait or run `systemctl --user stop pfm-name-sync.service`; on macOS, wait or run `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync`. The preview remains read-only.
 
 ---
 
 ## 2. Build from source — `pfm` only
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 SOURCE_DIR="$HOME/.professor"
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
@@ -162,16 +122,12 @@ mkdir -p "$HOME/.local/bin"
 GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -ldflags "-X main.version=$TAG" -o "$HOME/.local/bin/pfm" ./cmd/pfm
 ```
 
-Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.24.13 or newer**, the floor declared
-by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout
-keep the source and the binary on the same latest release; if the source directory already
-exists, fetch and check out that tag there instead of cloning over it.
+Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.24.13 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
-The source build has the same harvest cost and opt-outs as the
-[preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same
-two commands as the binary path:
+The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
 ```bash
+cd "$HOME/.professor"
 pfm install
 pfm install --yes
 ```
@@ -184,7 +140,7 @@ Same eight base surfaces, the same optional VS Code surface, and the same rc-97 
 
 Everything above, plus `CLAUDE.md`, per-project agents, commands, docs scaffolding, and the whole pipeline. `pfm init` scaffolds the project layer once, with template tokens intact and per-file baseline pins; the Claude-guided interview then adapts those local files in place. Nothing here duplicates what paths 1/2 already do.
 
-**Prerequisites:** Claude Code CLI, logged in. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). Optional, per opt-in: `prettier` via `npx` (markdown format hook), `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
+**Prerequisites:** Claude Code CLI, logged in. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). `rumdl` — the markdown lint/format engine behind `/quality:md-forlint` and the format hook; `pfm install` provisions it, and `pfm doctor` carries its row. Optional, per opt-in: `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
 
 Initialize the target project, then follow the path printed by `pfm init`:
 
@@ -209,20 +165,18 @@ Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install i
 
 One writer per surface — the law that keeps the two installers from fighting over the same file.
 
-| Surface                                                   | Written by                                                               | Paths                                                                                                                                                                                                                                                                        |
+| Surface | Written by | Paths |
 | --------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Host fleet wiring                                         | `pfm install` — the only writer                                          | `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, the systemd/launchd scheduler units, every Claude account `settings.json`, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json` |
-| Project discipline layer                                  | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/`                                                                                                                                                                                        |
-| Host-level opt-ins chosen during the interview            | `pfm install`, invoked on your behalf                                    | Lands inside the host-fleet surfaces above — the interview never writes them directly                                                                                                                                                                                        |
-| Source-fetched themes (default; `--skip-themes` opts out) | `pfm install`                                                            | `~/.claude/themes/tokyo-night.json` and other targets declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger                                                                                                                         |
+| Host fleet wiring | `pfm install` — the only writer | `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, the systemd/launchd scheduler units, every Claude account `settings.json`, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json` |
+| Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
+| Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
+| Source-fetched themes (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json` and other targets declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 
 ### Codex homes are config-owned
 
-An explicitly empty `codex.homes` array in the PFM machine config is authoritative: `"homes": []`
-means no Codex home even if `~/.codex` exists and contains credentials. Non-empty entries may use
-`~` or `$HOME/` and must name authenticated homes:
+An explicitly empty `codex.homes` array in the PFM machine config is authoritative: `"homes": []` means no Codex home even if `~/.codex` exists and contains credentials. Non-empty entries may use `~` or `$HOME/` and must name authenticated homes:
 
 ```json
 {
@@ -233,10 +187,7 @@ means no Codex home even if `~/.codex` exists and contains credentials. Non-empt
 }
 ```
 
-With an empty list, PFM does not fall back to the default home or write its Codex mirrors,
-configuration defaults, or hooks. If `ask.engine` is explicitly `codex`, select a configured
-engine there or remove that override; an explicit engine with no accounts is a configuration
-error. An omitted `ask.engine` is chosen from the available roster.
+With an empty list, PFM does not fall back to the default home or write its Codex mirrors, configuration defaults, or hooks. If `ask.engine` is explicitly `codex`, select a configured engine there or remove that override; an explicit engine with no accounts is a configuration error. An omitted `ask.engine` is chosen from the available roster.
 
 ---
 
@@ -244,11 +195,13 @@ error. An omitted `ask.engine` is chosen from the available roster.
 
 Each tier has one source of truth and one update mechanism:
 
-| Tier                                                        | Truth                              | Staying current                                                                                                                                                                                       |
+| Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Machine-global commands, agents, and skills                 | Blueprint originals                | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks.                                                                    |
-| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts)    | The local files                    | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
-| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`.                                                                               |
+| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. |
+| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
+| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
+
+**Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
 
 The project flow is deliberately non-destructive:
 

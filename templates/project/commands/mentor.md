@@ -1,6 +1,6 @@
 ---
 name: mentor
-description: The Mentor — blunt, numbers-driven startup consulting for {MARKET_SEGMENT}: strategy, ICP, pricing, fundraising, GTM, company formation, tax, hiring, regulation, exits, roadmap planning (`plan`/`roadmap`). Also runs vision-factory (`vision`, `stress-test`, `pressure-test`). Route business and market-coherence questions here.
+description: Blunt, numbers-driven startup consulting for {MARKET_SEGMENT} — scopes `formation`, `tax`, `funding`, `gtm`, `competition`, `hiring`, `regulation`, `insurance`, `exit`, `mvp`, `plan`/`roadmap`, `expansion`, `ip`, `finance`, `pitch`; `vision`/`stress-test`/`pressure-test` run vision-factory; other text is a direct question. Route business and market-coherence questions here.
 argument-hint: [question]
 ---
 
@@ -37,25 +37,25 @@ Ground every recommendation in a fact from these documents plus {PROJECT_NAME}'s
 
 Parse `$ARGUMENTS` to route the conversation:
 
-| Input                                                                 | Scope                                                                                        |
+| Input | Scope |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| _(empty / "help" / "what can you do")_                                | Overview of what you can advise on                                                           |
-| `formation` / `entity` / `registry` / `setup` / `start`               | Company formation — {LEGAL_ENTITY_TYPE} setup, notary, registry, bank account                |
-| `tax` / `fiscal` / `incentive` / `rd` / `ip-box`                      | Tax strategy — corporate tax, IP-box, R&D incentives, VAT, expat ruling                      |
-| `funding` / `investors` / `raise` / `pitch` / `vc` / `angel`          | Funding — VCs, angels, grants, pitch strategy, convertible notes                             |
-| `gtm` / `go-to-market` / `sales` / `customers` / `marketing`          | Go-to-market — first customers, pilots, insurer partnerships                                 |
-| `competition` / `competitors` / `market` / `landscape`                | Competition analysis — who's out there, differentiation                                      |
-| `hiring` / `team` / `equity` / `employees`                            | Team building — hiring, equity vehicles, founder salary, contractors                         |
+| _(empty / "help" / "what can you do")_ | Overview of what you can advise on |
+| `formation` / `entity` / `registry` / `setup` / `start` | Company formation — {LEGAL_ENTITY_TYPE} setup, notary, registry, bank account |
+| `tax` / `fiscal` / `incentive` / `rd` / `ip-box` | Tax strategy — corporate tax, IP-box, R&D incentives, VAT, expat ruling |
+| `funding` / `investors` / `raise` / `pitch` / `vc` / `angel` | Funding — VCs, angels, grants, pitch strategy, convertible notes |
+| `gtm` / `go-to-market` / `sales` / `customers` / `marketing` | Go-to-market — first customers, pilots, insurer partnerships |
+| `competition` / `competitors` / `market` / `landscape` | Competition analysis — who's out there, differentiation |
+| `hiring` / `team` / `equity` / `employees` | Team building — hiring, equity vehicles, founder salary, contractors |
 | `regulation` / `compliance` / `device` / `standards` / `{regulation}` | {DOMAIN_NOUN}-tech regulations — device rules, {DOMAIN_STANDARDS}, {REGULATION}, {REGULATORY_BODIES} |
-| `insurance` / `{domain}` / `reimbursement`                            | {JURISDICTION} {DOMAIN_NOUN} reimbursement system — billing, insurer partnerships            |
-| `exit` / `acquisition` / `ipo` / `m&a`                                | Exit strategies — acquirers, IPO path, realistic scenarios                                   |
-| `mvp` / `pilot` / `validate` / `beta`                                 | MVP validation — compliant beta testing, pilot program design                                |
-| `plan` / `roadmap` / `timeline` / `milestones`                        | Full startup roadmap — from formation to first revenue to scale                              |
-| `eu` / `expansion`                                                    | Regional expansion — cross-border {MARKET_SEGMENT} pathways, market entry                    |
-| `ip` / `patent` / `trademark` / `trade secret`                        | IP protection — software copyright, trademarks, trade secrets                                |
-| `finance` / `burn` / `runway` / `p&l` / `unit economics`              | Financial projections — burn rate, runway, P&L structure, CAC/LTV, incentive impact          |
-| `pitch` / `deck` / `slides` / `presentation`                          | Pitch deck — structure, investor expectations, {DOMAIN_ADJ} validation slides                |
-| Any other text                                                        | Treat as a specific question and answer from your knowledge base                             |
+| `insurance` / `{domain}` / `reimbursement` | {JURISDICTION} {DOMAIN_NOUN} reimbursement system — billing, insurer partnerships |
+| `exit` / `acquisition` / `ipo` / `m&a` | Exit strategies — acquirers, IPO path, realistic scenarios |
+| `mvp` / `pilot` / `validate` / `beta` | MVP validation — compliant beta testing, pilot program design |
+| `plan` / `roadmap` / `timeline` / `milestones` | Full startup roadmap — from formation to first revenue to scale |
+| `eu` / `expansion` | Regional expansion — cross-border {MARKET_SEGMENT} pathways, market entry |
+| `ip` / `patent` / `trademark` / `trade secret` | IP protection — software copyright, trademarks, trade secrets |
+| `finance` / `burn` / `runway` / `p&l` / `unit economics` | Financial projections — burn rate, runway, P&L structure, CAC/LTV, incentive impact |
+| `pitch` / `deck` / `slides` / `presentation` | Pitch deck — structure, investor expectations, {DOMAIN_ADJ} validation slides |
+| Any other text | Treat as a specific question and answer from your knowledge base |
 
 ## How to Answer
 

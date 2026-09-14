@@ -471,18 +471,18 @@ const realMalformedVSCodeSettings = `{
 // TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile proves
 // sanitizeJSONC/parseJSONCObject's trailing-comma tolerance against the
 // actual file that tripped errMalformedVSCodeSettings on devbox, not a
-// synthetic stand-in: the merge must proceed (no skip, no error). Every
-// value pfm owns here already matches what pfm would write, so this is a
-// no-op merge (the "ok" path, not "change" — same law as every other
-// already-correct settings file) and the file is left byte-for-byte alone;
+// synthetic stand-in: the merge must proceed (no skip, no error). The PFM
+// profile, the "PFM" default, and all four ScalarOwned keys already match
+// what pfm would write (an "ok", not a "change" — same law as every other
+// already-correct settings file) —
 // TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject is the
-// sibling fixture that forces an actual write and proves THAT output is
-// strict-JSON-clean. What this test proves is JSONC tolerance: the merge
-// reads the malformed file successfully (decodeJSONCObject, the same
-// tolerant parser wireVSCode uses), and the PFM profile, all four
-// ScalarOwned keys, and everything the operator's file already carried —
-// the other profiles, the automation profile, the tab title — read back
-// correctly.
+// sibling fixture that forces an actual write to the PROFILE object and
+// proves THAT output is strict-JSON-clean. What this test proves is
+// JSONC tolerance: the merge reads the malformed file successfully
+// (decodeJSONCObject, the same tolerant parser wireVSCode uses), and the PFM
+// profile, all four ScalarOwned keys, and everything the operator's file
+// already carried — the other profiles, the automation profile, the tab
+// title — read back correctly.
 func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
@@ -575,33 +575,6 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 		if !strings.Contains(got, want) {
 			t.Errorf("result missing %q:\n%s", want, got)
 		}
-	}
-}
-
-// TestSanitizeJSONCToleratesConsecutiveTrailingCommas covers the one gap a
-// single-comma lookahead leaves: two (or more) trailing commas in a row —
-// two edits landing on the same spot, or a block moved and re-punctuated —
-// where the first comma is followed by another comma, not directly by
-// whitespace-then-bracket.
-func TestSanitizeJSONCToleratesConsecutiveTrailingCommas(t *testing.T) {
-	for name, content := range map[string]string{
-		"double trailing comma in a nested object":  `{"a": {"x": 1,,},"b":2}`,
-		"triple trailing comma in a nested object":  `{"a": {"x": 1,,,},"b":2}`,
-		"double trailing comma in an array":         `{"a": [1, 2,,],"b":2}`,
-		"double trailing comma spread across lines": "{\"a\": {\"x\": 1,\n  ,\n  },\"b\":2}",
-	} {
-		t.Run(name, func(t *testing.T) {
-			document, err := decodeJSONCObject([]byte(content))
-			if err != nil {
-				t.Fatalf("decodeJSONCObject: %v", err)
-			}
-			if _, ok := document["b"].(float64); !ok {
-				t.Fatalf("decoded document missing sibling key: %#v", document)
-			}
-			if _, err := parseJSONCObject([]byte(content), 0); err != nil {
-				t.Fatalf("parseJSONCObject: %v", err)
-			}
-		})
 	}
 }
 

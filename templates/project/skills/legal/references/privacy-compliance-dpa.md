@@ -34,14 +34,14 @@ A compliant DPA must define all of:
 
 ## Common DPA red flags
 
-| Red flag                                                | Risk                             | Standard position                                                       |
+| Red flag | Risk | Standard position |
 | ---------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
-| Blanket sub-processor authorisation, no notice          | Loss of control over the chain   | Require notice + right to object                                        |
-| Breach-notice window > 72h                              | Blocks timely regulatory notice  | Require 24–48h                                                          |
-| No audit rights (or only third-party reports)           | Cannot verify compliance         | Accept a recognised third-party security-audit report ({DOMAIN_STANDARDS}) **plus** audit-on-cause |
-| Deletion timeline unspecified                           | Data retained indefinitely       | Require deletion within 30–90 days                                      |
-| Processing locations unspecified                        | Data processed anywhere          | Require disclosure of locations                                         |
-| Outdated SCCs                                            | Invalid transfer mechanism       | Require the current {JURISDICTION} SCCs                                 |
+| Blanket sub-processor authorisation, no notice | Loss of control over the chain | Require notice + right to object |
+| Breach-notice window > 72h | Blocks timely regulatory notice | Require 24–48h |
+| No audit rights (or only third-party reports) | Cannot verify compliance | Accept a recognised third-party security-audit report ({DOMAIN_STANDARDS}) **plus** audit-on-cause |
+| Deletion timeline unspecified | Data retained indefinitely | Require deletion within 30–90 days |
+| Processing locations unspecified | Data processed anywhere | Require disclosure of locations |
+| Outdated SCCs | Invalid transfer mechanism | Require the current {JURISDICTION} SCCs |
 | **Liability / insurance / commercial terms in the DPA** | Scope creep, conflicting clauses | Move to the master services agreement — Art. 28 is data-protection only |
 
 ## Data-subject request handling

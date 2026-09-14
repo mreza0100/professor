@@ -831,7 +831,8 @@ func TestRemoteLegacy_BuildAppConfinesReadsToCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(server.service.runtime.LocalRoots) != 1 || server.service.runtime.LocalRoots[0] != cache {
+	publicCache := filepath.Join(cache, "public")
+	if len(server.service.runtime.LocalRoots) != 1 || server.service.runtime.LocalRoots[0] != publicCache {
 		t.Fatalf("local roots = %#v", server.service.runtime.LocalRoots)
 	}
 }

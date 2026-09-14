@@ -23,10 +23,10 @@ Each inflates PR diffs, makes review harder, and risks introducing regressions i
 
 The Karpathy-canonical formulation ("don't touch what you weren't asked to touch") conflates two different things:
 
-| Category               | Example                                                                              | Policy        |
+| Category | Example | Policy |
 | ---------------------- | ------------------------------------------------------------------------------------ | ------------- |
-| **Cosmetic drift**     | Renaming a variable, reformatting a function, adding comments, restructuring imports | **Forbidden** |
-| **Fixing broken code** | Swallowed exception, N+1 query, security vulnerability, failing test                 | **Mandatory** |
+| **Cosmetic drift** | Renaming a variable, reformatting a function, adding comments, restructuring imports | **Forbidden** |
+| **Fixing broken code** | Swallowed exception, N+1 query, security vulnerability, failing test | **Mandatory** |
 
 Cosmetic drift is forbidden because it expands blast radius without fixing anything. Fixing broken code is mandatory because leaving a known bug unfixed because it is "out of scope" is negligence — the product serves real users.
 
@@ -40,14 +40,12 @@ Instructional rules alone are ~80% effective (two independent sources). Complian
 
 Structural enforcement closes the gap:
 
-| Mechanism                      | Determinism      | Where it helps              |
+| Mechanism | Determinism | Where it helps |
 | ------------------------------ | ---------------- | --------------------------- |
-| Git worktrees                  | Filesystem-level | `/build` pipeline isolation |
-| Hooks (PreToolUse exit code 2) | Unconditional    | Per-file/tool blocking      |
-| `--allowedTools` flag          | Per-session      | Tool restriction            |
-| Permission allowlists          | Glob-pattern     | File access control         |
-
-The instructional rule covers the `/jc` hotfix path where worktree isolation does not apply.
+| Git worktrees | Filesystem-level | `/build` pipeline isolation |
+| Hooks (PreToolUse exit code 2) | Unconditional | Per-file/tool blocking |
+| `--allowedTools` flag | Per-session | Tool restriction |
+| Permission allowlists | Glob-pattern | File access control |
 
 ### Sources
 
@@ -67,12 +65,12 @@ The instructional rule covers the `/jc` hotfix path where worktree isolation doe
 
 Placement rules exist at four granularity levels in production AI-maintained codebases:
 
-| Level                    | Example                                              | Prevalence  |
+| Level | Example | Prevalence |
 | ------------------------ | ---------------------------------------------------- | ----------- |
-| Package/service boundary | "Frontend code lives only in `client/`"              | Common      |
-| Layer within package     | "src/services/ — business logic (no DB calls here)"  | Most common |
-| File naming convention   | "kebab-case (user-profile.tsx, NOT UserProfile.tsx)" | Very common |
-| Within-file structure    | "exported component, subcomponents, helpers, types"  | Less common |
+| Package/service boundary | "Frontend code lives only in `client/`" | Common |
+| Layer within package | "src/services/ — business logic (no DB calls here)" | Most common |
+| File naming convention | "kebab-case (user-profile.tsx, NOT UserProfile.tsx)" | Very common |
+| Within-file structure | "exported component, subcomponents, helpers, types" | Less common |
 
 The sweet spot is **Levels 2+3 together** — layer boundaries + naming conventions.
 
@@ -120,10 +118,10 @@ Not a rule — a reference for when to add meta-documentation about how your con
 
 The canonical framework (arXiv 2602.20478, 108K-line system, 283 sessions):
 
-| Tier | Label                     | Mechanism                 | Threshold for docs |
+| Tier | Label | Mechanism | Threshold for docs |
 | ---- | ------------------------- | ------------------------- | ------------------ |
-| 1    | Hot Memory (Constitution) | Auto-loaded every session | Always documented  |
-| 2    | Domain-Expert Subagents   | Invoked per task          | 19+ agents         |
-| 3    | Cold Memory (Knowledge)   | Retrieved on demand       | 34+ specs          |
+| 1 | Hot Memory (Constitution) | Auto-loaded every session | Always documented |
+| 2 | Domain-Expert Subagents | Invoked per task | 19+ agents |
+| 3 | Cold Memory (Knowledge) | Retrieved on demand | 34+ specs |
 
 If your system works without meta-docs about the tiers, defer. Adding meta-documentation saying "here's how the context tiers work" describes infrastructure to the infrastructure. Revisit when context tier failures appear.

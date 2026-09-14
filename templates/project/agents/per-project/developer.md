@@ -1,10 +1,6 @@
 ---
 name: developer
-description: >
-  Implements code for the {project} project ({PROJECT_ROLE}). Reads the brief-named doc dir for context.
-  Follows CLAUDE.md conventions. Runs self-QA before finishing.
-  In cross-project mode, works in a worktree with allocated ports.
-  Invoke AFTER architect.
+description: Implements code for the {project} project ({PROJECT_ROLE}) from the brief-carried task spec — worktree with allocated ports, self-QA before finishing. Spawn AFTER architect; OPEN bugs in the brief-named 6-bugs.md make it a fix loop. Returns 5-dev-report-{project}.md.
 model: sonnet # {MODEL_TIER} — spec-execution; ships as the default pin, retune to your model tier
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---

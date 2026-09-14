@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,18 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"time"
 
+	"hostops/pfm/internal/codexmeta"
 	"hostops/pfm/internal/store"
 )
-
-type cxIndexRecord struct {
-	ID         string `json:"id"`
-	ThreadName string `json:"thread_name"`
-	// UpdatedAt is the rename time Codex 0.147 began stamping on every
-	// session_index.jsonl entry. Older entries carry none.
-	UpdatedAt string `json:"updated_at"`
-}
 
 func reloadCxNamesFromRoots(
 	ctx context.Context,
@@ -38,7 +29,7 @@ func reloadCxNamesFromRoots(
 	sources := make([]source, 0, len(codexRoots))
 	signature := sha256.New()
 	for _, codexRoot := range codexRoots {
-		path := filepath.Join(codexRoot, "session_index.jsonl")
+		path := filepath.Join(codexRoot, codexmeta.SessionIndexFile)
 		size, mtimeNS := int64(-1), int64(-1)
 		if info, err := os.Stat(path); err == nil {
 			size = info.Size()
@@ -62,12 +53,11 @@ func reloadCxNamesFromRoots(
 			continue
 		}
 		_, bytesRead, err := readCompleteLines(source.path, 0, func(line []byte) {
-			var record cxIndexRecord
-			if err := json.Unmarshal(line, &record); err == nil && record.ID != "" {
-				names[record.ID] = store.CxName{
-					ID: record.ID, ThreadName: record.ThreadName,
+			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
+				names[entry.ID] = store.CxName{
+					ID: entry.ID, ThreadName: entry.ThreadName,
 					Source:    store.CxNameSourceSessionIndex,
-					RenamedAt: parseCxRenameTime(record.UpdatedAt),
+					RenamedAt: cxRenameTime(entry),
 				}
 			}
 		})
@@ -100,20 +90,17 @@ func reloadCxNamesFromRoots(
 	return nil
 }
 
-// parseCxRenameTime reads a session_index.jsonl entry's updated_at. An empty
+// cxRenameTime reads a session_index.jsonl entry's updated_at. An empty
 // or unparsable value means no rename time is known for this entry, not that
 // the rename happened at the Unix epoch — reconcileCodexNames treats the two
 // cases identically (RenamedAt of 0), so returning 0 here is the correct
 // "unknown" sentinel, not a wrong guess.
-func parseCxRenameTime(raw string) int64 {
-	if raw == "" {
+func cxRenameTime(entry codexmeta.SessionIndexEntry) int64 {
+	renamed, ok := entry.RenamedAt()
+	if !ok {
 		return 0
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return 0
-	}
-	return parsed.UnixNano()
+	return renamed.UnixNano()
 }
 
 func reloadCxNames(
@@ -122,7 +109,7 @@ func reloadCxNames(
 	codexRoot string,
 	counters *Counters,
 ) error {
-	path := filepath.Join(codexRoot, "session_index.jsonl")
+	path := filepath.Join(codexRoot, codexmeta.SessionIndexFile)
 	size, mtimeNS := int64(-1), int64(-1)
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()
@@ -148,16 +135,15 @@ func reloadCxNames(
 	names := make(map[string]store.CxName)
 	if size >= 0 {
 		_, bytesRead, err := readCompleteLines(path, 0, func(line []byte) {
-			var record cxIndexRecord
-			if err := json.Unmarshal(line, &record); err == nil && record.ID != "" {
+			if entry, err := codexmeta.DecodeSessionIndexLine(line); err == nil {
 				// The file is append-only, so the LAST entry for an id — the
 				// one this overwrite leaves standing — is the freshest rename
 				// intent, whether or not it carries a timestamp.
-				names[record.ID] = store.CxName{
-					ID:         record.ID,
-					ThreadName: record.ThreadName,
+				names[entry.ID] = store.CxName{
+					ID:         entry.ID,
+					ThreadName: entry.ThreadName,
 					Source:     store.CxNameSourceSessionIndex,
-					RenamedAt:  parseCxRenameTime(record.UpdatedAt),
+					RenamedAt:  cxRenameTime(entry),
 				}
 			}
 		})

@@ -1,6 +1,6 @@
 # RR — Research and Report
 
-**Version:** 3.2.4 · **License:** MIT · **Repo:** [github.com/mreza0100/rr](https://github.com/mreza0100/rr)
+**Version:** 3.2.4 · **License:** MIT · **Repo:** [github.com/rezzminator/rr](https://github.com/rezzminator/rr)
 
 A Claude Code skill that runs a deterministic background **Workflow** to research a question — an unbounded, best-first, brainer-steered web crawl that **derives** the answer and writes a cited, multi-section report with a verdict, stated assumptions, and a plan.
 
@@ -73,7 +73,7 @@ The brainer never re-emits the whole frontier — it returns **deltas** (rescore
 **Per-project** — clone, then copy the 3 runtime files in (`engine/` is dev-only, not needed at runtime):
 
 ```bash
-git clone https://github.com/mreza0100/rr deep-rr
+git clone https://github.com/rezzminator/rr deep-rr
 mkdir -p <project>/.claude/skills/deep-rr
 cp deep-rr/{SKILL.md,workflow.js,persist.js} <project>/.claude/skills/deep-rr/
 ```
@@ -83,7 +83,7 @@ cp deep-rr/{SKILL.md,workflow.js,persist.js} <project>/.claude/skills/deep-rr/
 **Requirements:**
 
 - Claude Code with the Workflow tool.
-- The **Harvester** MCP server ([github.com/mreza0100/harvester-web-mcp](https://github.com/mreza0100/harvester-web-mcp)) connected — without it, every fetch errors and the run is snippet-only.
+- The **Harvester** MCP server ([github.com/rezzminator/harvester-web-mcp](https://github.com/rezzminator/harvester-web-mcp)) connected — without it, every fetch errors and the run is snippet-only.
 - `python3` with a scientific stack (scipy, sympy, uncertainties, pandas) for compute/derivation — optional, pass `compute: false` without it.
 
 **Verify:** in Claude Code say `rr fast <any question>` (instant, no Workflow needed), then `RR <question>` for a full background run. Results persist to `RR/{slug}/`.

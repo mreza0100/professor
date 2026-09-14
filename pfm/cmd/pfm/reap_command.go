@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/reap"
 )
 
@@ -58,7 +59,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		ClaudeBinary:   runtime.Config.Claude.Binary,
 		CodexBinary:    runtime.Config.Codex.Binary,
 		OpencodeBinary: runtime.Config.OpenCode.Binary,
-		CodexRoots:     codexHomes(runtime.Config),
+		CodexRoots:     runtime.Config.CodexHomes(),
 		KillServer: func(ctx context.Context, socket string) error {
 			return killChatServer(ctx, resolved, socket)
 		},
@@ -71,7 +72,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		Apply:      *apply,
 		BusyRecent: time.Duration(*busyRecent) * time.Second,
 		Horizon:    *horizon,
-		Self:       currentSocket(),
+		Self:       fleet.CurrentSocket(),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm reap: %v\n", err)

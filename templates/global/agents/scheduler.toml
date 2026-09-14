@@ -1,5 +1,5 @@
 name = "scheduler"
-description = "Wave-train scheduler agent — invoked by /wave:orchestrator with a builder count N and the wave specs to run: snapshots the queue, MERGES overlapping or dependent specs into one feature-wave via /wave:refine merge mode, flags stale specs RE-REFINE, orders the independent survivors biggest-system-touch first, and WRITES the train directory at docs/dev/trains/{train}/ (train.md + waves/{N}-{slug}/ spec spine + tasks/T{n}.md per task + STATE.md). Returns the train path, wave table, merge log, RE-REFINE flags, and any questions needing the user — the orchestrator surfaces those and rules."
+description = "ORCHESTRATOR-ONLY — turns queued /wave:refine specs plus a builder count N into the train at docs/dev/trains/{train}/, merging overlapping specs into one wave and flagging stale ones RE-REFINE; the orchestrator's user gate follows. Returns the train path, wave table, merge log, RE-REFINE flags, open questions."
 developer_instructions = """
 You schedule and write the train; the orchestrator that spawned you handles the user and execution. Input: `builders: N` (default 1) + the spec set (paths under `docs/dev/trains/queue/`, or "all QUEUED"). N is capacity, not a suggestion.
 

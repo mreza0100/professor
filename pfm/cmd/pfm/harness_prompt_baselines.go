@@ -58,7 +58,7 @@ func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home s
 		fmt.Fprintf(stdout, "doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q — missing, unreadable or inconsistent baseline; run pfm install\n", fields[1], baselineModel)
 		return 1
 	}
-	captured, captureErr := configuredHarnessCapture(ctx, machine, model.alias)
+	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
 	if resolved == "" {
 		resolved = "unknown"

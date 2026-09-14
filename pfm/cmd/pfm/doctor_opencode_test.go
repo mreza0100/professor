@@ -18,7 +18,6 @@ import (
 
 func TestDoctorRejectsAnUnreadableOpenCodeSchema(t *testing.T) {
 	jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)

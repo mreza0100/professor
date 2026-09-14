@@ -85,9 +85,9 @@ This becomes `{PROJECT_NAME}` and `{PROJECT_PITCH}`. Example: "Acme is a develop
 
 Most adopters keep Professor as-is. The voice transplants well across domains. If you want a different name (e.g., "Beatrix" for a finance project, "Gandalf" for an open-source library), name it. The voice can stay.
 
-Each persona ships as ONE version: the Professor (`professor.md`) is the **session style** loaded on every main-loop turn; JC (`jc.md`) is a command overlay loaded only when `/jc` runs.
+The Professor (`professor.md`) ships as ONE version: the **session style** loaded on every main-loop turn.
 
-Sacred ground (the topics where humor drops) is collected in question 8 — it feeds JC and the Tier B archetypes; the Professor persona itself stays generic.
+Sacred ground (the topics where humor drops) is collected in question 8 — it feeds the Tier B archetypes; the Professor persona itself stays generic.
 
 ### 3. Project roster
 
@@ -116,11 +116,11 @@ Example roster (one possible shape — yours may have one entry or seven):
 
 **Specialist agents:** beyond the standard four (`planner`, `architect`, `developer`, `qa`), add a specialist when a narrow concern justifies it:
 
-| When to add one                          | What it owns                                        |
+| When to add one | What it owns |
 | ---------------------------------------- | --------------------------------------------------- |
-| Visual/interaction layer is non-trivial  | Colors, typography, spacing, layout (`ui-ux`)       |
-| Schema/migration changes are risky       | Data layer, migrations, seeding (`db-admin`)        |
-| Deployment configs are real code         | Infra configs, environment promotion (`devops`)     |
+| Visual/interaction layer is non-trivial | Colors, typography, spacing, layout (`ui-ux`) |
+| Schema/migration changes are risky | Data layer, migrations, seeding (`db-admin`) |
+| Deployment configs are real code | Infra configs, environment promotion (`devops`) |
 | Prompt engineering is its own discipline | Prompts, evals, knowledge ingestion (`ai-engineer`) |
 
 Slot specialists into `/wave:builder` between architect and QA.
@@ -231,7 +231,6 @@ If no: skip — the entire Codex layer is omitted. No pipeline operation require
 
 This becomes `{SACRED_GROUND}` and is referenced by:
 
-- JC (the trigger that escalates from chill to temple-flipping)
 - Officer (if opted in — the protected category)
 
 Be specific. "Privacy" is too vague. "Patient session content and identifying details" is concrete. "Financial transaction integrity at the millisecond level" is concrete. "Scientific data reproducibility for FDA submissions" is concrete.
@@ -256,27 +255,28 @@ Claude takes your answers and:
 
 1. **Writes root `CLAUDE.md`** — fills in `{PROJECT_NAME}`, `{PROJECT_PITCH}`, the Professor persona section, and the non-negotiable rules. Emits `{PROJECT_ROSTER}` (one Architecture bullet per roster entry) and `{PROJECT_AGENT_ROSTER}` (one Agents line per entry, listing only that project's installed agents); a single-project install collapses the monorepo framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; infra rules only if a project owns infra).
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
-3. **Writes Tier A command files** — `/wave:builder`, `/jc`, `/pfm`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`. Voice intact, domain content filled.
+3. **Writes Tier A command files** — `/wave:builder`, `/pfm`, `/dev`, `/git`, `/wave:orchestrator`, `/documenter`. Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/km`, `/pm`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line.
 5. **Writes root agents** — `gitter`, `mono-documenter`, `rndier`, and `tracer` always; one `qa-{project}` gate wrapper per roster entry; `mono-planner` + `mono-architect` only for a roster of 2+, each with the roster pinned. A single-project install omits the two `mono-` consolidators.
 6. **Writes per-project agents** — for each roster entry, instantiates that project's `planner`, `architect`, `developer`, `qa` (plus any specialists from Q3) under `{project}/.claude/agents/`, with its test/lint/build commands pinned. One set per entry; none for projects not in the roster.
-7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop).
-   7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/wave:refine`, `/wave:walker`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and spawns its `rndier` agent, which executes one run. The table records each subject's source path and its parameterization.
+7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/wave:refine`, `/wave:walker`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and spawns its `rndier` agent, which executes one run. The table records each subject's source path and its parameterization.
 
-| Skill / command       | Source                                                                                                          | Parameterization                                                     |
+| Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `legal`               | Bundled `templates/project/skills/legal/`                                                                       | None                                                                 |
-| `deep-rr`             | in-tree at `{BLUEPRINT_CLONE_PATH}/engines/deep-rr/` — ships with the blueprint clone, no separate fetch        | None                                                                 |
-| `architecture-design` | in-tree at `{BLUEPRINT_CLONE_PATH}/templates/global/skills/architecture-design/` — host-global, linked by `pfm install`, no fetch | None                                                                 |
-| `ghostwriter`         | host-global source-fetched (`templates/global/skills/sources.json`) https://github.com/mreza0100/ghost-writer   | None                                                                 |
-| `vision-factory`      | host-global source-fetched (`templates/global/skills/sources.json`) https://github.com/mreza0100/vision-factory | None                                                                 |
-| `/rnd`                | Command `templates/project/commands/rnd.md`, agent `templates/project/agents/rndier.md`                         | Replace `{AI_PROJECT}`, `{AI_SERVICE_NAME}`, `{ai_module}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}` |
-| `/wave:refine`        | Command `templates/global/commands/wave/refine.md`                                                              | None (pipeline-coupled)                                              |
-| `/wave:walker`        | Command `templates/project/commands/wave/walker.md`                                                             | None (pipeline-coupled)                                              |
-| `/quality:prompt`     | Command `templates/global/commands/quality/prompt.md`                                                           | Replace `{KNOWLEDGE_ROOT}`, `{KNOWLEDGE_DOMAIN}`, `{SACRED_GROUND}`  |
-| `/quality:doc`        | Command `templates/global/commands/quality/doc.md`                                                              | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples          |
-| `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md`                                                      | Hydrated by RR (Phase 2.5)                                           |
-| `/audit:security`     | Command `templates/project/commands/audit/security.md`                                                          | Hydrated by RR (Phase 2.5)                                           |
+| `legal` | Bundled `templates/project/skills/legal/` | None |
+| `deep-rr` | in-tree at `{BLUEPRINT_CLONE_PATH}/engines/deep-rr/` — ships with the blueprint clone, no separate fetch | None |
+| `architecture-design` | in-tree at `{BLUEPRINT_CLONE_PATH}/templates/global/skills/architecture-design/` — host-global, linked by `pfm install`, no fetch | None |
+| `ghostwriter` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/ghost-writer> | None |
+| `vision-factory` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/vision-factory> | None |
+| `/rnd` | Command `templates/project/commands/rnd.md`, agent `templates/project/agents/rndier.md` | Replace `{AI_PROJECT}`, `{AI_SERVICE_NAME}`, `{ai_module}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}` |
+| `/wave:refine` | Command `templates/global/commands/wave/refine.md` | None (pipeline-coupled) |
+| `/wave:walker` | Command `templates/project/commands/wave/walker.md` | None (pipeline-coupled) |
+| `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{KNOWLEDGE_ROOT}`, `{KNOWLEDGE_DOMAIN}`, `{SACRED_GROUND}` |
+| `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
+| `/quality:description` | Command `templates/global/commands/quality/description.md` | None |
+| `/quality:md-forlint` | Command `templates/global/commands/quality/md-forlint.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
+| `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |
+| `/audit:security` | Command `templates/project/commands/audit/security.md` | Hydrated by RR (Phase 2.5) |
 
 7b. **Prepares the dual-runtime Wave Walker engine** — requires Node `>=22.13`, keeps the blueprint clone at the permanent `{BLUEPRINT_CLONE_PATH}` embedded in `walker-invariants.md`, runs `npm ci --prefix {BLUEPRINT_CLONE_PATH}/engines/wave-walker/engine`, then runs that engine's `npm run build` and `npm run verify`. The engine consumes its integrity-pinned `cross-workflow` package at build/runtime; Claude callers execute the equivalence-gated `dist/active-workflow.js` pointer, while Codex callers execute `dist/cross-workflow/codex/runner.mjs`. Never copy either target into the project: one engine source and one clone own both.
 
@@ -292,36 +292,36 @@ Claude takes your answers and:
 
 7d. **Configures notifications** — `notify.sh` hooks into Claude Code's `PreToolUse` and `Stop` events via `.claude/settings.json` hooks. Sends a macOS native notification with Glass sound when a turn takes 30+ seconds. Character name and project root path are parameterized at install. Add to `.claude/settings.json`:
 
-    ```json
-    {
-      "hooks": {
-        "PreToolUse": [
-          {
-            "matcher": "",
-            "hooks": [
-              {
-                "type": "command",
-                "command": "/absolute/path/to/your-project/.claude/scripts/notify.sh start"
-              }
-            ]
-          }
-        ],
-        "Stop": [
-          {
-            "matcher": "",
-            "hooks": [
-              {
-                "type": "command",
-                "command": "/absolute/path/to/your-project/.claude/scripts/notify.sh stop"
-              }
-            ]
-          }
-        ]
-      }
-    }
-    ```
+```json
+{
+"hooks": {
+"PreToolUse": [
+{
+"matcher": "",
+"hooks": [
+{
+"type": "command",
+"command": "/absolute/path/to/your-project/.claude/scripts/notify.sh start"
+}
+]
+}
+],
+"Stop": [
+{
+"matcher": "",
+"hooks": [
+{
+"type": "command",
+"command": "/absolute/path/to/your-project/.claude/scripts/notify.sh stop"
+}
+]
+}
+]
+}
+}
+```
 
-7e. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), prettier auto-formats it. Non-Professor files are ignored. Add to `.claude/settings.json`:
+7e. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
 
     ```json
     {
@@ -341,15 +341,15 @@ Claude takes your answers and:
     }
     ```
 
-    Requires `jq` and `prettier` (`npx prettier` — works if prettier is a project devDependency or globally installed). Fails silently if either is missing.
+    Requires `jq` and `rumdl` (provisioned by `pfm install`). A missing tool prints one stderr line naming it and leaves the file unformatted — never a silent skip.
 
-7f. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Installation stages embedded host assets, links the global command/agent registry from the recorded source clone, wires configured account settings and hooks, installs the shell launcher, and configures the platform scheduler (systemd on Linux, launchd on macOS). Optional MCP and VS Code integration retain their explicit enablement. Claude uses the selected harness replacement; configured Codex accounts receive the trusted native SessionStart appendix hook. An empty engine roster stays empty. Existing custom settings and hooks are preserved; owned predecessors are migrated with backups. The write gate refuses a currently running name-sync job, while an available idle manager is supported. Service activation errors remain errors. `pfm uninstall` removes owned registrations and staged assets. Skipped if the user declines.
+7f. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Installation stages embedded host assets, links the global command/agent registry from the recorded source clone, wires configured account settings and hooks, installs the shell launcher, and configures the platform scheduler (systemd on Linux, launchd on macOS). Optional MCP and the Professor VS Code extension (Professor's assistant in VS Code) with the PFM terminal made default retain their explicit enablement. Claude uses the selected harness replacement; configured Codex accounts receive the trusted native SessionStart appendix hook. An empty engine roster stays empty. Existing custom settings and hooks are preserved; owned predecessors are migrated with backups. The write gate refuses a currently running name-sync job, while an available idle manager is supported. Service activation errors remain errors. `pfm uninstall` removes owned registrations and staged assets. Skipped if the user declines.
 
 7f-i. **(Opt-in, host-level) The chat MCP server** — `pfm install` registers the opt-in `chat` and `harvester` MCP servers: an `mcpServers` entry in each configured Claude user registry (`~/.claude.json` for the implicit account, `<CLAUDE_CONFIG_DIR>/.claude.json` for explicit accounts), the installer-owned `mcp_servers` fence in each configured Codex home, and an exact ownership record under the managed root. Manual registrations and unrelated private configuration are preserved; failed writes retain recovery receipts. Doctor inspects these actual client paths and the historical root `.mcp.json` migration evidence. The chat server exposes the fleet as tools — list, resolve, read, capture, name, inject, group-message, branch, load, self-compact — which the agent calls directly. It replaced the host-level `/chat:*` slash-command family, removed in v0.62.0; `/reload` remains available alongside the shared global command registry.
 
 7g. **Probes host tooling (git-host bridge)** — checks the install machine for `gh` and `glab` (`command -v`). For each present, writes a one-file index skill at `.claude/skills/host-{gh|glab}/SKILL.md` whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: a GitLab adopter forks + releases through `glab`, a GitHub adopter through `gh`, and `/git` reads this marker to target the right host. Machine-specific, so it is generated per install (re-run on each machine), never shipped as a template. Absent tools get no skill.
 
-7h. **Installs themes (source-fetched)** — fetches each Claude Code theme listed in `templates/themes/sources.json` from its canonical public repo into `~/.claude/themes/` (the blueprint never vendors a copy, so it can't drift). For `tokyo-night`: `mkdir -p ~/.claude/themes && curl -fsSL https://raw.githubusercontent.com/mreza0100/claude-code-tokyo-night/main/tokyo-night.json -o ~/.claude/themes/tokyo-night.json`. Activate with `/theme` → "Tokyo Night" (requires Claude Code v2.1.118+). Themes install to the user's home, so they are shared across all the user's projects. To match the terminal's own base background to the theme (VS Code `terminal.background`, or the profile background in iTerm2/Apple Terminal/Ghostty/Kitty/WezTerm), follow the theme repo README: <https://github.com/mreza0100/claude-code-tokyo-night#match-your-terminal-background-optional>.
+7h. **Installs themes (source-fetched)** — fetches each Claude Code theme listed in `templates/themes/sources.json` from its canonical public repo into `~/.claude/themes/` (the blueprint never vendors a copy, so it can't drift). For `tokyo-night`: `mkdir -p ~/.claude/themes && curl -fsSL https://raw.githubusercontent.com/rezzminator/claude-code-tokyo-night/main/tokyo-night.json -o ~/.claude/themes/tokyo-night.json`. Activate with `/theme` → "Tokyo Night" (requires Claude Code v2.1.118+). Themes install to the user's home, so they are shared across all the user's projects. To match the terminal's own base background to the theme (VS Code `terminal.background`, or the profile background in iTerm2/Apple Terminal/Ghostty/Kitty/WezTerm), follow the theme repo README: <https://github.com/rezzminator/claude-code-tokyo-night#match-your-terminal-background-optional>.
 
 8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `docs/dev/waves/`, `.worktrees/` (gitignored).
 
@@ -449,7 +449,7 @@ After install, Claude verifies the project routes through the installed develope
 /dev status
 ```
 
-Then run one tiny `/jc` task and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pfm` to fix it at the source.
+Then exercise one small task through the pipeline and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pfm` to fix it at the source.
 
 Before the pipeline smoke, rerun `{BLUEPRINT_CLONE_PATH}/engines/wave-walker/engine`'s `npm run verify` and confirm its Claude and Codex manifests carry the same `workflowHash`. This proves the permanent paths and pinned library survived materialization.
 
@@ -542,7 +542,7 @@ Same for adding a new Tier A archetype if you build one — `/pfm` copies the te
 - Read `BLUEPRINT.md` § "The five load-bearing walls" — these don't change, ever.
 - Verify the statusline shows in your terminal (you should see model, fleet counts, context %, and git branch). If not, check `~/.claude/settings.json` runs `~/.local/bin/pfm statusline` and that the binary is executable.
 - Verify notifications work — start a task that takes 30+ seconds and check you get the macOS notification when the turn completes.
-- Run `/wave:builder` for new features. Run `/jc` for hotfixes. Run `/pfm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
+- Run `/wave:builder` for new features. Run `/pfm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
 
 **When something feels wrong** after a few real pipelines:
 
@@ -559,11 +559,13 @@ The pipeline is supposed to evolve. Static configurations rot — evolving ones 
 
 New Professor versions ship as semver git tags. Each tier stays current from its own source of truth:
 
-| Tier                                                        | Truth                              | Mechanism                                                                                                                                  |
+| Tier | Truth | Mechanism |
 | ----------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Machine-global commands, agents, and skills                 | Blueprint originals                | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
-| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts)    | The local file, full stop          | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update.        |
-| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, including `pfm codex build` and `pfm codex check`, after changing its local sources.          |
+| Machine-global commands, agents, and skills | Blueprint originals | Symlink-live. `pfm update` advances the recorded tagged clone, rebuilds the binary, runs `pfm install --yes`, and refreshes registrations. |
+| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local file, full stop | Scaffolded once by `pfm init`. Upstream changes are reports to review and hand-apply; pfm never rewrites these files during update. |
+| Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit by hand. Run the owning compiler, including `pfm codex build` and `pfm codex check`, after changing its local sources. |
+
+Before either tier moves, read every release note between the installed and the target version and merge their `#### → For:` actions — the rule lives in `INSTALL.md` § Updating.
 
 ### Review and adopt upstream project changes
 

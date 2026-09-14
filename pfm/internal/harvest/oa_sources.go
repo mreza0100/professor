@@ -1,0 +1,360 @@
+package harvest
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		IsOA   bool   `json:"is_oa"`
+		Status string `json:"oa_status"`
+		Best   struct {
+			PDF     string `json:"url_for_pdf"`
+			URL     string `json:"url"`
+			Version string `json:"version"`
+		} `json:"best_oa_location"`
+		Locations []struct {
+			PDF     string `json:"url_for_pdf"`
+			Version string `json:"version"`
+		} `json:"oa_locations"`
+	}
+	// Unpaywall now REQUIRES a real operator email per call (placeholder/example
+	// addresses are rejected with HTTP 422 — verified live 2026-08-22). Keyless
+	// runs SKIP it cleanly instead of burning a doomed request on every DOI;
+	// OpenAlex/S2/EuropePMC cover most of the same OA locations.
+	if r.contact() == "" {
+		return nil, nil
+	}
+	if err := getJSON(ctx, client, r.withContact("https://api.unpaywall.org/v2/"+url.PathEscape(doi), "email"), &data); err != nil || !data.IsOA {
+		return nil, err
+	}
+	link := data.Best.PDF
+	kind := "pdf"
+	if link == "" {
+		link = data.Best.URL
+		kind = "html"
+	}
+	if link == "" {
+		return nil, nil
+	}
+	out := []Candidate{{URL: link, Source: "unpaywall", Priority: candidatePriority("unpaywall", data.Status, data.Best.Version, kind), Kind: kind, Free: data.Status}}
+	for _, location := range data.Locations {
+		if location.PDF != "" {
+			out = append(out, Candidate{URL: location.PDF, Source: "unpaywall", Priority: candidatePriority("unpaywall", data.Status, location.Version, "pdf") + 5, Kind: "pdf", Free: data.Status})
+		}
+	}
+	return out, nil
+}
+func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		OA struct {
+			URL    string `json:"oa_url"`
+			Status string `json:"oa_status"`
+		} `json:"open_access"`
+		Locations []struct {
+			IsOA    bool   `json:"is_oa"`
+			PDF     string `json:"pdf_url"`
+			Version string `json:"version"`
+		} `json:"locations"`
+	}
+	if err := getJSON(ctx, client, r.withContact("https://api.openalex.org/works/https://doi.org/"+url.PathEscape(doi), "mailto"), &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	if data.OA.URL != "" {
+		out = append(out, Candidate{URL: data.OA.URL, Source: "openalex", Priority: candidatePriority("openalex", data.OA.Status, "", "pdf"), Kind: "pdf", Free: data.OA.Status})
+	}
+	for _, l := range data.Locations {
+		if l.IsOA && l.PDF != "" {
+			out = append(out, Candidate{URL: l.PDF, Source: "openalex", Priority: candidatePriority("openalex", data.OA.Status, l.Version, "pdf") + 4, Kind: "pdf", Free: data.OA.Status})
+		}
+	}
+	return out, nil
+}
+func (r *Resolver) crossref(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		Message struct {
+			Links []struct {
+				URL  string `json:"URL"`
+				Type string `json:"content-type"`
+			} `json:"link"`
+		} `json:"message"`
+	}
+	if err := getJSON(ctx, client, r.withContact("https://api.crossref.org/works/"+url.PathEscape(doi), "mailto"), &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	for _, l := range data.Message.Links {
+		if l.URL != "" && strings.Contains(l.Type, "pdf") {
+			out = append(out, Candidate{URL: l.URL, Source: "crossref", Priority: 30, Kind: "pdf"})
+		}
+	}
+	return out, nil
+}
+
+func (r *Resolver) semanticScholar(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		PDF *struct {
+			URL    string `json:"url"`
+			Status string `json:"status"`
+		} `json:"openAccessPdf"`
+		External map[string]string `json:"externalIds"`
+	}
+	headers := map[string]string{}
+	if key := strings.TrimSpace(r.SemanticScholarAPIKey); key != "" {
+		headers["x-api-key"] = key
+	}
+	if err := getJSONWithHeaders(ctx, client, "https://api.semanticscholar.org/graph/v1/paper/DOI:"+url.PathEscape(doi)+"?fields=openAccessPdf,externalIds", headers, &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	if data.PDF != nil && data.PDF.URL != "" {
+		out = append(out, Candidate{URL: data.PDF.URL, Source: "semanticscholar", Priority: candidatePriority("semanticscholar", data.PDF.Status, "", "pdf"), Kind: "pdf", Free: data.PDF.Status})
+	}
+	if arxiv := data.External["ArXiv"]; arxiv != "" {
+		out = append(out, Candidate{URL: "https://arxiv.org/pdf/" + arxiv, Source: "arxiv", Priority: 0, Kind: "pdf"})
+	}
+	if pmc := data.External["PubMedCentral"]; pmc != "" {
+		if !strings.HasPrefix(strings.ToUpper(pmc), "PMC") {
+			pmc = "PMC" + pmc
+		}
+		out = append(out, Candidate{URL: "https://europepmc.org/articles/" + pmc + "?pdf=render", Source: "europepmc", Priority: 16, Kind: "pdf"})
+	}
+	return out, nil
+}
+func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		Download string   `json:"downloadUrl"`
+		Sources  []string `json:"sourceFulltextUrls"`
+	}
+	u := "https://api.core.ac.uk/v3/works/" + url.PathEscape(doi)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	if key := strings.TrimSpace(r.CoreAPIKey); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	if data.Download != "" {
+		out = append(out, Candidate{URL: data.Download, Source: "core", Priority: 40, Kind: "pdf"})
+	}
+	for _, s := range data.Sources {
+		if s != "" {
+			out = append(out, Candidate{URL: s, Source: "core", Priority: 41, Kind: "pdf"})
+		}
+	}
+	return out, nil
+}
+func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		Results []struct {
+			Bib struct {
+				Links []struct {
+					URL  string `json:"url"`
+					Type string `json:"type"`
+				} `json:"link"`
+			} `json:"bibjson"`
+		} `json:"results"`
+	}
+	if err := getJSON(ctx, client, "https://doaj.org/api/search/articles/doi:"+url.PathEscape(doi), &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	for _, row := range data.Results[:minInt(len(data.Results), 1)] {
+		for _, link := range row.Bib.Links {
+			if link.URL != "" && link.Type == "fulltext" {
+				out = append(out, Candidate{URL: link.URL, Source: "doaj", Priority: candidatePriority("doaj", "", "", "html"), Kind: "html"})
+			}
+		}
+	}
+	return out, nil
+}
+func (r *Resolver) europePMCDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	pmcid, err := idToPMCID(ctx, client, doi, r)
+	if err != nil || pmcid == "" {
+		return nil, err
+	}
+	return []Candidate{{URL: "https://europepmc.org/articles/" + pmcid + "?pdf=render", Source: "europepmc", Priority: candidatePriority("europepmc", "green", "", "pdf"), Kind: "pdf", Free: "green"}}, nil
+}
+
+// ── wave additions: OpenAIRE / Zenodo / eLife / PLOS / NBER / HathiTrust ──────
+
+var (
+	plosJournalCodeRe  = regexp.MustCompile(`(?i)^10\.1371/journal\.([a-z]+)\.`)
+	nberWorkingPaperRe = regexp.MustCompile(`^w\d+$`)
+)
+
+// openAIRE resolves a DOI to every repository instance's full-text URL via the
+// EU aggregator. Endpoint verified live 2026-08-22; keyless. The JSON shape of
+// instances varies by record version, so webresource URLs are collected with an
+// ITERATIVE walk (a recursive walk blew the stack on deeply nested input).
+func (r *Resolver) openAIRE(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data interface{}
+	if err := getJSON(ctx, client, "https://api.openaire.eu/search/publications?doi="+url.QueryEscape(doi)+"&format=json", &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	seen := map[string]bool{}
+	stack := []interface{}{data}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch v := cur.(type) {
+		case map[string]interface{}:
+			if wr, ok := v["webresource"]; ok {
+				out = appendOpenAireResources(out, seen, wr)
+			}
+			for _, child := range v {
+				stack = append(stack, child)
+			}
+		case []interface{}:
+			stack = append(stack, v...)
+		}
+	}
+	// Stable: the walk order over a JSON map is already arbitrary, so a
+	// non-stable sort would let equal-priority instances swap between runs.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Priority < out[j].Priority })
+	return out, nil
+}
+
+func appendOpenAireResources(out []Candidate, seen map[string]bool, wr interface{}) []Candidate {
+	items, ok := wr.([]interface{})
+	if !ok {
+		items = []interface{}{wr}
+	}
+	for _, item := range items {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		raw, ok := m["url"]
+		if !ok {
+			continue
+		}
+		link := ""
+		switch u := raw.(type) {
+		case string:
+			link = u
+		case map[string]interface{}:
+			if s, ok := u["$"].(string); ok {
+				link = s
+			}
+		}
+		if link == "" || !strings.HasPrefix(link, "http") || seen[link] {
+			continue
+		}
+		seen[link] = true
+		kind := "html"
+		if strings.HasSuffix(strings.ToLower(link), ".pdf") {
+			kind = "pdf"
+		}
+		out = append(out, Candidate{URL: link, Source: "openaire", Priority: candidatePriority("openaire", "", "", kind), Kind: kind, Free: "green"})
+	}
+	return out
+}
+
+// zenodo resolves a DOI to the matching record's document files (pdf/epub only
+// — an exact-DOI match never turns a .zip dataset into article text).
+func (r *Resolver) zenodo(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	var data struct {
+		Hits struct {
+			Hits []struct {
+				DOI   string `json:"doi"`
+				Files []struct {
+					Key   string `json:"key"`
+					Links struct {
+						Self string `json:"self"`
+					} `json:"links"`
+				} `json:"files"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := getJSON(ctx, client, "https://zenodo.org/api/records?q=doi:"+url.QueryEscape(doi)+"&size=3&sort=mostrecent", &data); err != nil {
+		return nil, err
+	}
+	out := []Candidate{}
+	for _, hit := range data.Hits.Hits {
+		recDOI := DOIFrom(hit.DOI)
+		if recDOI == "" || !strings.EqualFold(recDOI, doi) {
+			continue // only THE record for THIS doi — never a neighboring record's files
+		}
+		for _, file := range hit.Files {
+			low := strings.ToLower(file.Key)
+			url2 := strings.ToLower(file.Links.Self)
+			if file.Links.Self == "" || (!strings.HasSuffix(low, ".pdf") && !strings.HasSuffix(low, ".epub") && !strings.HasSuffix(url2, ".pdf") && !strings.HasSuffix(url2, ".epub")) {
+				continue
+			}
+			kind := "pdf"
+			if strings.HasSuffix(low, ".epub") {
+				kind = "epub"
+			}
+			out = append(out, Candidate{URL: file.Links.Self, Source: "zenodo", Priority: candidatePriority("zenodo", "", "", kind), Kind: kind, Free: "green"})
+		}
+	}
+	return out, nil
+}
+
+// eLife resolves its DOIs (10.7554/…) through the keyless articles API whose
+// items carry a direct CDN PDF (verified live 2026-08-22).
+func (r *Resolver) eLife(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	if doiPrefixOf(doi) != "10.7554" {
+		return nil, nil
+	}
+	var data struct {
+		Items []struct {
+			PDF string `json:"pdf"`
+		} `json:"items"`
+	}
+	if err := getJSON(ctx, client, "https://api.elifesciences.org/articles?by-doi="+url.QueryEscape(doi), &data); err != nil {
+		return nil, err
+	}
+	if len(data.Items) == 0 || data.Items[0].PDF == "" {
+		return nil, nil
+	}
+	return []Candidate{{URL: data.Items[0].PDF, Source: "elife", Priority: candidatePriority("elife", "", "", "pdf"), Kind: "pdf", Free: "gold"}}, nil
+}
+
+// plosCandidates derives the printable-PDF URL offline from the DOI's journal
+// code (verified live 2026-08-22: journals.plos.org/{code}/article/file?id={doi}
+// &type=printable serves application/pdf to a plain UA). No API call needed.
+func plosCandidates(doi string) []Candidate {
+	matched := plosJournalCodeRe.FindStringSubmatch(doi)
+	if matched == nil {
+		return nil
+	}
+	target := "https://journals.plos.org/" + strings.ToLower(matched[1]) + "/article/file?id=" + url.QueryEscape(doi) + "&type=printable"
+	return []Candidate{{URL: target, Source: "plos", Priority: candidatePriority("plos", "", "", "pdf"), Kind: "pdf", Free: "gold"}}
+}
+
+// nberCandidates derives the free working-paper PDF offline from the
+// 10.3386/w{id} DOI (verified live 2026-08-22). No API call needed.
+func nberCandidates(doi string) []Candidate {
+	if doiPrefixOf(doi) != "10.3386" {
+		return nil
+	}
+	wp := strings.ToLower(doi[strings.Index(doi, "/")+1:])
+	if !nberWorkingPaperRe.MatchString(wp) {
+		return nil
+	}
+	target := "https://www.nber.org/system/files/working_papers/" + wp + "/" + wp + ".pdf"
+	return []Candidate{{URL: target, Source: "nber", Priority: candidatePriority("nber", "", "", "pdf"), Kind: "pdf", Free: "green"}}
+}

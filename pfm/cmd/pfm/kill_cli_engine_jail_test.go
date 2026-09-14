@@ -82,7 +82,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 	})
 
 	// F1 regression: runChatKill now resolves EVERY target — uuid or name —
-	// through resolveChat first, and a resolved row that is Live with a
+	// through pfmchat.Resolve first, and a resolved row that is Live with a
 	// non-empty Socket and Pane is closed through runResolvedChatKill(...,
 	// true, ...), not merely tombstoned. The old code short-circuited
 	// resolution entirely for a well-formed uuid target (both agentID and

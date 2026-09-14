@@ -56,6 +56,9 @@ type Result struct {
 	Error      string
 	Raw        string
 	VerboseErr string
+	// ExitCode is the version probe's process exit code, or -1 when the
+	// failure never reached one (lookup, timeout, cancellation).
+	ExitCode int
 }
 
 // ProbeOptions supplies the only variability required by tests and callers.
@@ -121,7 +124,7 @@ func Probe(ctx context.Context, entries []Entry, options ProbeOptions) []Result 
 }
 
 func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
-	result := Result{Entry: entry}
+	result := Result{Entry: entry, ExitCode: -1}
 	path, err := options.LookPath(entry.Command)
 	if err != nil {
 		result.State = StateMissing
@@ -158,6 +161,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 				return result
 			}
 			result.State = StateBroken
+			result.ExitCode = ExitCode(runErr)
 			result.Error = commandError(runErr, output)
 			return result
 		}
@@ -337,6 +341,17 @@ func terminalEnvironment() []string {
 	return append(environment, "TERM=xterm-256color")
 }
 
+// ExitCode reads a process exit code out of err, or -1 when err never
+// reached one (a lookup failure, timeout, or cancellation, none of which
+// ran the command to completion).
+func ExitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
 func commandError(err error, output []byte) string {
 	line := FirstLine(string(output))
 	if line == "" {
@@ -358,6 +373,14 @@ func writeVerbose(directory, name string, output []byte) error {
 	}
 	return nil
 }
+
+// AtLeast reports whether version satisfies minimum, comparing the numeric
+// fields of each in order. It is the ONE version comparison in pfm: a second
+// one disagrees the moment a pre-release suffix appears ("0.2.73-beta" splits
+// to a non-numeric third field, which a naive Atoi reads as 0), and two
+// answers to "is the installed tool new enough" means doctor and install
+// disagree about the same binary.
+func AtLeast(version, minimum string) bool { return atLeast(version, minimum) }
 
 func atLeast(version, minimum string) bool {
 	left := numericVersion(version)

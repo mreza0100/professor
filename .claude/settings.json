@@ -45,6 +45,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/format-md.sh"
+          },
+          {
+            "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/codex-sync.sh mark"
           }
         ]

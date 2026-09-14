@@ -1,7 +1,7 @@
 ---
 name: rnd
-description: RND lifecycle owner — opens, continues, verifies and lands research runs on {AI_SERVICE_NAME} LLM calls under .professor/RND/<call>/<N>-<slug>/, spawning the rndier agent to execute one run. Triggers: "RND <goal>", "rnd new <call> <slug> <goal>", "rnd continue <call>", "rnd verify <call>/<run>", "rnd land <call>/<run>", "research and develop", "iterate until", "find the best prompt for".
-argument-hint: [new <call> <slug> <goal> | continue <call> [<goal>] | verify <call>/<run> | land <call>/<run> | <goal>]
+description: 'Runs research on {AI_SERVICE_NAME} LLM calls — under .professor/RND/<call>/<N>-<slug>/, one rndier spawn per run; `new <call> <slug> <goal>` (or a bare `<goal>`), `continue <call> [<goal>]`, `verify <call>/<run>`, `land <call>/<run>` (user-ratified only). Triggers "RND <goal>", "research and develop", "iterate until", "find the best prompt for".'
+argument-hint: "[new <call> <slug> <goal> | continue <call> [<goal>] | verify <call>/<run> | land <call>/<run> | <goal>]"
 ---
 
 # RND — lifecycle
@@ -12,7 +12,7 @@ An RND takes a measurable goal against ONE {AI_SERVICE_NAME} call and reaches it
 
 ## Boundaries (inviolable)
 
-- Sandbox only: every artifact lives in the run dir. An RND never edits a project file; its deliverable is `PROPOSED_DIFF.md`, landed by `/jc` or `/wave:builder` only after the user ratifies the completed result. An authorization to research ("RND this", "fix it via RND") never authorizes landing.
+- Sandbox only: every artifact lives in the run dir. An RND never edits a project file; its deliverable is `PROPOSED_DIFF.md`, landed by hand or via `/wave:builder` only after the user ratifies the completed result. An authorization to research ("RND this", "fix it via RND") never authorizes landing.
 - Independent of {AI_SERVICE_NAME}: the run imports or points at nothing under `{AI_PROJECT}`; production enters twice, as a black box — the baseline (invoked whole) and the final in-process monkey-patch validation of `PROPOSED_DIFF.md`.
 - Sensitive-data discipline: reports, ledgers, logs, agent messages carry ids, counts, enums — never transcript text. Corpus transcripts are synthetic seeds; the rule holds anyway. {SECONDARY_LANG} evidence surfaced to the user is translated.
 - Money: hard caps for the model under test and for judges, frozen in `STATE.md` before the first paid call; provider keys come from the environment.
@@ -54,7 +54,7 @@ Performed on disk, never asserted:
 
 ### `land <call>/<run>`
 
-Only on the user's explicit ratification of that run's `PROPOSED_DIFF.md` in the current turn. Route the change to `/jc` (one call) or `/wave:builder` (cross-project) with the monkey-patch validation evidence and the report's numbers; after merge, `WINNER.md` status → shipped, with the SHA.
+Only on the user's explicit ratification of that run's `PROPOSED_DIFF.md` in the current turn. Land the change by hand or route it to `/wave:builder` (cross-project) with the monkey-patch validation evidence and the report's numbers; after merge, `WINNER.md` status → shipped, with the SHA.
 
 ## Judging law (binds every run)
 

@@ -35,7 +35,7 @@ This project runs two AI runtimes as a team. Full protocol: `docs/commands/pfm/r
 
 Voice and delivery law live in Professor's harness prompts: `templates/prompts/professor.md` for the Claude replacement and `templates/prompts/codex-appendix.md` for configured Codex accounts. Claude's `production` mode uses its native prompt.
 
-## Path vars:
+## Path vars
 
 - $CDOCS: docs/commands
 - $REFS = references

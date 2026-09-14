@@ -11,12 +11,35 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
 	vscodeOwnershipName    = "vscode-ownership.json"
 	vscodeOwnershipVersion = 1
-	vscodeProfileName      = "PFM"
+	// vscodeProfileName is the settings profile pfm writes AND the default
+	// terminal it selects. The default must stay a SETTINGS profile: a window
+	// reload rebuilds every restored terminal through createTerminal, and VS
+	// Code's getContributedDefaultProfile hands a restored terminal (no
+	// executable, no extHostTerminalId) to an EXTENSION-contributed default —
+	// the extension makes a brand-new terminal, the live one is never
+	// reattached, and the pty host shuts it down after its grace time.
+	vscodeProfileName = "PFM"
+	// vscodeExtensionProfileTitle is the terminal profile the Professor
+	// extension contributes (its title in assets/vscode/professor/package.json):
+	// offered in the + dropdown, never selected as the default. An owned
+	// default holding it — written by the release that briefly selected it —
+	// is pfm's own earlier value and moves back to vscodeProfileName.
+	vscodeExtensionProfileTitle = "Professor"
+	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
+	// product's extensions directory, and the extension id VS Code records
+	// for it.
+	vscodeExtensionLinkName = "professor"
+	// vscodeExtensionSource is the managed-asset subpath the generic asset
+	// walk (assets.go assetFiles) stages the Professor extension under,
+	// relative to managedRoot.
+	vscodeExtensionSource = "vscode/professor"
 )
 
 var errMalformedVSCodeSettings = errors.New("malformed VS Code settings")
@@ -24,6 +47,11 @@ var errMalformedVSCodeSettings = errors.New("malformed VS Code settings")
 type vscodeOwnershipDocument struct {
 	Version int                     `json:"version"`
 	Files   []vscodeOwnershipRecord `json:"files"`
+	// Extensions records the extension link paths pfm made — recorded
+	// independently of Files because a link survives on a product that never
+	// had a settings.json touched (a plain ~/.vscode-server with no Machine
+	// settings yet, for instance).
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type vscodeOwnershipRecord struct {
@@ -52,14 +80,14 @@ type vscodeOwnershipRecord struct {
 
 func (installer *engine) wireVSCode() error {
 	ownershipPath := filepath.Join(installer.managedRoot, vscodeOwnershipName)
-	ownership, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
+	ownership, extensions, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read VS Code ownership %s: %w", ownershipPath, err)
 	}
 	if installer.options.Mode == ModeUninstall {
-		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership)
+		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership, extensions)
 	}
-	if !installer.options.VSCode && len(ownership) == 0 {
+	if !installer.options.VSCode && len(ownership) == 0 && len(extensions) == 0 {
 		return nil
 	}
 
@@ -105,21 +133,97 @@ func (installer *engine) wireVSCode() error {
 			continue
 		}
 		if err := installer.change("merge VS Code PFM terminal profile "+path, func() error {
-			mode := fs.FileMode(0o600)
-			if info, statErr := os.Stat(path); statErr == nil {
-				mode = info.Mode().Perm()
-				if err := copyBackup(path, availableBackup(path, installer.stamp)); err != nil {
-					return err
-				}
-			} else if !errors.Is(statErr, fs.ErrNotExist) {
-				return statErr
-			}
-			return atomicWrite(path, updated, mode)
+			return installer.writeVSCodeSettings(path, updated)
 		}); err != nil {
 			return err
 		}
 	}
-	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership)
+	extensions, err = installer.linkVSCodeExtension(extensions)
+	if err != nil {
+		return err
+	}
+	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions)
+}
+
+// vscodeExtensionLinks enumerates the extension-link targets pfm can wire on
+// this host: <product root>/extensions/professor for every VS Code product
+// root that actually EXISTS under the home directory, plus the portable
+// install's data directory — VSCODE_PORTABLE names that directory itself
+// (VS Code's bootstrap-node getPortableDataPath), so its extensions/ sits
+// directly beneath it. A product a user never installed gets no link — pfm
+// never creates the product's own directory tree, only extends one that is
+// already there.
+func (installer *engine) vscodeExtensionLinks() []string {
+	roots := installer.options.vscodeExtensionRoots
+	if roots == nil {
+		home := installer.options.Home
+		roots = []string{
+			filepath.Join(home, ".vscode"),
+			filepath.Join(home, ".vscode-insiders"),
+			filepath.Join(home, ".vscode-oss"),
+			filepath.Join(home, ".vscode-server"),
+			filepath.Join(home, ".vscode-server-insiders"),
+		}
+		if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
+			roots = append(roots, portable)
+		}
+	}
+	var found []string
+	for _, root := range roots {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			found = append(found, filepath.Join(root, "extensions", vscodeExtensionLinkName))
+		}
+	}
+	return cleanUniquePaths(found)
+}
+
+// linkVSCodeExtension reconciles the set of extension links pfm owns:
+// previously recorded targets plus every currently discoverable product
+// root. It runs only on a VS Code-managed install (the flag, or a non-empty
+// ledger), and discovery is unconditional there: the extension is part of the
+// managed VS Code surface, so a ledger written before it shipped gets it on
+// the next ordinary install. A recorded target whose product was uninstalled
+// (its root directory is gone) is dropped by name rather than recreating a
+// directory tree nothing else uses; every other target gets its extensions/
+// directory created if needed and the link itself made idempotent through
+// ensureLink. It returns the kept targets, sorted, for the ownership ledger.
+func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error) {
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	targets := make(map[string]bool, len(recorded))
+	for _, target := range recorded {
+		targets[target] = true
+	}
+	for _, target := range installer.vscodeExtensionLinks() {
+		targets[target] = true
+	}
+	ordered := make([]string, 0, len(targets))
+	for target := range targets {
+		ordered = append(ordered, target)
+	}
+	sort.Strings(ordered)
+
+	var kept []string
+	for _, target := range ordered {
+		extensionsDir := filepath.Dir(target)
+		root := filepath.Dir(extensionsDir)
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			installer.skip(target + " VS Code product " + root + " no longer exists; dropped extension link")
+			continue
+		}
+		if info, err := os.Stat(extensionsDir); err != nil || !info.IsDir() {
+			if err := installer.change("create "+extensionsDir, func() error {
+				return os.MkdirAll(extensionsDir, 0o755)
+			}); err != nil {
+				return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+			}
+		}
+		if _, err := installer.ensureLink(source, target); err != nil {
+			return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+		}
+		kept = append(kept, target)
+	}
+	sort.Strings(kept)
+	return kept, nil
 }
 
 func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnershipRecord, alreadyOwned bool) ([]byte, vscodeOwnershipRecord, bool, error) {
@@ -174,8 +278,10 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	}
 
 	existingDefault, hasDefault := document[defaultKey]
-	if alreadyOwned && record.DefaultOwned && (!hasDefault || existingDefault != vscodeProfileName) {
-		// Selecting another default terminal is an intentional operator override.
+	if alreadyOwned && record.DefaultOwned && (!hasDefault || (existingDefault != vscodeProfileName && existingDefault != vscodeExtensionProfileTitle)) {
+		// An owned default holding the extension's title is pfm's own earlier
+		// value, moved back — not an operator override. Only a THIRD value
+		// (something the operator picked after installation) relinquishes.
 		record.DefaultOwned = false
 		record.HadDefault = false
 		record.PreviousDefault = nil
@@ -279,7 +385,7 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	return updated, record, changed, nil
 }
 
-func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord) error {
+func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
 	ordered := make([]string, 0, len(ownership))
 	for settings := range ownership {
 		ordered = append(ordered, settings)
@@ -303,7 +409,7 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 		profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 		updated := append([]byte(nil), raw...)
 		changed := false
-		if record.DefaultOwned && document[defaultKey] == vscodeProfileName {
+		if record.DefaultOwned && (document[defaultKey] == vscodeProfileName || document[defaultKey] == vscodeExtensionProfileTitle) {
 			if record.HadDefault {
 				updated, err = setJSONCProperty(updated, 0, defaultKey, record.PreviousDefault)
 			} else {
@@ -376,14 +482,7 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 				if removeEmptyFile {
 					return os.Remove(settings)
 				}
-				info, err := os.Stat(settings)
-				if err != nil {
-					return err
-				}
-				if err := copyBackup(settings, availableBackup(settings, installer.stamp)); err != nil {
-					return err
-				}
-				return atomicWrite(settings, updated, info.Mode().Perm())
+				return installer.writeVSCodeSettings(settings, updated)
 			}); err != nil {
 				return err
 			}
@@ -397,11 +496,48 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 			delete(ownership, settings)
 		}
 	}
-	return installer.writeVSCodeOwnership(path, existing, ownership)
+
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	orderedExtensions := append([]string(nil), extensions...)
+	sort.Strings(orderedExtensions)
+	for _, target := range orderedExtensions {
+		if current, linked := resolvedLink(target); linked && current == filepath.Clean(source) {
+			if err := installer.unlinkOne(target); err != nil {
+				return err
+			}
+			continue
+		}
+		installer.skip(target + " no longer points at pfm's Professor extension; left in place")
+	}
+
+	return installer.writeVSCodeOwnership(path, existing, ownership, nil)
 }
 
-func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord) error {
-	if len(ownership) == 0 {
+// writeVSCodeSettings backs up and atomically rewrites a VS Code settings file
+// THROUGH any symlink, as writeMCPFile does for a linked MCP registry. Dotfile
+// managers link settings.json into a repository; renaming over the link would
+// sever it, leaving VS Code on a detached copy the managed file never sees. A
+// file that does not exist yet is created at path with owner-only access.
+func (installer *engine) writeVSCodeSettings(path string, content []byte) error {
+	physical, mode := path, fs.FileMode(0o600)
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		mode = info.Mode().Perm()
+		if physical, err = filepath.EvalSymlinks(path); err != nil {
+			return fmt.Errorf("resolve VS Code settings %s: %w", path, err)
+		}
+		if err := copyBackup(physical, availableBackup(physical, installer.stamp)); err != nil {
+			return err
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	return atomicfile.Write(physical, content, mode)
+}
+
+func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
+	if len(ownership) == 0 && len(extensions) == 0 {
 		if len(existing) == 0 {
 			return nil
 		}
@@ -412,6 +548,10 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 		document.Files = append(document.Files, record)
 	}
 	sort.Slice(document.Files, func(i, j int) bool { return document.Files[i].Path < document.Files[j].Path })
+	if len(extensions) != 0 {
+		document.Extensions = append([]string(nil), extensions...)
+		sort.Strings(document.Extensions)
+	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err
@@ -421,35 +561,47 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 		installer.ok(path)
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicWrite(path, encoded, 0o600) })
+	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
 }
 
-func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []byte, error) {
+func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []string, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]vscodeOwnershipRecord{}, nil, nil
+		return map[string]vscodeOwnershipRecord{}, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var document vscodeOwnershipDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if document.Version != vscodeOwnershipVersion {
-		return nil, nil, fmt.Errorf("unsupported version %d", document.Version)
+		return nil, nil, nil, fmt.Errorf("unsupported version %d", document.Version)
 	}
 	records := make(map[string]vscodeOwnershipRecord, len(document.Files))
 	for _, record := range document.Files {
 		if !filepath.IsAbs(record.Path) || (record.Platform != "linux" && record.Platform != "osx") {
-			return nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
+			return nil, nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
 		}
 		if _, duplicate := records[record.Path]; duplicate {
-			return nil, nil, fmt.Errorf("duplicate record %s", record.Path)
+			return nil, nil, nil, fmt.Errorf("duplicate record %s", record.Path)
 		}
 		records[record.Path] = record
 	}
-	return records, raw, nil
+	extensions := make([]string, 0, len(document.Extensions))
+	seenExtensions := make(map[string]bool, len(document.Extensions))
+	for _, extension := range document.Extensions {
+		if !filepath.IsAbs(extension) {
+			return nil, nil, nil, fmt.Errorf("invalid extension link path %q", extension)
+		}
+		if seenExtensions[extension] {
+			return nil, nil, nil, fmt.Errorf("duplicate extension link %s", extension)
+		}
+		seenExtensions[extension] = true
+		extensions = append(extensions, extension)
+	}
+	return records, extensions, raw, nil
 }
 
 func (installer *engine) vscodePlatform() (string, error) {
@@ -497,7 +649,9 @@ func (installer *engine) vscodeSettingsPaths() []string {
 		}
 	}
 	if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
-		candidates = append(candidates, filepath.Join(portable, "data", "user-data", "User", "settings.json"))
+		// VSCODE_PORTABLE is the portable data directory itself, not the
+		// install folder holding it (see vscodeExtensionLinks).
+		candidates = append(candidates, filepath.Join(portable, "user-data", "User", "settings.json"))
 	}
 	var found []string
 	for _, candidate := range candidates {
@@ -576,387 +730,4 @@ func vscodeScalarValue(key string) any {
 	default:
 		return nil
 	}
-}
-
-// The editor accepts JSONC, so installer edits must not round-trip the whole
-// document through encoding/json and erase the operator's comments. These
-// helpers parse enough structure to replace one object property surgically.
-type jsoncProperty struct {
-	name                 string
-	keyStart, valueStart int
-	valueEnd, commaStart int
-	commaEnd             int
-}
-
-type jsoncObject struct {
-	open, close int
-	properties  []jsoncProperty
-	byName      map[string]jsoncProperty
-}
-
-func decodeJSONCObject(raw []byte) (map[string]any, error) {
-	sanitized, err := sanitizeJSONC(raw)
-	if err != nil {
-		return nil, err
-	}
-	var document map[string]any
-	if err := json.Unmarshal(sanitized, &document); err != nil {
-		return nil, err
-	}
-	if _, err := parseJSONCObject(raw, 0); err != nil {
-		return nil, err
-	}
-	return document, nil
-}
-
-func sanitizeJSONC(raw []byte) ([]byte, error) {
-	clean := append([]byte(nil), raw...)
-	inString, escaped := false, false
-	for index := 0; index < len(clean); index++ {
-		character := clean[index]
-		if inString {
-			if escaped {
-				escaped = false
-			} else if character == '\\' {
-				escaped = true
-			} else if character == '"' {
-				inString = false
-			}
-			continue
-		}
-		if character == '"' {
-			inString = true
-			continue
-		}
-		if character != '/' || index+1 >= len(clean) {
-			continue
-		}
-		switch clean[index+1] {
-		case '/':
-			clean[index], clean[index+1] = ' ', ' '
-			index += 2
-			for index < len(clean) && clean[index] != '\n' {
-				clean[index] = ' '
-				index++
-			}
-			index--
-		case '*':
-			clean[index], clean[index+1] = ' ', ' '
-			index += 2
-			closed := false
-			for index < len(clean) {
-				if index+1 < len(clean) && clean[index] == '*' && clean[index+1] == '/' {
-					clean[index], clean[index+1] = ' ', ' '
-					index++
-					closed = true
-					break
-				}
-				if clean[index] != '\n' && clean[index] != '\r' {
-					clean[index] = ' '
-				}
-				index++
-			}
-			if !closed {
-				return nil, errors.New("unterminated block comment")
-			}
-		}
-	}
-	if inString {
-		return nil, errors.New("unterminated string")
-	}
-	// A comma is trailing — VS Code accepts it, encoding/json does not — when
-	// nothing but whitespace and/or MORE commas separates it from the object
-	// or array's closing bracket. A hand edit that leaves two properties
-	// each ending in their own comma back to back (a block moved, or two
-	// edits landing on the same spot) is exactly this, one comma deeper than
-	// the single-comma case a lookahead of whitespace alone would catch.
-	for index, character := range clean {
-		if character != ',' {
-			continue
-		}
-		next := index + 1
-		for next < len(clean) && (isJSONWhitespace(clean[next]) || clean[next] == ',') {
-			next++
-		}
-		if next < len(clean) && (clean[next] == '}' || clean[next] == ']') {
-			clean[index] = ' '
-		}
-	}
-	return clean, nil
-}
-
-func parseJSONCObject(raw []byte, start int) (jsoncObject, error) {
-	open, err := skipJSONCTrivia(raw, start)
-	if err != nil {
-		return jsoncObject{}, err
-	}
-	if open >= len(raw) || raw[open] != '{' {
-		return jsoncObject{}, fmt.Errorf("expected object at byte %d", open)
-	}
-	result := jsoncObject{open: open, byName: map[string]jsoncProperty{}}
-	index := open + 1
-	for {
-		index, err = skipJSONCTrivia(raw, index)
-		if err != nil {
-			return jsoncObject{}, err
-		}
-		if index >= len(raw) {
-			return jsoncObject{}, errors.New("unterminated object")
-		}
-		if raw[index] == '}' {
-			result.close = index
-			return result, nil
-		}
-		if raw[index] == ',' { // trailing commas and the separator after a prior member
-			index++
-			continue
-		}
-		if raw[index] != '"' {
-			return jsoncObject{}, fmt.Errorf("expected object key at byte %d", index)
-		}
-		keyStart := index
-		keyEnd, err := scanJSONString(raw, index)
-		if err != nil {
-			return jsoncObject{}, err
-		}
-		var name string
-		if err := json.Unmarshal(raw[index:keyEnd], &name); err != nil {
-			return jsoncObject{}, err
-		}
-		if _, duplicate := result.byName[name]; duplicate {
-			return jsoncObject{}, fmt.Errorf("duplicate object key %q", name)
-		}
-		index, err = skipJSONCTrivia(raw, keyEnd)
-		if err != nil || index >= len(raw) || raw[index] != ':' {
-			return jsoncObject{}, fmt.Errorf("expected colon after %q", name)
-		}
-		valueStart, err := skipJSONCTrivia(raw, index+1)
-		if err != nil {
-			return jsoncObject{}, err
-		}
-		valueEnd, err := scanJSONCValue(raw, valueStart)
-		if err != nil {
-			return jsoncObject{}, fmt.Errorf("scan %q: %w", name, err)
-		}
-		after, err := skipJSONCTrivia(raw, valueEnd)
-		if err != nil {
-			return jsoncObject{}, err
-		}
-		property := jsoncProperty{name: name, keyStart: keyStart, valueStart: valueStart, valueEnd: valueEnd, commaStart: -1, commaEnd: -1}
-		if after < len(raw) && raw[after] == ',' {
-			property.commaStart, property.commaEnd = after, after+1
-			index = after + 1
-		} else if after < len(raw) && raw[after] == '}' {
-			index = after
-		} else {
-			return jsoncObject{}, fmt.Errorf("expected comma or object end after %q", name)
-		}
-		result.properties = append(result.properties, property)
-		result.byName[name] = property
-	}
-}
-
-func setJSONCProperty(raw []byte, objectStart int, name string, value []byte) ([]byte, error) {
-	if !json.Valid(value) {
-		return nil, fmt.Errorf("replacement for %q is not JSON", name)
-	}
-	object, err := parseJSONCObject(raw, objectStart)
-	if err != nil {
-		return nil, err
-	}
-	if property, found := object.byName[name]; found {
-		return spliceBytes(raw, property.valueStart, property.valueEnd, value), nil
-	}
-	closingIndent := lineIndent(raw, object.close)
-	childIndent := closingIndent + "  "
-	formatted := indentJSON(value, childIndent)
-	prefix := ""
-	if len(object.properties) != 0 && object.properties[len(object.properties)-1].commaStart < 0 {
-		prefix = ","
-	}
-	// No trailing comma after the inserted property: it is the new last
-	// member, sitting directly against the closing bracket, so the result
-	// is valid strict JSON there, not merely JSONC. A LATER insertion into
-	// the same object still lands correctly — it is the "last property has
-	// no comma" case the prefix check above already exists to handle.
-	insertion := []byte(prefix + "\n" + childIndent + string(mustJSON(name)) + ": " + string(formatted) + "\n" + closingIndent)
-	return spliceBytes(raw, object.close, object.close, insertion), nil
-}
-
-func removeJSONCProperty(raw []byte, objectStart int, name string) ([]byte, error) {
-	object, err := parseJSONCObject(raw, objectStart)
-	if err != nil {
-		return nil, err
-	}
-	property, found := object.byName[name]
-	if !found {
-		return raw, nil
-	}
-	if property.commaStart >= 0 {
-		return spliceBytes(raw, property.keyStart, property.commaEnd, nil), nil
-	}
-	// A formatter may have removed the trailing comma PFM writes. Remove only
-	// the preceding separator byte; comments and whitespace around it survive.
-	for index := len(object.properties) - 1; index >= 0; index-- {
-		prior := object.properties[index]
-		if prior.keyStart >= property.keyStart {
-			continue
-		}
-		withoutProperty := spliceBytes(raw, property.keyStart, property.valueEnd, nil)
-		if prior.commaStart >= 0 {
-			return spliceBytes(withoutProperty, prior.commaStart, prior.commaEnd, nil), nil
-		}
-		break
-	}
-	return spliceBytes(raw, property.keyStart, property.valueEnd, nil), nil
-}
-
-func scanJSONCValue(raw []byte, start int) (int, error) {
-	if start >= len(raw) {
-		return 0, errors.New("missing value")
-	}
-	if raw[start] == '"' {
-		return scanJSONString(raw, start)
-	}
-	if raw[start] == '{' || raw[start] == '[' {
-		stack := []byte{raw[start]}
-		inString, escaped := false, false
-		for index := start + 1; index < len(raw); index++ {
-			character := raw[index]
-			if inString {
-				if escaped {
-					escaped = false
-				} else if character == '\\' {
-					escaped = true
-				} else if character == '"' {
-					inString = false
-				}
-				continue
-			}
-			if character == '"' {
-				inString = true
-				continue
-			}
-			if character == '/' && index+1 < len(raw) && (raw[index+1] == '/' || raw[index+1] == '*') {
-				next, err := skipOneJSONCComment(raw, index)
-				if err != nil {
-					return 0, err
-				}
-				index = next - 1
-				continue
-			}
-			switch character {
-			case '{', '[':
-				stack = append(stack, character)
-			case '}', ']':
-				open := stack[len(stack)-1]
-				if (open == '{' && character != '}') || (open == '[' && character != ']') {
-					return 0, fmt.Errorf("mismatched %c at byte %d", character, index)
-				}
-				stack = stack[:len(stack)-1]
-				if len(stack) == 0 {
-					return index + 1, nil
-				}
-			}
-		}
-		return 0, errors.New("unterminated composite value")
-	}
-	index := start
-	for index < len(raw) && raw[index] != ',' && raw[index] != '}' && raw[index] != ']' && !isJSONWhitespace(raw[index]) {
-		if raw[index] == '/' && index+1 < len(raw) && (raw[index+1] == '/' || raw[index+1] == '*') {
-			break
-		}
-		index++
-	}
-	if index == start {
-		return 0, errors.New("empty primitive value")
-	}
-	return index, nil
-}
-
-func scanJSONString(raw []byte, start int) (int, error) {
-	escaped := false
-	for index := start + 1; index < len(raw); index++ {
-		if escaped {
-			escaped = false
-			continue
-		}
-		if raw[index] == '\\' {
-			escaped = true
-			continue
-		}
-		if raw[index] == '"' {
-			return index + 1, nil
-		}
-	}
-	return 0, errors.New("unterminated string")
-}
-
-func skipJSONCTrivia(raw []byte, start int) (int, error) {
-	index := start
-	for index < len(raw) {
-		if isJSONWhitespace(raw[index]) {
-			index++
-			continue
-		}
-		if raw[index] == '/' && index+1 < len(raw) && (raw[index+1] == '/' || raw[index+1] == '*') {
-			next, err := skipOneJSONCComment(raw, index)
-			if err != nil {
-				return 0, err
-			}
-			index = next
-			continue
-		}
-		break
-	}
-	return index, nil
-}
-
-func skipOneJSONCComment(raw []byte, start int) (int, error) {
-	if raw[start+1] == '/' {
-		index := start + 2
-		for index < len(raw) && raw[index] != '\n' {
-			index++
-		}
-		return index, nil
-	}
-	for index := start + 2; index+1 < len(raw); index++ {
-		if raw[index] == '*' && raw[index+1] == '/' {
-			return index + 2, nil
-		}
-	}
-	return 0, errors.New("unterminated block comment")
-}
-
-func isJSONWhitespace(character byte) bool {
-	return character == ' ' || character == '\t' || character == '\r' || character == '\n'
-}
-
-func spliceBytes(raw []byte, start, end int, replacement []byte) []byte {
-	result := make([]byte, 0, len(raw)-(end-start)+len(replacement))
-	result = append(result, raw[:start]...)
-	result = append(result, replacement...)
-	result = append(result, raw[end:]...)
-	return result
-}
-
-func lineIndent(raw []byte, position int) string {
-	start := bytes.LastIndexByte(raw[:position], '\n') + 1
-	end := start
-	for end < position && (raw[end] == ' ' || raw[end] == '\t') {
-		end++
-	}
-	return string(raw[start:end])
-}
-
-func indentJSON(raw []byte, indent string) []byte {
-	return bytes.ReplaceAll(raw, []byte("\n"), []byte("\n"+indent))
-}
-
-func mustJSON(value string) []byte {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		panic(err)
-	}
-	return encoded
 }

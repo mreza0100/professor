@@ -1,6 +1,14 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"hostops/pfm/internal/compose"
+)
 
 // TestRenderSkipsListPanelBuildOnLimitsStatsAndCosmos pins the fix in
 // render(): before it, `body := model.renderListPanel(...)` ran on EVERY
@@ -44,4 +52,36 @@ func TestRenderSkipsListPanelBuildOnLimitsStatsAndCosmos(t *testing.T) {
 		}()
 		_ = model.render()
 	}()
+}
+
+// TestOpencodeRowShowsUnmeasuredSizeNotZeroBytes pins the size badge: an
+// OpenCode session has no file size of its own, so its Row.Size is always 0
+// — never a measurement. formatSize(0) would print "0B", which claims a
+// byte count nothing ever measured; the picker must show "—" instead, while
+// an ordinary Claude/Codex row with a real zero-byte size still shows "0B".
+func TestOpencodeRowShowsUnmeasuredSizeNotZeroBytes(t *testing.T) {
+	rows := []compose.Row{
+		{
+			Kind: compose.ResumeOpencode, ID: "oc-1", Name: "OC session",
+			Project: "alpha", CWD: "/work/alpha", PromptCount: 1,
+			ActivityNS: fixtureNowNS - int64(time.Minute),
+		},
+		{
+			Kind: compose.ResumeClaude, ID: "cc-1", Name: "CC session",
+			Project: "alpha", CWD: "/work/alpha", PromptCount: 1, Size: 0,
+			ActivityNS: fixtureNowNS - int64(time.Minute),
+		},
+	}
+	snapshot := fixtureSnapshot(160)
+	snapshot.Rows = rows
+	snapshot.MergeNewChat = false
+	model := NewModel(snapshot)
+	view := ansi.Strip(model.View().Content)
+
+	if !strings.Contains(view, "OC session") || !strings.Contains(view, "—") {
+		t.Fatalf("OpenCode row did not show the unmeasured-size dash:\n%s", view)
+	}
+	if !strings.Contains(view, "CC session") || !strings.Contains(view, "0B") {
+		t.Fatalf("a real zero-byte Claude row lost its honest 0B size:\n%s", view)
+	}
 }

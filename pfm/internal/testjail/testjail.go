@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/deps"
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 )
 
@@ -104,6 +105,43 @@ func ShortRoot(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(directory) })
 	return directory
+}
+
+// Fleet builds a scratch fleet under a ShortRoot and points every pfm path at
+// it — TMUX_TMPDIR, PFM_DB, PFM_SID_DIR, both engine roots, the tmux dir, the
+// process table — and returns the root; a caller layers install artifacts on
+// top. A chat server's tmux config is /dev/null: in real life it loads the
+// user's ~/.tmux.conf, and a fixture must not let the machine it runs on
+// steer the test.
+//
+// PFM_HOME and HOME are set together. HOME is the same concept under its
+// other name: pinning only PFM_HOME leaves anything reading the plain
+// variable — the test itself, a subprocess, a library — writing into the
+// operator's real account, which is how fixture transcripts reached a live
+// ~/.claude/projects. The two must never be allowed to disagree.
+func Fleet(t *testing.T) string {
+	t.Helper()
+	root := ShortRoot(t)
+	// The engine roots are named for their engines, spelled by the registry.
+	claudeRoot := pfmengine.MustLookup(pfmengine.Claude).LongName
+	codexRoot := pfmengine.MustLookup(pfmengine.Codex).LongName
+	for _, directory := range []string{"t", "sid", claudeRoot, codexRoot, "tmux", "home", "proc"} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
+	// The index DB, under the name it is migrating to (design § Glossary).
+	t.Setenv(paths.EnvDB, filepath.Join(root, "index.db"))
+	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
+	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, claudeRoot))
+	t.Setenv(paths.EnvCodexRoot, filepath.Join(root, codexRoot))
+	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
+	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
+	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	return root
 }
 
 // PTYCommand builds a command that runs argv on a REAL pty via script(1), for

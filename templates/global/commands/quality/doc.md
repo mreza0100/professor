@@ -1,6 +1,6 @@
 ---
 name: quality:doc
-description: Use BEFORE writing or restructuring any permanent reference doc under docs/ (architecture, api, map, features, child-project docs), or to certify an existing doc via the Approval gate (APPROVED/REJECTED). Defines how to shape reference docs for LLM Read/grep consumption — the cluster model, the ~500-line topic-file target (~80 KB hard cap), navigation indexes, the table-vs-sections record-format rule, grep-true naming, current-state-only content, and the no-byline rule. Mandatory load for /documenter; load it yourself before any large reference-doc edit.
+description: MANDATORY — load before writing or restructuring any reference doc under docs/ (root or child project), and to certify one via the Approval gate (APPROVED/REJECTED); owns doc SHAPE — cluster + _index.md, ≤500-line topic files, table-vs-sections, grep-true headings, current-state only. Prose → /quality:prompt; a `description:` → /quality:description; markdown mechanics → /quality:md-forlint.
 ---
 
 # Doc Format
@@ -13,7 +13,7 @@ Fan-out documenter workers read the extract card `docs/commands/documenter/refer
 
 ## The deciding principle
 
-Format choice barely affects whether the model _understands_ the content — model capability dominates. Decide on the mechanics the reader actually pays for: token cost, grep context, edit/diff locality, prettier stability. Optimize those; comprehension takes care of itself.
+Format choice barely affects whether the model _understands_ the content — model capability dominates. Decide on the mechanics the reader actually pays for: token cost, grep context, edit/diff locality, formatter stability. Optimize those; comprehension takes care of itself.
 
 ## The cluster model
 
@@ -31,7 +31,7 @@ The highest-leverage rule. Decide by field shape, not habit:
 - Short, uniform cells (port maps, access matrices, the `_index.md` pointer tables themselves) → markdown table: genuinely tabular, no padding waste, one grep hit shows the whole record on one line.
 - Any long free-text field (descriptions, rationale, prose) → heading-per-record sections: one `###` per record, a one-line bold metadata strip for the short fields (`**Projects:** api, web — **Status:** Active`), then the long field as a prose paragraph.
 
-Long prose belongs in a section, never a table cell. Prettier aligns every column to its widest cell with no config option to disable it, and a PostToolUse hook runs `prettier --write` over every Professor-owned `.md`, so a "compact unpadded table" re-bloats on the next save: one 600-char description pads every other row in that column to 600 chars, and editing one record reflows the entire column into a giant diff. Sections cost zero padding, keep a one-record edit local, and give each record its own greppable `###` anchor.
+Long prose belongs in a section, never a table cell. A 600-char cell forces its column that wide for every other row, so editing one record reflows the whole column into a giant diff and a grep hit drags the padding with it. Sections keep a one-record edit local and give each record its own greppable `###` anchor. (Column padding itself is stripped by the format policy — `/quality:md-forlint` — so a genuinely tabular table stays compact; the rule above is about edit locality and grep, not about padding.)
 
 ## Edit locality
 
@@ -57,21 +57,20 @@ When a split moves a doc that consumers reference by its old path, leave a one-l
 
 ## Finish
 
-Run `npx prettier --write --prose-wrap preserve <file>` on everything touched. The format hook covers Edit/Write on root-owned paths (`CLAUDE.md`, `.claude/`, `docs/`); child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
+Run `rumdl fmt <file>` from the repo root on everything touched (`/quality:md-forlint`). The format hook covers Edit/Write on root-owned paths (`CLAUDE.md`, `.claude/`, `docs/`); child-project docs (a sub-project's own `docs/`) and Bash-written files need the manual run.
 
 ## Approval — certify a document
 
 Every reference doc must pass this gate before it is considered done; run it over an existing doc, not just at write-time. A doc is **APPROVED** only when ALL hold; otherwise it is **REJECTED** with the failing checks named, and the fix is applied before re-checking.
 
-| #   | Check         | REJECT when                                                                                                                    |
-| --- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Size          | a topic file is >500 lines (split) or any file >80 KB                                                                          |
-| 2   | ToC           | a file >100 lines lacks a top Table of Contents                                                                                |
-| 3   | Record format | long prose sits in a table cell instead of a `###` section                                                                     |
-| 4   | Grep-true     | a `###` heading paraphrases a code symbol the record maps to, instead of being that symbol verbatim                            |
-| 5   | Current-state | a tombstone, `~~strikethrough~~`, "removed/added/deprecated {date or wave}" note, or per-pipeline changelog framing is present |
-| 6   | One hop       | a record sends the reader on a doc → doc → doc chase instead of inlining the essential fact                                    |
-| 7   | Index         | the cluster `_index.md` does not list exactly the files on disk                                                                |
-| 8   | Byline        | a `> Author:` / `> Last updated:` / `> Wave:` line is present                                                                  |
+- 1 Size: a topic file is >500 lines (split) or any file >80 KB.
+- 2 ToC: a file >100 lines lacks a top Table of Contents.
+- 3 Record format: long prose sits in a table cell instead of a `###` section.
+- 4 Grep-true: a `###` heading paraphrases a code symbol the record maps to, instead of being that symbol verbatim.
+- 5 Current-state: a tombstone, `~~strikethrough~~`, "removed/added/deprecated {date or wave}" note, or per-pipeline changelog framing is present.
+- 6 One hop: a record sends the reader on a doc → doc → doc chase instead of inlining the essential fact.
+- 7 Index: the cluster `_index.md` does not list exactly the files on disk.
+- 8 Byline: a `> Author:` / `> Last updated:` / `> Wave:` line is present.
+- 9 Mechanics: `/quality:md-forlint check <path>` reports a dead relative link (MD057), a dead or stale anchor (MD051 — a ToC entry included), or a byline term (MD061). Run it; a check that was not run is not a pass.
 
 Emit the verdict per doc as `APPROVED: {path}` or `REJECTED: {path} — checks {n,…}`. A cluster is approved only when its `_index.md` and every topic file are approved.

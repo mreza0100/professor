@@ -25,7 +25,7 @@ Route a merge into the topic file whose `_index.md` entry matches; if none fits,
 | **Doc Hub**         | `docs/agents/_index.md`                               | Entry point linking every cluster + child-project doc                        | When a cluster or child doc is added, removed, or renamed             |
 | **Doc Registry**    | § Document Registry below                             | Master inventory of all permanent docs                                       | When docs are added, removed, renamed, or ownership changes           |
 | **Sync Rules**      | `$CDOCS/documenter/$REFS/sync-rules.md`               | Cross-reference rules the audit checks                                       | When new sync relationships are discovered                            |
-| **Backlog**         | `docs/dev/backlog.md`                                 | Roadmap-candidate feature ideas parked for later                             | Every ARCHIVE and JC-UPDATE mode (cleanup); AUDIT mode (rot detection) |
+| **Backlog**         | `docs/dev/backlog.md`                                 | Roadmap-candidate feature ideas parked for later                             | Every ARCHIVE and FIX-UPDATE mode (cleanup); AUDIT mode (rot detection) |
 | **Epic Updates**    | `docs/epics/*/update.md` + `docs/epics/*/manifest.md` | Consolidate shipped/session work into the active epic — current-state merges | ARCHIVE Step 2j; EPIC mode on `/documenter:epic`                      |
 
 **Scope guard (single rule — applies everywhere):**

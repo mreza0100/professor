@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // FDLink is one numeric process file descriptor and its symlink target.
@@ -45,6 +46,34 @@ type ProcBirth interface {
 // everywhere else and the reaper reports no RAM rather than refusing to run.
 type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
+}
+
+// FileID names one file by device and inode: the identity an install's
+// rename-over gives the binary's path anew, and a process already running the
+// old image keeps.
+type FileID struct {
+	Device uint64
+	Inode  uint64
+}
+
+// ProcImage is the optional ProcFS extension that reports which file a
+// process is EXECUTING. Only the stale sweep needs it; a table without it is
+// refused there rather than read as "every process is fresh".
+type ProcImage interface {
+	Image(pid int) (FileID, error)
+}
+
+// FileIDOf is the identity of the file at path, following symlinks.
+func FileIDOf(path string) (FileID, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileID{}, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
+	}
+	return FileID{Device: uint64(stat.Dev), Inode: uint64(stat.Ino)}, nil
 }
 
 // NewProcFS returns the process-table reader for a given proc root.
@@ -179,16 +208,47 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 	return ProcStat{ParentPID: parentPID, StartTime: startTime}, nil
 }
 
-// Birth returns the process start time in epoch seconds. The kernel stamps
-// the /proc/<pid> directory when it creates the process, so its modification
-// time is the birth moment without the boot-time arithmetic /proc/<pid>/stat
-// ticks would need.
+// userHZ is USER_HZ, the fixed tick rate the kernel reports /proc times in
+// (<asm/param.h>): 100 on every Linux architecture pfm builds for (amd64,
+// arm64). It is an ABI constant, not the kernel's internal CONFIG_HZ.
+const userHZ = 100
+
+// Birth returns the process start time in epoch seconds: the boot time from
+// /proc/stat plus the start tick /proc/<pid>/stat records. The /proc/<pid>
+// directory's own mtime is NOT a birth stamp — procfs instantiates that inode
+// lazily on first lookup, and again after cache eviction, so it reads a
+// process as minutes or hours younger than it is (measured: kernel threads
+// 318 s late on an ordinary host).
 func (proc RealProcFS) Birth(pid int) (int64, error) {
-	info, err := os.Stat(filepath.Join(proc.root(), strconv.Itoa(pid)))
+	stat, err := proc.Stat(pid)
 	if err != nil {
 		return 0, err
 	}
-	return info.ModTime().Unix(), nil
+	boot, err := proc.bootTime()
+	if err != nil {
+		return 0, err
+	}
+	return boot + int64(stat.StartTime/userHZ), nil
+}
+
+// bootTime reads the "btime" line of /proc/stat: the boot moment in epoch
+// seconds every start tick counts from.
+func (proc RealProcFS) bootTime() (int64, error) {
+	path := filepath.Join(proc.root(), "stat")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read boot time: %w", err)
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if value, found := strings.CutPrefix(line, "btime "); found {
+			boot, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse btime in %s: %w", path, err)
+			}
+			return boot, nil
+		}
+	}
+	return 0, errors.New("no btime line in " + path)
 }
 
 // RSSKB returns a process's resident set size in kilobytes, read from
@@ -209,6 +269,13 @@ func (proc RealProcFS) RSSKB(pid int) (int64, error) {
 		return 0, fmt.Errorf("parse resident pages for %d: %w", pid, err)
 	}
 	return pages * int64(os.Getpagesize()) / 1024, nil
+}
+
+// Image is the file /proc/<pid>/exe resolves to. The kernel keeps a replaced
+// image's inode alive for its process, so the identity survives the install
+// that unlinked its path.
+func (proc RealProcFS) Image(pid int) (FileID, error) {
+	return FileIDOf(proc.path(pid, "exe"))
 }
 
 func (proc RealProcFS) path(pid int, element string) string {

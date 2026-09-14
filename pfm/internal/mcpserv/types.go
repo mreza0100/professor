@@ -176,7 +176,7 @@ type WhoamiOutput struct {
 type FindInput struct {
 	Excerpt     string `json:"excerpt" jsonschema:"literal name or prompt excerpt to find; a multi-line excerpt is split into needles and candidates are ranked by how many they hit"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"maximum candidates, default 10 and maximum 50"`
-	IncludeSelf bool   `json:"include_self,omitempty" jsonschema:"also match the asking session's own transcript, which is excluded by default"`
+	IncludeSelf bool   `json:"include_self,omitempty" jsonschema:"also match the asking session's own transcript, which is excluded by default where the server knows the asking session (self_id then names it)"`
 }
 
 // FindCandidate is one confirmed indexed transcript match.
@@ -245,19 +245,19 @@ type StatusInput struct {
 }
 
 type StatusOutput struct {
-	Name          string  `json:"name"`
-	State         string  `json:"state"`
-	IdleSeconds   int64   `json:"idle_seconds"`
-	Engine        string  `json:"engine"`
-	Model         string  `json:"model,omitempty"`
-	CWD           string  `json:"cwd,omitempty"`
-	SessionID     string  `json:"session_id,omitempty"`
-	Socket        string  `json:"socket,omitempty"`
-	ContextPct    float64 `json:"context_pct,omitempty"`
-	Last          string  `json:"last,omitempty"`
-	Summary       string  `json:"summary,omitempty"`
-	SummaryCached bool    `json:"summary_cached,omitempty"`
-	Ask           string  `json:"ask,omitempty"`
+	Name          string       `json:"name"`
+	State         string       `json:"state"`
+	IdleSeconds   int64        `json:"idle_seconds"`
+	Engine        pfmengine.ID `json:"engine"`
+	Model         string       `json:"model,omitempty"`
+	CWD           string       `json:"cwd,omitempty"`
+	SessionID     string       `json:"session_id,omitempty"`
+	Socket        string       `json:"socket,omitempty"`
+	ContextPct    float64      `json:"context_pct,omitempty"`
+	Last          string       `json:"last,omitempty"`
+	Summary       string       `json:"summary,omitempty"`
+	SummaryCached bool         `json:"summary_cached,omitempty"`
+	Ask           string       `json:"ask,omitempty"`
 }
 
 // TargetInput is shared by chat actions whose CLI form takes one target.
@@ -304,11 +304,6 @@ type KillInput struct {
 type SaveInput struct {
 	Target     string `json:"target" jsonschema:"FILE PATH to append the snapshot to (not a chat) — must contain a directory separator, e.g. ./notes/session.md"`
 	Transcript string `json:"transcript,omitempty" jsonschema:"path of the transcript .jsonl to dump; defaults to the calling chat's own transcript"`
-}
-
-type GoalInput struct {
-	Target string `json:"target,omitempty" jsonschema:"target chat; defaults to the requesting chat"`
-	Goal   string `json:"goal" jsonschema:"already-compiled inline /goal body, one line and at most 4000 characters"`
 }
 
 // IssueInput is one agent complaint filed against Professor itself. Reporter

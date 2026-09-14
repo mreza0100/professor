@@ -614,7 +614,7 @@ describe('WaveWalker — WALK mode, populated pipeline', () => {
         };
       }
       if (prompt.startsWith('[fold]'))
-        return { verdict: 'ROUGH SEAS', actionItems: ['/jc fix w'], review: '# review' };
+        return { verdict: 'ROUGH SEAS', actionItems: ['fix w'], review: '# review' };
       if (rawPrompt.startsWith('[clock · ')) return { epochSeconds: 1_000_000 };
       throw new Error('unexpected agent call in walk stub: ' + rawPrompt.slice(0, 40));
     };
@@ -640,7 +640,7 @@ describe('WaveWalker — WALK mode, populated pipeline', () => {
     expect(result.killedAsFalse).toBe(0);
     // fold adopted; ledger carries the full walk state
     expect(result.verdict).toBe('ROUGH SEAS');
-    expect(result.actionItems).toEqual(['/jc fix w']);
+    expect(result.actionItems).toEqual(['fix w']);
     expect(result.ledger.cards).toHaveLength(2);
     expect(result.ledger.walks).toHaveLength(1);
     expect(result.threadsWalked).toBe(1);
@@ -1475,7 +1475,7 @@ describe('WaveWalker — INVARIANT REGISTRY FEATURE', () => {
       if (label === 'fold')
         return {
           verdict: 'ROUGH SEAS',
-          actionItems: ['/jc fix chunk_cache.py'],
+          actionItems: ['fix chunk_cache.py'],
           review: '# review',
         };
       if (rawPrompt.startsWith('[clock · ')) return { epochSeconds: 1_000_000 };
@@ -1737,7 +1737,7 @@ describe('WaveWalker — INVARIANT REGISTRY FEATURE', () => {
         if (label === 'fold')
           return {
             verdict: 'ROUGH SEAS',
-            actionItems: ['/jc restore the NL policy'],
+            actionItems: ['restore the NL policy'],
             review: '# review',
           };
         if (rawPrompt.startsWith('[clock · ')) return { epochSeconds: 1_000_000 };

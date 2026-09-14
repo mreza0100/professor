@@ -20,12 +20,12 @@ Public knowledge (no fault of the recipient) · prior possession · independent 
 
 **Severity 1–5:** negligible · low · moderate · high · critical. **Likelihood 1–5:** remote · unlikely · possible · likely · almost-certain. **Score = severity × likelihood.**
 
-| Score | Level    | Colour | Action                                                                  |
+| Score | Level | Colour | Action |
 | ----- | -------- | ------ | ------------------------------------------------------------------------ |
-| 1–4   | Low      | GREEN  | Accept, document, periodic review — no escalation                       |
-| 5–9   | Medium   | YELLOW | Mitigate, assign owner, brief stakeholders, define escalation triggers  |
-| 10–15 | High     | ORANGE | Escalate to senior counsel, mitigation plan, consider outside counsel   |
-| 16–25 | Critical | RED    | Immediate escalation, outside counsel, response team, preserve evidence |
+| 1–4 | Low | GREEN | Accept, document, periodic review — no escalation |
+| 5–9 | Medium | YELLOW | Mitigate, assign owner, brief stakeholders, define escalation triggers |
+| 10–15 | High | ORANGE | Escalate to senior counsel, mitigation plan, consider outside counsel |
+| 16–25 | Critical | RED | Immediate escalation, outside counsel, response team, preserve evidence |
 
 ### When to engage outside counsel
 

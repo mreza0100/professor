@@ -12,19 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/paths"
 )
-
-func TestSelectHighestSemverUsesParsedComponents(t *testing.T) {
-	got, err := selectHighestSemver([]string{"v0.9.0", "v0.10.0", "v0.10.0-rc1", "notes"})
-	if err != nil {
-		t.Fatalf("selectHighestSemver() error = %v", err)
-	}
-	if got != "v0.10.0" {
-		t.Fatalf("selectHighestSemver() = %q, want v0.10.0", got)
-	}
-}
 
 func TestUpdateRefusesDirtyWorktree(t *testing.T) {
 	repo := newUpdateGitFixture(t)
@@ -53,6 +44,57 @@ func TestUpdateRefusesSourceDowngrade(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "would downgrade source from v0.10.0") {
 		t.Fatalf("runUpdate() stderr = %q, want source-downgrade diagnostic", stderr.String())
+	}
+}
+
+// TestUpdateSourceOnDetachedHeadFastForwards is a REGRESSION test for the
+// stale "source checkout is detached" refusal: updateRepository used to call
+// `git symbolic-ref --quiet --short HEAD` right after resolving previousRef
+// and return an error the moment that failed (a detached HEAD has no
+// symbolic ref), refusing an update on a source clone checked out at a bare
+// tag/commit rather than a branch. The fix drops that check entirely; a
+// detached source now fast-forwards past it exactly like a branch checkout.
+func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
+	repo := newDetachedUpdateGitFixture(t)
+	runtime := updateTestRuntime(t)
+	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBuild := updateBuildCandidate
+	oldInstall := updateApplyInstall
+	oldDoctor := updateRunDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate = oldBuild
+		updateApplyInstall = oldInstall
+		updateRunDoctor = oldDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runUpdate() on a detached source code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "detached") {
+		t.Fatalf("runUpdate() still refuses a detached source: stderr=%q", stderr.String())
+	}
+	if got := updateGitRevision(t, repo, "HEAD"); got != updateGitRevision(t, repo, "v0.10.0") {
+		t.Fatalf("source HEAD after update = %q, want fast-forwarded to v0.10.0", got)
 	}
 }
 
@@ -254,7 +296,7 @@ func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *testing.T) {
 	jailTest(t)
 	repo := newTaggedBuildFixture(t)
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +346,7 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 	jailTest(t)
 	repo := newTaggedBuildFixture(t)
-	runtime, err := loadCommandRuntime("")
+	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,6 +502,204 @@ func newUpdateGitFixture(t *testing.T) string {
 	return repo
 }
 
+// newDetachedUpdateGitFixture is newUpdateGitFixture, except the source
+// clone is checked out at v0.9.0 detached rather than on a branch named
+// "installed" — the shape a maintainer's clone takes after `git checkout
+// v0.9.0` directly.
+func newDetachedUpdateGitFixture(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitTemp(t, repo, "init", "-q")
+	gitTemp(t, repo, "config", "user.email", "fixture.invalid")
+	gitTemp(t, repo, "config", "user.name", "fixture-identity")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "README.md")
+	gitTemp(t, repo, "commit", "-qm", "fixture")
+	gitTemp(t, repo, "tag", "v0.9.0")
+	if err := os.WriteFile(filepath.Join(repo, "RELEASE"), []byte("next\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "RELEASE")
+	gitTemp(t, repo, "commit", "-qm", "fixture next release")
+	gitTemp(t, repo, "tag", "v0.10.0")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, remote, "init", "--bare", "-q")
+	gitTemp(t, repo, "remote", "add", "origin", remote)
+	gitTemp(t, repo, "push", "-q", "origin", "HEAD", "--tags")
+	gitTemp(t, repo, "checkout", "-q", "--detach", "v0.9.0")
+	return repo
+}
+
+// newReleaseNotesUpdateFixture is newUpdateGitFixture, plus a releases/ file
+// per name in releaseFiles committed and tagged v0.10.0 (the update target),
+// so a real runUpdate can be driven end to end to observe the printed
+// release-notes report lines.
+func newReleaseNotesUpdateFixture(t *testing.T, releaseFiles []string) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitTemp(t, repo, "init", "-q")
+	gitTemp(t, repo, "config", "user.email", "fixture.invalid")
+	gitTemp(t, repo, "config", "user.name", "fixture-identity")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "README.md")
+	gitTemp(t, repo, "commit", "-qm", "fixture")
+	gitTemp(t, repo, "tag", "v0.9.0")
+	// Always commit at least the marker file, even with no release notes
+	// between the two tags, so "nothing between" is a real, empty
+	// releases/ listing rather than an aborted commit.
+	if err := os.WriteFile(filepath.Join(repo, "NEXT"), []byte("next\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "NEXT")
+	for _, name := range releaseFiles {
+		path := filepath.Join(repo, "releases", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitTemp(t, repo, "add", filepath.Join("releases", name))
+	}
+	gitTemp(t, repo, "commit", "-qm", "fixture release notes")
+	gitTemp(t, repo, "tag", "v0.10.0")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, remote, "init", "--bare", "-q")
+	gitTemp(t, repo, "remote", "add", "origin", remote)
+	gitTemp(t, repo, "push", "-q", "origin", "HEAD", "--tags")
+	gitTemp(t, repo, "checkout", "-qb", "installed", "v0.9.0")
+	return repo
+}
+
+// newUntaggedPreviousReleaseNotesFixture is newReleaseNotesUpdateFixture,
+// except the source clone's checked-out branch sits at an UNTAGGED commit
+// (no tag reaches it), so `git describe --tags` on previousRef fails and
+// releaseNotesForUpdate reports its own error rather than an empty listing.
+func newUntaggedPreviousReleaseNotesFixture(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitTemp(t, repo, "init", "-q")
+	gitTemp(t, repo, "config", "user.email", "fixture.invalid")
+	gitTemp(t, repo, "config", "user.name", "fixture-identity")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "README.md")
+	gitTemp(t, repo, "commit", "-qm", "fixture untagged base")
+	gitTemp(t, repo, "branch", "installed")
+	if err := os.WriteFile(filepath.Join(repo, "TAGGED"), []byte("tagged\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "TAGGED")
+	gitTemp(t, repo, "commit", "-qm", "fixture v0.9.0")
+	gitTemp(t, repo, "tag", "v0.9.0")
+	if err := os.WriteFile(filepath.Join(repo, "RELEASE"), []byte("next\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", "RELEASE")
+	gitTemp(t, repo, "commit", "-qm", "fixture v0.10.0")
+	gitTemp(t, repo, "tag", "v0.10.0")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, remote, "init", "--bare", "-q")
+	gitTemp(t, repo, "remote", "add", "origin", remote)
+	gitTemp(t, repo, "push", "-q", "origin", "HEAD", "--tags")
+	gitTemp(t, repo, "checkout", "-q", "installed")
+	return repo
+}
+
+// updateWithReleaseNotesFakes drives a real runUpdate against repo with
+// build/install/doctor stubbed to no-ops, returning stdout for the caller to
+// inspect the printed release-notes report line.
+func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
+	t.Helper()
+	runtime := updateTestRuntime(t)
+	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
+		t.Fatal(err)
+	}
+	oldBuild, oldInstall, oldDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runUpdate() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	return stdout.String()
+}
+
+// TestUpdateReportsReleaseNotesToRead pins the "files between" branch of the
+// release-notes report: the printed line names the previous and target tags
+// and the release count, and lists each file oldest first.
+func TestUpdateReportsReleaseNotesToRead(t *testing.T) {
+	repo := newReleaseNotesUpdateFixture(t, []string{"v0.9.5.md", "v0.9.1.md"})
+	stdout := updateWithReleaseNotesFakes(t, repo)
+	if !strings.Contains(stdout, "release notes to read (v0.9.0 → v0.10.0, 2 release(s)):") {
+		t.Fatalf("stdout=%q, want the release-notes-to-read header", stdout)
+	}
+	first := strings.Index(stdout, "v0.9.1.md")
+	second := strings.Index(stdout, "v0.9.5.md")
+	if first < 0 || second < 0 || second < first {
+		t.Fatalf("stdout=%q, want v0.9.1.md listed before v0.9.5.md (oldest first)", stdout)
+	}
+}
+
+// TestUpdateReportsNoReleaseNotesBetween is a REGRESSION test for the
+// none-between branch: watched failing against a build that collapsed
+// releaseNotesForUpdate's error branch into this one (see
+// TestUpdateReportsReleaseNotesCannotList) — the two must stay visibly
+// distinct, since one names a real absence and the other a failed read.
+func TestUpdateReportsNoReleaseNotesBetween(t *testing.T) {
+	repo := newReleaseNotesUpdateFixture(t, nil)
+	stdout := updateWithReleaseNotesFakes(t, repo)
+	if !strings.Contains(stdout, "release notes: none between v0.9.0 and v0.10.0") {
+		t.Fatalf("stdout=%q, want the none-between report line", stdout)
+	}
+}
+
+// TestUpdateReportsReleaseNotesCannotList pins the error branch: a previous
+// revision `git describe` cannot resolve to any tag must render as "cannot
+// list", never silently fold into "none between" — an error is never
+// absence.
+func TestUpdateReportsReleaseNotesCannotList(t *testing.T) {
+	repo := newUntaggedPreviousReleaseNotesFixture(t)
+	stdout := updateWithReleaseNotesFakes(t, repo)
+	if !strings.Contains(stdout, "release notes: cannot list (") {
+		t.Fatalf("stdout=%q, want the cannot-list report line", stdout)
+	}
+	if strings.Contains(stdout, "none between") {
+		t.Fatalf("stdout=%q, cannot-list collapsed into none-between", stdout)
+	}
+}
+
 func newTaggedBuildFixture(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -527,4 +767,148 @@ func updateGitRevision(t *testing.T, repo, revision string) string {
 		t.Fatalf("resolve fixture revision %s: %v\n%s", revision, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+// TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree pins
+// -buildvcs=false. pfm update stages its source as a git worktree, whose .git
+// is a FILE cmd/go does not accept as a VCS root, so VCS stamping walks up and
+// dies on any .git DIRECTORY above it — an empty $HOME/.git did it live:
+// "error obtaining VCS status: exit status 128".
+func TestBuildUpdateCandidateSurvivesAStrayGitDirectoryAboveTheWorktree(t *testing.T) {
+	for _, tool := range []string{"git", "go"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " is not installed")
+		}
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(root, "source")
+	for name, content := range map[string]string{
+		"pfm/go.mod":          "module probe\n\ngo 1.24\n",
+		"pfm/cmd/pfm/main.go": "package main\n\nvar version = \"dev\"\n\nfunc main() { println(version) }\n",
+	} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-q", "-m", "probe")
+	stage := filepath.Join(root, "stage")
+	git("worktree", "add", "--detach", "-q", stage, "HEAD")
+
+	candidate := filepath.Join(root, "pfm-candidate")
+	if err := buildUpdateCandidate(context.Background(), stage, "v9.9.9", candidate); err != nil {
+		t.Fatalf("candidate build beneath a stray .git directory: %v", err)
+	}
+	printed, err := exec.Command(candidate).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(printed)) != "v9.9.9" {
+		t.Fatalf("candidate printed %q, %v; want the stamped v9.9.9", printed, err)
+	}
+}
+
+// updateHookRollbackFixture drives a real `runUpdate` whose candidate install
+// rewrites an account's Claude settings with a hook only the newer release
+// knows, then fails at doctor. between runs after that install and before the
+// rollback — the window in which something other than the update may write.
+func updateHookRollbackFixture(t *testing.T, between func(settings string)) (settings string, original []byte, stderr string) {
+	t.Helper()
+	repo := newUpdateGitFixture(t)
+	runtime := updateTestRuntime(t)
+	home := runtime.Paths.Home
+	runtime.Config = pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")})
+	settings = filepath.Join(home, ".cc", "1", "settings.json")
+	canonical := filepath.Join(home, ".local", "bin", "pfm")
+	original = []byte("{\n  \"hooks\": {}\n}\n")
+	for path, content := range map[string][]byte{canonical: []byte("old\n"), settings: original} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.RecordCanonicalBinary(home); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := []any{updateBuildCandidate, updateApplyInstall, updateRunDoctor, updateRollbackInstall, updateRollbackDoctor}
+	t.Cleanup(func() {
+		updateBuildCandidate = saved[0].(func(context.Context, string, string, string) error)
+		updateApplyInstall = saved[1].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRunDoctor = saved[2].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRollbackInstall = saved[3].(func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error)
+		updateRollbackDoctor = saved[4].(func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error)
+	})
+	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return os.WriteFile(settings, []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal hook-only-the-new-release-knows\"}]}]}\n}\n"), 0o600)
+	}
+	updateRunDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		between(settings)
+		return errors.New("injected doctor failure")
+	}
+	// The previous release's installer recognises only hooks IT generates, so
+	// it leaves the newer hook alone — exactly the live behaviour.
+	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, commandRuntime, bool, io.Writer, io.Writer) error { return nil }
+
+	var stdout, stderrBuffer bytes.Buffer
+	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderrBuffer, runtime); code == 0 {
+		t.Fatalf("runUpdate() code=0, want failure; stderr=%q", stderrBuffer.String())
+	}
+	return settings, original, stderrBuffer.String()
+}
+
+// TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged pins the
+// rollback-residue regression: a hook only the newer release registered
+// survived the rollback and ran a subcommand the restored binary lacks —
+// "UserPromptSubmit operation blocked by hook" on every prompt, twice live.
+func TestUpdateRollbackRestoresHookFilesTheCandidateInstallChanged(t *testing.T) {
+	settings, original, stderr := updateHookRollbackFixture(t, func(string) {})
+	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("settings after rollback = %q, %v; want the pre-update bytes %q", got, err, original)
+	}
+	if !strings.Contains(stderr, "restored "+settings) {
+		t.Fatalf("rollback did not report the restored hook file: %q", stderr)
+	}
+}
+
+// TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt pins the
+// race guard: a live chat can save its settings while the update runs, and a
+// byte restore would erase that edit. A file that no longer holds exactly
+// what the candidate's install wrote is left as is and named as residue.
+func TestUpdateRollbackLeavesAHookFileSomethingElseRewroteAndReportsIt(t *testing.T) {
+	edited := []byte("{\n  \"hooks\": {},\n  \"theme\": \"saved by a live chat\"\n}\n")
+	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
+		if err := os.WriteFile(settings, edited, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got, err := os.ReadFile(settings); err != nil || !bytes.Equal(got, edited) {
+		t.Fatalf("settings after rollback = %q, %v; want the concurrent edit kept %q", got, err, edited)
+	}
+	if !strings.Contains(stderr, settings) || !strings.Contains(stderr, "rollback residue") {
+		t.Fatalf("rollback did not name the untouched file as residue: %q", stderr)
+	}
 }

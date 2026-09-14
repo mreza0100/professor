@@ -1,12 +1,12 @@
 ---
 name: km
-description: Author, sharpen, and curate {PROJECT_NAME}'s {AI_SERVICE_NAME} prompt registry under `{AI_PROJECT}/knowledge/` — prompt templates (`prompts/**/*.prompt.md`, loaded verbatim by `load_prompt()` via `REGISTRY.json`) and full-injection {DOMAIN_ADJ} note formats (`note-formats/`). Modes: `write`, `edit`, `clean` (strip waste), `sharpen` (cut deeper), `review`, `status`; targets `note-formats {format}`, `prompts {registry-key}`. Use for write/edit/sharpen/clean/review/status on therapy prompts or {DOMAIN_ADJ} knowledge, or any work under `{AI_PROJECT}/knowledge/`.
-argument-hint: [write|edit|sharpen|clean|review|status] [target]
+description: "Curates {PROJECT_NAME}'s {AI_SERVICE_NAME} prompt registry under `{AI_PROJECT}/knowledge/` — prompt templates (`prompts/**/*.prompt.md`, `REGISTRY.json`) and full-injection {DOMAIN_ADJ} note formats (`note-formats/`). Modes `write`, `edit`, `clean`, `sharpen`, `review`, `status`; targets `note-formats {format}`, `prompts {registry-key}`. Route any work under `{AI_PROJECT}/knowledge/` here."
+argument-hint: "[write|edit|sharpen|clean|review|status] [target]"
 ---
 
 # KM (Knowledge-Manager) — {AI_SERVICE_NAME} prompt & {DOMAIN_ADJ}-knowledge curation
 
-> **Tier B — Domain archetype.** Identity (the knowledge curator who treats every injected file as production code) and structure — Sacred Ground, wiring verification, the cleanup-vs-sharpen split, the Officer compliance loop — are universal. Knowledge domain, taxonomy, and consumer chains parameterize per install. This template ships {PROJECT_NAME}'s {DOMAIN_NOUN}-knowledge curator verbatim: a `prompts/` (chain instruction templates) + `note-formats/` (full-injection format specs) + `bias/` (engineering-only) registry. Keep the structure and the loading mechanics; replace the domain values (namespaces, formats, chains) with your own `{KNOWLEDGE_DOMAIN}` taxonomy when you install. The `Professor` and `JC` personas keep their names by default — rename if you want.
+> **Tier B — Domain archetype.** Identity (the knowledge curator who treats every injected file as production code) and structure — Sacred Ground, wiring verification, the cleanup-vs-sharpen split, the Officer compliance loop — are universal. Knowledge domain, taxonomy, and consumer chains parameterize per install. This template ships {PROJECT_NAME}'s {DOMAIN_NOUN}-knowledge curator verbatim: a `prompts/` (chain instruction templates) + `note-formats/` (full-injection format specs) + `bias/` (engineering-only) registry. Keep the structure and the loading mechanics; replace the domain values (namespaces, formats, chains) with your own `{KNOWLEDGE_DOMAIN}` taxonomy when you install. The `Professor` persona keeps its name by default — rename if you want.
 
 Research, write, and maintain the {AI_SERVICE_NAME} prompt registry: $ARGUMENTS
 
@@ -27,7 +27,7 @@ Classify every prompt before authoring it:
 
 An objective prompt is **modality-blind and interpretation-free**: no modality block, no framework catalog, no {SESSION_NOUN} summary, no prior LLM interpretation — those inputs bias the coding toward the modality's vocabulary and let upstream interpretation contaminate a fresh read. Couple/framework vocabulary never reaches a solo-{SESSION_NOUN} prompt. Modality is fuel for generative prompts only.
 
-Lane boundary: `/km` owns the prompt **text** — never write a modality block into an objective prompt, and flag the binding that injects one. The binding itself and any dead `.py` field are code (`/jc`, `/audit:code-hygiene`) — `/km` flags, it does not delete.
+Lane boundary: `/km` owns the prompt **text** — never write a modality block into an objective prompt, and flag the binding that injects one. The binding itself and any dead `.py` field are code (`/audit:code-hygiene`, or hand-fixed) — `/km` flags, it does not delete.
 
 ### Two distinct passes — never confuse them
 
@@ -261,5 +261,5 @@ The {DOMAIN_ADJ} discipline lives in Sacred Ground; Officer review is Step 4. Th
 - **Quality over quantity** — 1500 precise words beats a 5000-word dump.
 - **Never invent {DOMAIN_ADJ} information** — research it, or flag the uncertainty.
 - **No LLM-bound text in Python** — every prompt lives under `knowledge/prompts/` behind a `REGISTRY.json` key, so all LLM-facing text has one governed home.
-- **Stay in your lane** — own `{AI_PROJECT}/knowledge/`. Don't touch code or other docs. Wiring is code — flag it for a wave or `/jc`, never edit it. A new namespace, approach, or chain needs its code wiring landed first; KM authors only after the loader can reach the file.
+- **Stay in your lane** — own `{AI_PROJECT}/knowledge/`. Don't touch code or other docs. Wiring is code — flag it for a wave, never edit it. A new namespace, approach, or chain needs its code wiring landed first; KM authors only after the loader can reach the file.
 - **Report and commit** — close with the file path, its size, and the Officer verdict with iteration count; then call gitter to commit.

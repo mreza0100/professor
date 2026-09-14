@@ -1,7 +1,7 @@
 ---
-name: {ROLE}-{project}
-description: {One line naming what this role builds in {project} — its {PROJECT_STACK} surfaces}. Follows the project CLAUDE.md conventions and runs self-QA before finishing; works in a worktree with allocated ports. Spawn as the {role-noun} for any {project} task span; full protocol lives in {project}/.claude/agents/{ROLE}.md
-model: {MODEL_TIER}
+name: "{ROLE}-{project}"
+description: "Spawn as the {role-noun} for any {project} task span — {One line naming what this role builds in {project} — its {PROJECT_STACK} surfaces}. Works in a worktree with allocated ports, self-QA before finishing; full protocol in {project}/.claude/agents/{ROLE}.md."
+model: "{MODEL_TIER}"
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

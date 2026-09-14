@@ -2,10 +2,13 @@ package resolve
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 type fakeTmux struct {
@@ -289,5 +292,54 @@ func assertOutcome(
 			stdout,
 			stderr,
 		)
+	}
+}
+
+// TestResolveFailsLoudWhenTmuxCannotRun is the resolve-ladder half of the
+// deaf-daemon regression: allPanes dropped every list-panes error, so a tmux
+// missing from PATH made every name resolve to "no match" — chat_inject then
+// refused a live chat as "matched no live chat". A tmux that never started
+// read no socket, so resolution is an error naming the cause, never a miss.
+func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	tmuxDir := t.TempDir()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, "cc-1-2-3"), Net: "unix"})
+	if err != nil {
+		t.Fatalf("create socket: %v", err)
+	}
+	defer listener.Close()
+	resolver := &Resolver{tmux: CommandTmux{Binary: "pfm-test-missing-tmux"}, tmuxDir: tmuxDir}
+	for _, kind := range []Kind{Session, Label, CxWindow} {
+		outcome, err := resolver.Resolve(context.Background(), kind, "any-chat")
+		if err == nil {
+			t.Fatalf("Resolve(%s) with an unstartable tmux = %+v, nil — a miss that means \"could not look\"", kind, outcome)
+		}
+		if !pfmtmux.CouldNotRun(err) {
+			t.Fatalf("Resolve(%s) error %v does not carry the could-not-run cause", kind, err)
+		}
+	}
+}
+
+// TestResolveStillMissesPastADeadSocket pins the other side: a socket whose
+// server is gone is one ended chat, not a fault — resolution skips it and
+// reports a plain miss, never an error.
+func TestResolveStillMissesPastADeadSocket(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux-no-server")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmuxDir := t.TempDir()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, "cc-1-2-3"), Net: "unix"})
+	if err != nil {
+		t.Fatalf("create socket: %v", err)
+	}
+	defer listener.Close()
+	resolver := &Resolver{tmux: CommandTmux{Binary: binary}, tmuxDir: tmuxDir}
+	outcome, err := resolver.Resolve(context.Background(), Session, "any-chat")
+	if err != nil {
+		t.Fatalf("a dead socket failed resolution: %v", err)
+	}
+	if outcome.Code != 1 {
+		t.Fatalf("dead-socket resolution = %+v, want a plain miss (code 1)", outcome)
 	}
 }

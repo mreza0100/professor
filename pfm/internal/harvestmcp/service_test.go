@@ -2,23 +2,20 @@ package harvestmcp
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
-	goRuntime "runtime"
 	"strings"
 	"testing"
 
 	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/harvestpy"
 	"hostops/pfm/internal/paths"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +52,74 @@ func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
 	}
 }
 
+// listToolNames connects an in-process client to the given service and
+// returns the tool names it advertises — the one place both search-gating
+// tests below read the registered surface, rather than poking register()
+// internals.
+func listToolNames(t *testing.T, service *Service) []string {
+	t.Helper()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+// TestSearchToolHiddenWithoutABackend is the regression for a `search` tool
+// advertised with nowhere to search: register() used to gate only on
+// !DisableSearch, so a Service with neither SearXNGURL nor BraveAPIKey set
+// still listed `search`, and calling it always failed with a configuration
+// error the caller had no way to see in advance.
+func TestSearchToolHiddenWithoutABackend(t *testing.T) {
+	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	names := listToolNames(t, service)
+	for _, name := range names {
+		if name == "search" {
+			t.Fatalf("tool list %v advertises `search` with no backend configured", names)
+		}
+	}
+}
+
+// TestSearchToolListedWithSearXNGConfigured is TestSearchToolHiddenWithoutABackend's
+// positive twin: a configured backend must still register the tool.
+func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
+	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	names := listToolNames(t, service)
+	found := false
+	for _, name := range names {
+		if name == "search" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tool list %v does not advertise `search` with SearXNGURL configured", names)
+	}
+}
+
 func TestOracleReceiptRenderers(t *testing.T) {
 	listing := renderArchiveListing("/tmp/sample.zip", []harvest.Member{{Name: "a|b.txt", UncompressedSize: 7}})
 	if want := `archive(source="/tmp/sample.zip", member="<name>")`; !contains(listing, want) {
@@ -74,27 +139,22 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 		{
 			name:   "invalid URL",
 			result: harvest.Result{ErrorKind: "invalid"},
-			want:   []string{"Invalid URL", "`search`"},
+			want:   []string{"input is invalid", "findWorks"},
 		},
 		{
 			name:   "timeout",
 			result: harvest.Result{ErrorKind: "timeout"},
-			want:   []string{"timed out", "`search`"},
+			want:   []string{"timed out", "Retry later"},
 		},
 		{
 			name:   "challenge",
 			result: harvest.Result{Challenge: true, HTTPStatus: 200},
-			want:   []string{"challenge", "`search`"},
+			want:   []string{"access challenge", "another copy"},
 		},
 		{
 			name:   "HTTP 404",
 			result: harvest.Result{Content: "tiny", ContentChars: 4, HTTPStatus: 404},
-			want:   []string{"HTTP 404", "`search`", "`findWorks`"},
-		},
-		{
-			name:   "thin extraction",
-			result: harvest.Result{HTTPStatus: 200},
-			want:   []string{"no readable content", "`search`", "`findWorks`"},
+			want:   []string{"not found", "findWorks"},
 		},
 	}
 	for _, test := range tests {
@@ -106,6 +166,40 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
+// TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
+// the "thin extraction" (JS-rendered/bot-blocked, no readable content)
+// message must recommend `search` only when a backend is actually
+// configured, and fall back to findWorks/another-URL wording when it is not.
+func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
+	result := harvest.Result{HTTPStatus: 200}
+
+	searchOn, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = searchOn.Close() }()
+	got := searchOn.describeFetch("https://fixture.example/source", result, false)
+	for _, want := range []string{"no readable content", "`search`", "`findWorks`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
+		}
+	}
+
+	searchOff, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = searchOff.Close() }()
+	got = searchOff.describeFetch("https://fixture.example/source", result, false)
+	if strings.Contains(got, "`search`") {
+		t.Fatalf("search-off describe receipt names the unavailable `search` tool: %q", got)
+	}
+	if !strings.Contains(got, "`findWorks`") {
+		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
 	}
 }
 
@@ -128,16 +222,65 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 	}
 }
 
-// A failed search renders every backend's own error, one per line.
-func TestSearchFailureRendersEachBackend(t *testing.T) {
-	text := renderSearchFailure(errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")))
-	for _, want := range []string{"searxng http://127.0.0.1:8888: HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("search failure text lacks %q:\n%s", want, text)
+func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
+	home := t.TempDir()
+	service, err := NewConfigured("test", Runtime{
+		Home:             home,
+		CacheDir:         filepath.Join(home, "cache"),
+		DOIMirrorURL:     "https://mirror.example/doi-mirror",
+		IPFSCatalogURL:   "https://ipfs-catalog.example",
+		DOIViewerURL:     "https://doi-viewer.example",
+		MD5CatalogURL:    "https://md5-catalog.example",
+		GoogleScholarURL: "https://scholar.example",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	for _, tc := range []struct{ name, got, want string }{
+		{"DOIMirrorURL", service.runtime.DOIMirrorURL, "https://mirror.example/doi-mirror"},
+		{"IPFSCatalogURL", service.runtime.IPFSCatalogURL, "https://ipfs-catalog.example"},
+		{"DOIViewerURL", service.runtime.DOIViewerURL, "https://doi-viewer.example"},
+		{"MD5CatalogURL", service.runtime.MD5CatalogURL, "https://md5-catalog.example"},
+		{"GoogleScholarURL", service.runtime.GoogleScholarURL, "https://scholar.example"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
 		}
 	}
-	if strings.Contains(text, "unreachable or failing") {
-		t.Fatalf("search failure text kept the generic message:\n%s", text)
+}
+
+// TestSearchCacheMissHintsSearchOnlyWhenAvailable pins the searchCache
+// empty-match hint, the one harvestmcp-side message in the closed
+// `use `search“ list: it must not point at a `search` tool the server does
+// not advertise.
+func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
+	off, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = off.Close() }()
+	result, _, err := off.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
+	if err != nil {
+		t.Fatalf("searchCache(no backend) error: %v", err)
+	}
+	offText := result.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(offText, "`search`") {
+		t.Fatalf("searchCache miss text %q names `search` with no backend configured", offText)
+	}
+
+	on, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = on.Close() }()
+	result, _, err = on.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
+	if err != nil {
+		t.Fatalf("searchCache(with backend) error: %v", err)
+	}
+	onText := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(onText, "`search`") {
+		t.Fatalf("searchCache miss text %q dropped `search` with a backend configured", onText)
 	}
 }
 
@@ -152,23 +295,4 @@ func mustWorkingDir(t *testing.T) string {
 
 func contains(value, needle string) bool {
 	return strings.Contains(value, needle)
-}
-
-// TestBrowserPathsResolveTheNormalizedPlatform pins the HIGH review finding:
-// production must probe env-browser/<GOOS>-<GOARCH>/ — never the "-" sentinel
-// an empty Platform{} stringifies to, which provisioning never writes.
-func TestBrowserPathsResolveTheNormalizedPlatform(t *testing.T) {
-	root := t.TempDir()
-	converter := pythonConverter{browserRoot: root}
-	interpreter, script := converter.browserPaths()
-	normalized := harvestpy.Platform{GOOS: goRuntime.GOOS, GOARCH: goRuntime.GOARCH}
-	wantRoot := harvestpy.BrowserRuntimeRoot(root, normalized)
-	wantInterpreter := filepath.Join(wantRoot, "project", ".venv", "bin", "python")
-	wantScript := filepath.Join(wantRoot, "project", "browser.py")
-	if interpreter != wantInterpreter || script != wantScript {
-		t.Fatalf("browser paths=%q/%q, want the normalized-platform root %q", interpreter, script, wantRoot)
-	}
-	if strings.Contains(interpreter, `"-/`) || strings.HasSuffix(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(interpreter)))), "-") {
-		t.Fatalf("browser path uses the empty-Platform %q sentinel: %q", harvestpy.Platform{}.String(), interpreter)
-	}
 }

@@ -52,7 +52,7 @@ func stubFailingTmux(t *testing.T, root string) {
 
 // TestInteractiveRefreshBuffersGatherWarningsUntilFlushed is BUG 4's
 // red-first fixture: pipeline.go used to write a tmux probe warning straight
-// to stderr from gatherFleet (cmd/pfm/pipeline.go, the loop over
+// to stderr from the fleet gather (now fleet.Gather, the loop over
 // live.Warnings) regardless of who called it — including the background
 // refresh goroutine streamFleetRefreshesWith runs WHILE the interactive
 // picker owns the tty (runLS starts it right before Pick). That write

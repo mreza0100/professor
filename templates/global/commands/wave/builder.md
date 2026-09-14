@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:builder
-description: The wave builder — ORCHESTRATED ONLY: takes a /goal from /wave:orchestrator (train, spec, worktree, ports) and implements the wave task-by-task per the zero-gap spec — build agents, verify, gitter checkpoint, one STATE.md line each; reports BUILD-GREEN, runs the {project}-qa fix chain per touched project, then full suites, reports DONE. A genuine spec gap = ask the orchestrator, never improvise.
+description: ORCHESTRATOR-ONLY — implements one wave from the /goal /wave:orchestrator sends (train, spec, worktree, ports), task-by-task per the spec, never re-deciding it; reports BUILD-GREEN then DONE to the orchestrator, which hands the merged wave to /wave:walker.
 ---
 
 # Builder — implement the wave

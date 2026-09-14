@@ -11,26 +11,26 @@ pfm headless exec --engine claude --system-file judge.md --schema answer.schema.
 
 ## Common options
 
-| Option                      | Meaning                                              |
+| Option | Meaning |
 | --------------------------- | ---------------------------------------------------- |
-| `--engine`                  | `claude` or `codex`; default from PFM config         |
-| `--model`, `--effort`       | Override configured model and reasoning effort       |
-| `--account`                 | Configured account ID; default first account         |
-| `--config-dir`              | Select a configured account by its directory         |
-| `--prompt`, `-p`            | Prompt text; otherwise read stdin                    |
-| `--prompt-file`             | Read raw prompt text from a file                     |
-| `--task`, `--task-file`     | Task text or file, using labeled task framing        |
-| `--files`, `--labels`       | Zero or more files and labels; default basenames     |
+| `--engine` | `claude` or `codex`; default from PFM config |
+| `--model`, `--effort` | Override configured model and reasoning effort |
+| `--account` | Configured account ID; default first account |
+| `--config-dir` | Select a configured account by its directory |
+| `--prompt`, `-p` | Prompt text; otherwise read stdin |
+| `--prompt-file` | Read raw prompt text from a file |
+| `--task`, `--task-file` | Task text or file, using labeled task framing |
+| `--files`, `--labels` | Zero or more files and labels; default basenames |
 | `--system`, `--system-file` | Replace the system prompt with text or file contents |
-| `--schema`, `--json-schema` | JSON Schema file or inline JSON                      |
-| `--cwd`                     | Working directory                                    |
-| `--timeout`                 | Wall-clock seconds; default 600, zero unlimited      |
-| `--output-format`           | `text`, `json`, or `native`                          |
-| `--out`                     | Write validated structured output or the text answer |
-| `--receipt`                 | Append a content-free JSON execution receipt         |
-| `--env`                     | Repeatable `KEY=VALUE` environment override          |
-| `--engine-arg`              | Repeatable native engine argument                    |
-| `--allow-unsupported`       | Continue without unsupported common controls, with diagnostics |
+| `--schema`, `--json-schema` | JSON Schema file or inline JSON |
+| `--cwd` | Working directory |
+| `--timeout` | Wall-clock seconds; default 600, zero unlimited |
+| `--output-format` | `text`, `json`, or `native` |
+| `--out` | Write validated structured output or the text answer |
+| `--receipt` | Append a content-free JSON execution receipt |
+| `--env` | Repeatable `KEY=VALUE` environment override |
+| `--engine-arg` | Repeatable native engine argument |
+| `--allow-unsupported` | Continue without unsupported common controls, with diagnostics |
 
 `--system-prompt` and `--system-prompt-file` alias the system options. Prompt/task, system, and schema each accept one input source.
 

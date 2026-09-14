@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime/debug"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/testjail"
 )
@@ -405,7 +407,6 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 
 func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(codexAvailableEnv, "0")
 	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")
@@ -449,16 +450,23 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
+	readServer := holdClaudeOpen(t, root, "cc-1700000000-1-1")
 	if code := run([]string{"chat", "open", id}, &stdout, &stderr); code != 0 {
 		t.Fatalf("open code=%d stderr=%q", code, stderr.String())
 	}
 	if lines := strings.Count(stdout.String(), "\n"); lines != 1 {
 		t.Fatalf("open emitted %d lines: %q", lines, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "--resume") ||
-		!strings.Contains(stdout.String(), id) ||
-		!strings.Contains(stdout.String(), "cc-1700000000-1-1") {
+	if !strings.Contains(stdout.String(), "attach -t 'cc-1700000000-1-1'") {
 		t.Fatalf("open stdout=%q", stdout.String())
+	}
+	// The resume is born through the one chat-server creator: its window
+	// carries the engine's name, never one its pane command chose.
+	if run := readServer("#{pane_start_command}"); !strings.Contains(run, "--resume") || !strings.Contains(run, id) {
+		t.Fatalf("opened server runs %q, want the resume of %s", run, id)
+	}
+	if window := readServer("#{window_name}"); window != "Claude" {
+		t.Fatalf("opened window = %q, want Claude", window)
 	}
 
 	stdout.Reset()
@@ -475,8 +483,8 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 // TestCheckRefusesALiveCodexSocketMissingFromTheGoRows is the regression this
 // checker existed to catch and did not. A legacy-only live-codex row means the
 func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
-	root := jailTest(t)
-	dbPath := filepath.Join(root, "fleet.db")
+	jailTest(t)
+	dbPath := os.Getenv(paths.EnvDB)
 	if err := os.WriteFile(dbPath, []byte("not a sqlite database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -800,35 +808,11 @@ func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPro
 func jailTest(t *testing.T) string {
 	t.Helper()
 
-	root := testjail.ShortRoot(t)
-	for _, directory := range []string{
-		filepath.Join(root, "t"),
-		filepath.Join(root, "sid"),
-		filepath.Join(root, "claude"),
-		filepath.Join(root, "codex"),
-		filepath.Join(root, "tmux"),
-		filepath.Join(root, "home"),
-		filepath.Join(root, "home", ".local", "bin"),
-		filepath.Join(root, "proc"),
-	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
-	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	root := testjail.Fleet(t)
 	jailedHome := filepath.Join(root, "home")
-	t.Setenv("PFM_HOME", jailedHome)
-	// HOME is the same concept under its other name. Pinning only
-	// PFM_HOME leaves anything reading the plain variable — the test
-	// itself, a subprocess, a library — writing into the operator's real
-	// account, which is how fixture transcripts reached a live
-	// ~/.claude/projects. The two must never be allowed to disagree.
-	t.Setenv("HOME", jailedHome)
+	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	canonical := filepath.Join(root, "home", ".local", "bin", "pfm")
 	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
 		t.Fatal(err)
@@ -867,10 +851,6 @@ func jailTest(t *testing.T) string {
 		}
 	}
 	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
-	t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
-	// A chat server loads the user's ~/.tmux.conf in real life; a fixture must
-	// not, or the machine it runs on steers the test.
-	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	return root
 }
 
@@ -882,5 +862,33 @@ func writeJailedCodexAuth(t *testing.T, root string) {
 		0o600,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// holdClaudeOpen readies the jail for a `chat open` that creates its resume's
+// server through the one chat-server creator BEFORE it prints the attach: the
+// stock jail claude exits at once and would take that fresh server with it,
+// so it becomes a pane that stays up, and the server ends with the test. It
+// returns a reader for the created server's pane.
+func holdClaudeOpen(t *testing.T, root, socket string) func(format string) string {
+	t.Helper()
+	managed := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
+	if err := os.WriteFile(managed, []byte("#!/bin/sh\nexec sleep 120\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(root, "tmux", socket)
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
+		kill.Env = append(os.Environ(), "TMUX=")
+		_ = kill.Run()
+	})
+	return func(format string) string {
+		read := exec.Command("tmux", "-S", socketPath, "display-message", "-p", "-t", socket, format)
+		read.Env = append(os.Environ(), "TMUX=")
+		output, err := read.Output()
+		if err != nil {
+			t.Fatalf("read the opened server %s: %v", socket, err)
+		}
+		return strings.TrimSpace(string(output))
 	}
 }

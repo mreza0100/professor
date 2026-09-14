@@ -42,7 +42,7 @@ func runHeal(args []string, stdout, stderr io.Writer) int {
 	if *thread != "" {
 		if message := heal.Thread(
 			context.Background(),
-			firstRoot(resolved.Roots[pfmengine.Codex]),
+			resolved.FirstRoot(pfmengine.Codex),
 			*thread,
 		); message != "" {
 			fmt.Fprintln(stderr, message)
@@ -50,7 +50,7 @@ func runHeal(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	runner, err := heal.New(firstRoot(resolved.Roots[pfmengine.Codex]), nil)
+	runner, err := heal.New(resolved.FirstRoot(pfmengine.Codex), nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm heal: %v\n", err)
 		return 1

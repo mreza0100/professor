@@ -23,7 +23,7 @@ type fakeActionTmux struct {
 	killedServer []string
 	sized        []string
 	selected     []string
-	created      []CodexServer
+	created      []ChatServer
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -104,9 +104,9 @@ func (tmux *fakeActionTmux) SelectWindow(
 	return nil
 }
 
-func (tmux *fakeActionTmux) CreateCodexServer(
+func (tmux *fakeActionTmux) CreateChatServer(
 	_ context.Context,
-	server CodexServer,
+	server ChatServer,
 ) error {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
@@ -443,14 +443,14 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stringsContainsAll(
-		line,
-		"new-session",
-		"'cc-900-1-1'",
-		"claude",
-		"--resume",
-	) {
-		t.Fatalf("dead fallback line = %q", line)
+	// The resume is born through the one chat-server creator; the line only
+	// attaches to the server the executor created.
+	if line != "TMUX= tmux -L 'cc-900-1-1' attach -t 'cc-900-1-1'" || len(tmux.created) == 0 {
+		t.Fatalf("dead fallback line = %q created = %#v", line, tmux.created)
+	}
+	if born := tmux.created[len(tmux.created)-1]; born.Socket != "cc-900-1-1" || born.Window != "Claude" ||
+		!stringsContainsAll(born.Run, "claude", "--resume") {
+		t.Fatalf("dead fallback server = %#v", born)
 	}
 
 	codexRequest := Request{
@@ -467,9 +467,11 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if line != "TMUX= tmux -L 'cx-901-1-1' attach -t 'cx-901-1-1:Codex'" ||
-		len(tmux.created) != 1 ||
-		tmux.created[0].Socket != "cx-901-1-1" {
+	// Two servers born so far: the dead Claude row's fresh resume above, and
+	// this Codex resume.
+	if line != "TMUX= tmux -L 'cx-901-1-1' attach -t 'cx-901-1-1'" ||
+		len(tmux.created) != 2 ||
+		tmux.created[1].Socket != "cx-901-1-1" {
 		t.Fatalf("Codex line=%q created=%#v", line, tmux.created)
 	}
 }
@@ -538,10 +540,12 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(line, "cx-dead") ||
-		!strings.Contains(line, "cx-fresh:Codex") ||
+	if line != "TMUX= tmux -L 'cx-fresh' attach -t 'cx-fresh'" ||
 		!strings.Contains(stderr.String(), "disappeared; resuming") {
 		t.Fatalf("dead fallback line=%q stderr=%q", line, stderr.String())
+	}
+	if born := tmux.created[len(tmux.created)-1]; born.Socket != "cx-fresh" || born.Window != "Codex" {
+		t.Fatalf("dead fallback server = %#v", born)
 	}
 }
 

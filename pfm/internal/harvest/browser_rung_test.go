@@ -32,6 +32,10 @@ type browserSpyConverter struct {
 	html         string
 	status       int
 	err          error
+	// modes records the headless flag of every call, in order; render, when
+	// set, answers per mode instead of html/status/err.
+	modes  []bool
+	render func(headless bool) (string, int, error)
 }
 
 func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
@@ -41,8 +45,12 @@ func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string
 	return "", errors.New("spy converter refuses every conversion")
 }
 
-func (spy *browserSpyConverter) FetchBrowser(ctx context.Context, source string) (string, int, error) {
+func (spy *browserSpyConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
 	spy.browserCalls++
+	spy.modes = append(spy.modes, headless)
+	if spy.render != nil {
+		return spy.render(headless)
+	}
 	return spy.html, spy.status, spy.err
 }
 
@@ -345,5 +353,77 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
 	if result.HTTPStatus != http.StatusForbidden {
 		t.Fatalf("HTTPStatus=%d, want the wall's 403 (jina's failed transport must not clobber it)", result.HTTPStatus)
+	}
+}
+
+// recoveredArticleSpy converts a rendered "Recovered article" page to long
+// real content and anything else (a wall) to thin text.
+func recoveredArticleSpy(render func(headless bool) (string, int, error)) *browserSpyConverter {
+	return &browserSpyConverter{
+		render: render,
+		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+			if strings.Contains(string(body), "Recovered article") {
+				return "# Recovered article\n\n" + strings.Repeat("real rendered evidence ", 100), nil
+			}
+			return "thin wall text", nil
+		},
+	}
+}
+
+const recoveredArticleHTML = "<html><body><h1>Recovered article</h1>real rendered evidence</body></html>"
+
+// TestBrowserRungRendersHeadlessFirst pins headless-first: a render that
+// passes on the first try never opens a visible window.
+func TestBrowserRungRendersHeadlessFirst(t *testing.T) {
+	spy := recoveredArticleSpy(func(bool) (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
+	h := wallHarvester(t, spy, browserOn())
+	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
+	if result.Error != "" || result.Method != "browser-chrome" {
+		t.Fatalf("headless render not accepted: method=%q err=%q", result.Method, result.Error)
+	}
+	if fmt.Sprint(spy.modes) != "[true]" {
+		t.Fatalf("browser modes=%v, want exactly one HEADLESS render [true]", spy.modes)
+	}
+}
+
+// TestBrowserHeadedRetryOnlyAfterAWall: a headless render that meets a bot
+// wall earns ONE headed retry, and the headed render's content wins.
+func TestBrowserHeadedRetryOnlyAfterAWall(t *testing.T) {
+	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
+		if headless {
+			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
+		}
+		return recoveredArticleHTML, http.StatusOK, nil
+	})
+	h := wallHarvester(t, spy, browserOn())
+	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
+	if result.Error != "" || result.Method != "browser-chrome" {
+		t.Fatalf("headed retry after a headless wall not accepted: method=%q err=%q", result.Method, result.Error)
+	}
+	if fmt.Sprint(spy.modes) != "[true false]" {
+		t.Fatalf("browser modes=%v, want headless then headed [true false]", spy.modes)
+	}
+}
+
+// TestBrowserHeadedRetryFailureKeepsTheWallVerdict: when the headed retry
+// cannot launch (a display-less host), the completed headless attempt's
+// verdict — it RAN and met a wall — stands; it never becomes an outage.
+func TestBrowserHeadedRetryFailureKeepsTheWallVerdict(t *testing.T) {
+	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
+		if headless {
+			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
+		}
+		return "", 0, errors.New("headed Chrome needs a display")
+	})
+	h := browserHarvester(t, spy)
+	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
+	if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
+		t.Fatalf("headed-launch failure erased the headless wall verdict: challenge=%v err=%q", result.Challenge, result.Error)
+	}
+	if strings.Contains(result.Error, "could NOT RUN") {
+		t.Fatalf("a completed headless attempt was misreported as an outage: %q", result.Error)
+	}
+	if fmt.Sprint(spy.modes) != "[true false]" {
+		t.Fatalf("browser modes=%v, want [true false]", spy.modes)
 	}
 }

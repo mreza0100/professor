@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 const (
@@ -115,7 +117,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 
 		next := cloneThemeOwnership(ownership)
 		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if writeErr := atomicWrite(target, content, 0o644); writeErr != nil {
+		if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
 			installer.skip("theme " + name + " install failed: write " + target + ": " + writeErr.Error())
 			continue
 		}
@@ -179,7 +181,7 @@ func (installer *engine) uninstallThemes() {
 		if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
 			var rollbackErr error
 			if exists {
-				rollbackErr = atomicWrite(record.Path, content, 0o644)
+				rollbackErr = atomicfile.Write(record.Path, content, 0o644)
 			}
 			message := "theme " + name + " uninstall failed: update ownership: " + ledgerErr.Error()
 			if rollbackErr != nil {
@@ -430,7 +432,7 @@ func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) e
 		return fmt.Errorf("encode ownership: %w", err)
 	}
 	content = append(content, '\n')
-	if err := atomicWrite(path, content, 0o600); err != nil {
+	if err := atomicfile.Write(path, content, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -438,7 +440,7 @@ func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) e
 
 func rollbackTheme(path string, previous []byte, existed bool) error {
 	if existed {
-		return atomicWrite(path, previous, 0o644)
+		return atomicfile.Write(path, previous, 0o644)
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

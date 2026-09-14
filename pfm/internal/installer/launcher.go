@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
@@ -93,7 +94,7 @@ func RepairClaudeLauncher(home string) (bool, error) {
 		if current.Mode()&os.ModeSymlink == 0 {
 			return false, fmt.Errorf("refuse to replace non-symlink Claude binary: %s", canonical)
 		}
-		if err := atomicWrite(claudeLauncherStatePath(home), []byte(status.Target+"\n"), 0o600); err != nil {
+		if err := atomicfile.Write(claudeLauncherStatePath(home), []byte(status.Target+"\n"), 0o600); err != nil {
 			return false, fmt.Errorf("record displaced Claude target: %w", err)
 		}
 	}
@@ -172,4 +173,21 @@ func (installer *engine) unwireClaudeLauncher() error {
 		}
 		return nil
 	})
+}
+
+// ClaudeAbsent reports whether path is pfm's own Claude launcher AND its
+// last run exited 127 — the shim's contract for "no real Claude binary
+// resolved" (assets/bin/claude). Any other exit code, or a path that is not
+// pfm's launcher, is a real failure, never absence: doctor's dep and
+// harness-prompt rows both decide "Claude is absent" through this one check.
+func ClaudeAbsent(home, path string, exitCode int) bool {
+	if exitCode != 127 {
+		return false
+	}
+	clean := filepath.Clean(path)
+	if clean == filepath.Clean(canonicalClaudeLauncher(home)) || clean == filepath.Clean(managedClaudeLauncher(home)) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(clean)
+	return err == nil && filepath.Clean(resolved) == filepath.Clean(managedClaudeLauncher(home))
 }

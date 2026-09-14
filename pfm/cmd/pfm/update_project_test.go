@@ -276,17 +276,18 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 
 	noGitStore := t.TempDir()
 	for relative, content := range map[string]string{
-		"VERSION":                                                  "0.65.0\n",
-		"templates/project/CLAUDE.md":                              "# x\n",
-		"templates/project/settings.json":                          "{}\n",
-		"templates/project/commands/dev.md":                        "old\n",
-		"templates/project/agents/gitter.md":                       "body\n",
-		"templates/project/scripts/dev.sh":                         "#!/usr/bin/env bash\n",
-		"templates/project/skills/legal/SKILL.md":                  "body\n",
-		"templates/project/workflows/audit.js":                     "export default {};\n",
-		"templates/project/codex/config.toml":                      "model=\"x\"\n",
-		"templates/project/docs-commands/jc/references/jc-core.md": "# JC\n",
-		"templates/project/docs-agents/_index.md":                  "# Agents\n",
+		"VERSION":                                                     "0.65.0\n",
+		"templates/project/CLAUDE.md":                                 "# x\n",
+		"templates/project/settings.json":                             "{}\n",
+		"templates/project/rumdl-policy.toml":                         "[global]\n",
+		"templates/project/commands/dev.md":                           "old\n",
+		"templates/project/agents/gitter.md":                          "body\n",
+		"templates/project/scripts/dev.sh":                            "#!/usr/bin/env bash\n",
+		"templates/project/skills/legal/SKILL.md":                     "body\n",
+		"templates/project/workflows/audit.js":                        "export default {};\n",
+		"templates/project/codex/config.toml":                         "model=\"x\"\n",
+		"templates/project/docs-commands/wave/references/fix-core.md": "# Fix Core\n",
+		"templates/project/docs-agents/_index.md":                     "# Agents\n",
 	} {
 		writeProjectFixtureFile(t, noGitStore, relative, content)
 	}
@@ -677,17 +678,18 @@ func newAdoptAtStoreFixture(t *testing.T) (store, oldSHA, headSHA string) {
 	t.Helper()
 	root := t.TempDir()
 	for relative, content := range map[string]string{
-		"VERSION":                                                  "0.65.0\n",
-		"templates/project/CLAUDE.md":                              "# {TOKEN} contract\n",
-		"templates/project/settings.json":                          "{}\n",
-		"templates/project/commands/dev.md":                        "old\n",
-		"templates/project/agents/gitter.md":                       "---\nname: gitter\n---\nbody\n",
-		"templates/project/scripts/dev.sh":                         "#!/usr/bin/env bash\nset -euo pipefail\n",
-		"templates/project/skills/legal/SKILL.md":                  "---\nname: legal\n---\nbody\n",
-		"templates/project/workflows/audit.js":                     "export default {};\n",
-		"templates/project/codex/config.toml":                      "model = \"{TOKEN}\"\n",
-		"templates/project/docs-commands/jc/references/jc-core.md": "# JC\n",
-		"templates/project/docs-agents/_index.md":                  "# Agents\n",
+		"VERSION":                                                     "0.65.0\n",
+		"templates/project/CLAUDE.md":                                 "# {TOKEN} contract\n",
+		"templates/project/settings.json":                             "{}\n",
+		"templates/project/rumdl-policy.toml":                         "# fixture rumdl policy\n[global]\n",
+		"templates/project/commands/dev.md":                           "old\n",
+		"templates/project/agents/gitter.md":                          "---\nname: gitter\n---\nbody\n",
+		"templates/project/scripts/dev.sh":                            "#!/usr/bin/env bash\nset -euo pipefail\n",
+		"templates/project/skills/legal/SKILL.md":                     "---\nname: legal\n---\nbody\n",
+		"templates/project/workflows/audit.js":                        "export default {};\n",
+		"templates/project/codex/config.toml":                         "model = \"{TOKEN}\"\n",
+		"templates/project/docs-commands/wave/references/fix-core.md": "# Fix Core\n",
+		"templates/project/docs-agents/_index.md":                     "# Agents\n",
 	} {
 		writeProjectFixtureFile(t, root, relative, content)
 	}

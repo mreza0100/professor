@@ -91,7 +91,7 @@ export type Flow = 'INTACT' | 'AT-RISK' | 'BROKEN' | 'N/A';
 export interface Defect {
   what: string;
   location: string;
-  jc?: string;
+  fix?: string;
   // INVARIANT-REGISTRY FEATURE (tmp/wave-walker-investigation.md § 2.5) — optional so it's additive to
   // the existing WALK schema; the reoriented thread-walker prompt asks for a concrete failure scenario
   // per defect, but a defect emitted before this field existed (or one where none applies) stays valid.
@@ -101,7 +101,7 @@ export interface Hygiene {
   kind: string;
   where: string;
   detail: string;
-  jc?: string;
+  fix?: string;
 }
 export interface WalkOut {
   threadId: string;
@@ -302,7 +302,7 @@ export interface MissedRisk {
   what: string;
   where: string;
   severity?: string;
-  jc?: string;
+  fix?: string;
 }
 export interface FinalOut {
   verdict: 'SMOOTH SAILING' | 'MOSTLY GOOD' | 'ROUGH SEAS' | 'SHIPWRECK';

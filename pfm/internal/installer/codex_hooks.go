@@ -15,7 +15,7 @@ const codexClearMatcher = "startup|resume|clear"
 // updateCodexHooks preserves personal handlers, retires clear-kill, and owns the appendix.
 func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHookCounts) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
+	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return nil, false, nil, err
 	}
 	if err := validateCodexHooks(document); err != nil {
@@ -80,7 +80,7 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 			for _, value := range handlers {
 				handler, _ := value.(map[string]any)
 				if handler["command"] == codexappendix.Command(home) {
-					if handler["type"] != "command" || handler["timeout"] != float64(10) {
+					if handler["type"] != "command" || !jsonNumberIs(handler["timeout"], 10) {
 						handler["type"] = "command"
 						handler["timeout"] = float64(10)
 						changed = true

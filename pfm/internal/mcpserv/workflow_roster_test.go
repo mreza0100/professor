@@ -5,13 +5,17 @@ import (
 	"testing"
 )
 
-func TestChatMCPAdvertisesEveryNativeWorkflowTool(t *testing.T) {
+// TestChatMCPRosterNeverAdvertisesRetiredGoalAndReload pins the retired
+// compiled-goal firer and in-place reboot tools' absence: chat_goal and
+// chat_reload are gone from the MCP roster (the CLI `pfm chat reload` stays).
+func TestChatMCPRosterNeverAdvertisesRetiredGoalAndReload(t *testing.T) {
 	tools := ToolNames()
 	for _, name := range []string{
 		"chat_goal",
+		"chat_reload",
 	} {
-		if !slices.Contains(tools, name) {
-			t.Errorf("chat MCP tool roster lacks %q", name)
+		if slices.Contains(tools, name) {
+			t.Errorf("chat MCP tool roster still advertises retired tool %q", name)
 		}
 	}
 }
