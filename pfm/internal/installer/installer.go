@@ -902,8 +902,22 @@ func (installer *engine) writeUpdateMetadata() error {
 		} else {
 			installer.ok(path)
 		}
-	} else if err := installer.reportSourceRepoMarker(); err != nil {
-		return err
+		abs, err := filepath.Abs(installer.options.SourceRepo)
+		if err != nil {
+			return fmt.Errorf("resolve source repository %q: %w", installer.options.SourceRepo, err)
+		}
+		if err := installer.armSourceRepoPrePushGate(filepath.Clean(abs)); err != nil {
+			return err
+		}
+	} else {
+		if err := installer.reportSourceRepoMarker(); err != nil {
+			return err
+		}
+		if recorded, err := ReadSourceRepoMarker(installer.options.Home); err == nil {
+			if err := installer.armSourceRepoPrePushGate(recorded); err != nil {
+				return err
+			}
+		}
 	}
 	content, err := canonicalBinaryOwnershipContent(installer.options.Home)
 	if err != nil {

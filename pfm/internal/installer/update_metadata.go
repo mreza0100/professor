@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/deps"
 )
 
 const (
@@ -97,6 +99,67 @@ func (installer *engine) reportSourceRepoMarker() error {
 	default:
 		return fmt.Errorf("check source repository marker: %w", err)
 	}
+}
+
+// armSourceRepoPrePushGate arms the leak gate (core.hooksPath=.githooks) in
+// the source clone install just recorded or kept, so `pfm doctor` run from
+// that clone — where the update prompt sends every adopter — reports
+// pre-push gate=armed instead of exiting 1 with UNWIRED. The product demands
+// core.hooksPath in a clone it owns; nothing else in pfm ever sets it, so
+// install/update is the only place that can. Only the resolved source clone
+// is ever touched, and .githooks/ contents are never modified — this writes
+// repo-local git config, nothing else.
+func (installer *engine) armSourceRepoPrePushGate(repo string) error {
+	hook := filepath.Join(repo, ".githooks", "pre-push")
+	hookInfo, err := os.Stat(hook)
+	if errors.Is(err, fs.ErrNotExist) {
+		installer.skip("pre-push gate not shipped in " + repo + " — nothing to arm")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect pre-push hook %s: %w", hook, err)
+	}
+	if !hookInfo.Mode().IsRegular() || hookInfo.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("%s is not an executable regular file — refusing to arm a broken pre-push hook", hook)
+	}
+
+	git := deps.Executable("git")
+	toplevelBytes, err := exec.Command(git, "-C", repo, "rev-parse", "--show-toplevel").CombinedOutput()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			installer.skip("git unavailable — pre-push gate not armed in " + repo)
+			return nil
+		}
+		message := strings.TrimSpace(string(toplevelBytes))
+		if strings.Contains(strings.ToLower(message), "not a git repository") {
+			installer.skip(repo + " is not a git repository — pre-push gate not armed")
+			return nil
+		}
+		return fmt.Errorf("resolve %s as a git repository: %w: %s", repo, err, message)
+	}
+
+	actualBytes, configErr := exec.Command(git, "-C", repo, "config", "--get", "core.hooksPath").CombinedOutput()
+	actual := strings.TrimSpace(string(actualBytes))
+	if configErr != nil {
+		var exitErr *exec.ExitError
+		if !(errors.As(configErr, &exitErr) && exitErr.ExitCode() == 1 && actual == "") {
+			return fmt.Errorf("read core.hooksPath in %s: %w: %s", repo, configErr, actual)
+		}
+		actual = ""
+	}
+
+	if actual == ".githooks" {
+		installer.ok("pre-push gate armed core.hooksPath=.githooks in " + repo)
+		return nil
+	}
+
+	return installer.change("arm pre-push gate core.hooksPath=.githooks in "+repo, func() error {
+		out, err := exec.Command(git, "-C", repo, "config", "core.hooksPath", ".githooks").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("set core.hooksPath in %s: %w: %s", repo, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	})
 }
 
 func binaryOwnershipPath(home string) string {
