@@ -155,7 +155,7 @@ func TestDOIMirrorClientPreservesBaseRedirectPolicy(t *testing.T) {
 		called = true
 		return wantErr
 	}}
-	client := doiMirrorClient(base, jar)
+	client := gatewayClient(base, jar)
 	next, err := http.NewRequest(http.MethodGet, "https://mirror.example/final", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -311,6 +311,62 @@ func TestPMIDWithoutPMCIDFallsBackToDOIMirror(t *testing.T) {
 	}
 	if postIdentifier != "1234567" || pdfReferer != "https://doi-mirror.test/article/fixture" {
 		t.Fatalf("PMID DOIMirror request identifier=%q referer=%q", postIdentifier, pdfReferer)
+	}
+}
+
+// TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure: a transport
+// failure (no response ever arrived) and a response failure (a response
+// arrived and then its body failed to read/decode/fit the byte ceiling) are
+// different facts about where the wire broke, and doiMirrorLookup's own
+// message must say which.
+func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
+	withPublicDNSForProviderTest(t)
+
+	t.Run("transport failure names the request", func(t *testing.T) {
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("dial tcp: connection refused")
+		})}
+		h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}, DOIMirrorURL: "https://doi-mirror.test/"})
+		got := h.fetchDOIMirror(context.Background(), doiMirrorFixtureDOI, FetchOptions{})
+		if !strings.Contains(got.Error, "lookup request failed") {
+			t.Fatalf("error = %q, want it to name the request failure", got.Error)
+		}
+		if strings.Contains(got.Error, "lookup response failed") {
+			t.Fatalf("error = %q, a transport failure must not be reported as a response failure", got.Error)
+		}
+	})
+
+	t.Run("oversize response names the response", func(t *testing.T) {
+		oversize := strings.Repeat("a", 51*1024*1024)
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return response(r, http.StatusOK, "text/html", oversize), nil
+		})}
+		h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}, DOIMirrorURL: "https://doi-mirror.test/"})
+		got := h.fetchDOIMirror(context.Background(), doiMirrorFixtureDOI, FetchOptions{})
+		if !strings.Contains(got.Error, "lookup response failed") {
+			t.Fatalf("error = %q, want it to name the response failure", got.Error)
+		}
+		if strings.Contains(got.Error, "lookup request failed") {
+			t.Fatalf("error = %q, a received-but-oversize response must not be reported as a request failure", got.Error)
+		}
+	})
+}
+
+// TestReadDOIMirrorResponseErrorsAreSourceNeutral: readDOIMirrorResponse
+// backs oversizeTruncate:false for EVERY gateway caller (postJSON,
+// getJSONWithHeaders, searchBrave, the doi-mirror provider itself), so its
+// own error strings must not name "doi-mirror" — a CORE or Brave failure
+// reading "doi-mirror returned an empty response body" names the wrong
+// source.
+func TestReadDOIMirrorResponseErrorsAreSourceNeutral(t *testing.T) {
+	_, _, _, err := readDOIMirrorResponse(nil, 1024)
+	if err == nil || strings.Contains(err.Error(), "doi-mirror") {
+		t.Fatalf("readDOIMirrorResponse(nil) error = %v, must not name doi-mirror", err)
+	}
+	emptyBody := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: nil}
+	_, _, _, err = readDOIMirrorResponse(emptyBody, 1024)
+	if err == nil || strings.Contains(err.Error(), "doi-mirror") {
+		t.Fatalf("readDOIMirrorResponse(empty body) error = %v, must not name doi-mirror", err)
 	}
 }
 

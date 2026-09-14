@@ -94,40 +94,50 @@ type providerResponse struct {
 	finalURL    string
 }
 
+// providerGet fetches one provider PAGE through the fetch gateway. Going
+// through the gateway is what gives every scholarly provider the challenge
+// ladder — Chrome impersonation, then the headless browser, then a headed one
+// as the last resort. Before the gateway existed this path ran a single plain
+// client, so a provider record page behind a JS wall failed with a bare 403
+// that was indistinguishable from the source refusing the request.
 func (h *Harvester) providerGet(ctx context.Context, rawURL string, headers http.Header, max int64) (providerResponse, error) {
-	if err := assertFetchable(rawURL, false); err != nil {
-		return providerResponse{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
-	if err != nil {
-		return providerResponse{}, fmt.Errorf("build provider request: %w", err)
-	}
-	req.Header.Set("User-Agent", h.userAgent)
-	for key, values := range headers {
-		for _, value := range values {
-			req.Header.Add(key, value)
-		}
-	}
+	return h.providerFetch(ctx, rawURL, headers, max, false)
+}
+
+// providerDownload fetches a provider ARTIFACT (the PDF/EPUB bytes). It climbs
+// the same ladder except the browser rungs, which render HTML and therefore
+// can never return a document's bytes.
+func (h *Harvester) providerDownload(ctx context.Context, rawURL string, headers http.Header, max int64) (providerResponse, error) {
+	return h.providerFetch(ctx, rawURL, headers, max, true)
+}
+
+func (h *Harvester) providerFetch(ctx context.Context, rawURL string, headers http.Header, max int64, binary bool) (providerResponse, error) {
 	jar, _ := ctx.Value(providerCookieJarKey{}).(http.CookieJar)
 	if jar == nil {
+		var err error
 		jar, err = cookiejar.New(nil)
 		if err != nil {
 			return providerResponse{}, fmt.Errorf("create provider cookie jar: %w", err)
 		}
 	}
-	resp, err := doiMirrorClient(h.binaryDirectOrClient(), jar).Do(req)
+	response, err := h.gatewayFetch(ctx, gatewayRequest{
+		url:     rawURL,
+		client:  h.binaryDirectOrClient(),
+		ua:      h.userAgent,
+		headers: headers,
+		max:     max,
+		jar:     jar,
+		policy:  gatewayEscalate,
+		binary:  binary,
+	})
 	if err != nil {
-		return providerResponse{}, err
+		return providerResponse{status: response.status, contentType: response.contentType}, err
 	}
-	body, status, contentType, err := readDOIMirrorResponse(resp, max)
-	if err != nil {
-		return providerResponse{status: status, contentType: contentType}, err
+	finalURL := response.finalURL
+	if finalURL == "" {
+		finalURL = rawURL
 	}
-	finalURL := rawURL
-	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
-	}
-	return providerResponse{body: body, status: status, contentType: contentType, finalURL: finalURL}, nil
+	return providerResponse{body: response.body, status: response.status, contentType: response.contentType, finalURL: finalURL}, nil
 }
 
 func providerResult(source, provider, message, kind string, status int, challenge bool, rungs []string) Result {
@@ -164,7 +174,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 	if referer != "" {
 		headers.Set("Referer", referer)
 	}
-	response, err := h.providerGet(ctx, fileURL, headers, doiMirrorMaxBytes(h))
+	response, err := h.providerDownload(ctx, fileURL, headers, doiMirrorMaxBytes(h))
 	if err != nil {
 		return providerResult(source, provider, "download failed: "+err.Error(), errorKind(err), 0, false, rungs)
 	}

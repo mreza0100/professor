@@ -254,7 +254,7 @@ func (h *Harvester) md5CatalogRecord(ctx context.Context, md5 string) (string, s
 	// the ads page. Probe it once as a bounded fallback; an HTML/empty response
 	// is still a provider failure and is never accepted as a file.
 	directURL := base + "/get.php?md5=" + url.QueryEscape(md5)
-	direct, directErr := h.providerGet(providerCtx, directURL, http.Header{"Referer": {response.finalURL}}, doiMirrorMaxBytes(h))
+	direct, directErr := h.providerDownload(providerCtx, directURL, http.Header{"Referer": {response.finalURL}}, doiMirrorMaxBytes(h))
 	if directErr == nil && direct.status < 400 && bytes.HasPrefix(direct.body, []byte("%PDF-")) {
 		return direct.finalURL, response.finalURL, nil
 	}

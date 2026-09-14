@@ -64,18 +64,24 @@ func (f doiMirrorFailure) result(identifier string, rungs []string) Result {
 		Challenge: f.challenge, HTTPStatus: f.status, Rungs: append([]string(nil), rungs...)}
 }
 
-func doiMirrorClient(base *http.Client, jar http.CookieJar) *http.Client {
+// gatewayClient clones base for ONE gateway request: it attaches the request's
+// cookie jar and re-validates every redirect hop, without mutating the shared
+// client. A nil jar leaves the base client's own jar in place — dropping it
+// would silently discard a session an earlier rung established.
+func gatewayClient(base *http.Client, jar http.CookieJar) *http.Client {
 	clone := &http.Client{Jar: jar}
 	var existingRedirect func(*http.Request, []*http.Request) error
 	if base != nil {
 		copy := *base
 		clone = &copy
-		clone.Jar = jar
+		if jar != nil {
+			clone.Jar = jar
+		}
 		existingRedirect = clone.CheckRedirect
 	}
 	clone.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return errors.New("doi-mirror redirect limit exceeded")
+			return errors.New("gateway redirect limit exceeded")
 		}
 		if err := assertFetchable(next.URL.String(), false); err != nil {
 			return err
@@ -95,14 +101,19 @@ func doiMirrorMaxBytes(h *Harvester) int64 {
 	return 50 * 1024 * 1024
 }
 
+// readDOIMirrorResponse is gatewayReadBody's non-truncating branch — every
+// gateway caller that refuses an oversize body (postJSON, getJSONWithHeaders,
+// searchBrave, the doi-mirror provider itself) reads its response through
+// here, so its error strings name the gateway generically rather than the
+// one caller ("doi-mirror") this function happened to be written for first.
 func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string, error) {
 	if resp == nil {
-		return nil, 0, "", errors.New("doi-mirror returned no HTTP response")
+		return nil, 0, "", errors.New("gateway received no HTTP response")
 	}
 	status := resp.StatusCode
 	contentType := resp.Header.Get("Content-Type")
 	if resp.Body == nil {
-		return nil, status, contentType, errors.New("doi-mirror returned an empty response body")
+		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
 	if err != nil {
@@ -127,28 +138,43 @@ func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar 
 	if err := assertFetchable(base, false); err != nil {
 		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup URL refused: " + err.Error(), kind: errorKind(err)}
 	}
+	// The lookup POST goes through the fetch gateway like every other harvester
+	// egress, so this provider's own entry point gets the same challenge ladder
+	// — Chrome impersonation, then the browser rungs — that the record-page
+	// fetches get. It previously ran one plain client, which meant the one
+	// request that STARTS a doi-mirror fetch was the one request that could not
+	// pass a wall.
 	form := url.Values{"request": {identifier}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base, strings.NewReader(form.Encode()))
-	if err != nil {
-		return doiMirrorLookup{}, doiMirrorFailure{message: "could not build lookup request: " + err.Error(), kind: "invalid"}
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8")
-	req.Header.Set("User-Agent", h.userAgent)
-	client := doiMirrorClient(h.client, jar)
-	resp, err := client.Do(req)
-	if err != nil {
-		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: errorKind(err)}
-	}
-	body, status, _, err := readDOIMirrorResponse(resp, doiMirrorMaxBytes(h))
+	response, err := h.gatewayFetch(ctx, gatewayRequest{
+		url:    base,
+		method: http.MethodPost,
+		body:   []byte(form.Encode()),
+		client: h.client,
+		ua:     h.userAgent,
+		headers: http.Header{
+			"Content-Type": {"application/x-www-form-urlencoded"},
+			"Accept":       {"text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8"},
+		},
+		max:    doiMirrorMaxBytes(h),
+		jar:    jar,
+		policy: gatewayEscalate,
+	})
+	body, status := response.body, response.status
 	pageURL := base
-	if resp.Request != nil && resp.Request.URL != nil {
-		pageURL = resp.Request.URL.String()
+	if response.finalURL != "" {
+		pageURL = response.finalURL
 	}
 	if err != nil {
 		kind := errorKind(err)
 		if strings.Contains(err.Error(), "exceeds") {
 			kind = "too_large"
+		}
+		// status == 0 means no response ever arrived (a transport failure);
+		// a non-zero status means the server answered and the RESPONSE
+		// itself then failed to read/decode/fit the ceiling. Collapsing the
+		// two into one message hides which side of the wire broke.
+		if status == 0 {
+			return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: kind, status: status}
 		}
 		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup response failed: " + err.Error(), kind: kind, status: status}
 	}
@@ -184,27 +210,35 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			}
 			return nil, 0, mergeDOIMirrorFailures(first, failure)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, lookup.pdfURL, nil)
+		// Through the gateway like every other egress. Escalation is OFF: this
+		// loop owns its own direct→chrome sequence, and the browser rungs can
+		// never satisfy a PDF-bytes fetch anyway.
+		response, err := gatewayAttempt(ctx, gatewayRequest{
+			url:    lookup.pdfURL,
+			client: base,
+			ua:     h.userAgent,
+			headers: http.Header{
+				"Accept":  {"application/pdf,application/octet-stream;q=0.9,*/*;q=0.5"},
+				"Referer": {lookup.pageURL},
+			},
+			max:    doiMirrorMaxBytes(h),
+			jar:    jar,
+			binary: true,
+		})
+		body, status, readErr := response.body, response.status, error(nil)
 		if err != nil {
-			failure := doiMirrorFailure{message: "could not build PDF request: " + err.Error(), kind: "invalid"}
-			if attempt == 0 {
-				return nil, 0, failure
+			if status == 0 {
+				failure := doiMirrorFailure{message: "PDF request failed: " + err.Error(), kind: errorKind(err)}
+				if attempt == 0 {
+					first = &failure
+					continue
+				}
+				return nil, 0, mergeDOIMirrorFailures(first, failure)
 			}
-			return nil, 0, mergeDOIMirrorFailures(first, failure)
+			// The request reached the server and the RESPONSE failed (decode or
+			// size). Keep that distinct from never reaching it.
+			readErr = err
 		}
-		req.Header.Set("Accept", "application/pdf,application/octet-stream;q=0.9,*/*;q=0.5")
-		req.Header.Set("User-Agent", h.userAgent)
-		req.Header.Set("Referer", lookup.pageURL)
-		resp, err := doiMirrorClient(base, jar).Do(req)
-		if err != nil {
-			failure := doiMirrorFailure{message: "PDF request failed: " + err.Error(), kind: errorKind(err)}
-			if attempt == 0 {
-				first = &failure
-				continue
-			}
-			return nil, 0, mergeDOIMirrorFailures(first, failure)
-		}
-		body, status, _, readErr := readDOIMirrorResponse(resp, doiMirrorMaxBytes(h))
 		if readErr != nil {
 			failure := doiMirrorFailure{message: "PDF response failed: " + readErr.Error(), kind: errorKind(readErr), status: status}
 			if strings.Contains(readErr.Error(), "exceeds") {

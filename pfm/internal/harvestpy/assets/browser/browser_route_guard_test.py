@@ -12,17 +12,66 @@ import types
 from browser import browser_route_guard
 
 
+# The complete CDP Network.ErrorReason enum Playwright's Route.abort accepts.
+CDP_ERROR_REASONS = {
+    "aborted", "accessdenied", "addressunreachable", "blockedbyclient",
+    "blockedbyresponse", "connectionaborted", "connectionclosed",
+    "connectionfailed", "connectionrefused", "connectionreset",
+    "internetdisconnected", "namenotresolved", "timedout", "failed",
+}
+
+
 class FakeRoute:
     def __init__(self, url):
         self.request = types.SimpleNamespace(url=url)
         self.abort_reason = None
         self.continued = False
 
-    async def abort(self, reason="blocked"):
+    async def abort(self, reason="failed"):
+        # Playwright validates this against the fixed CDP Network.ErrorReason
+        # enum and RAISES on anything else. The fake must reject exactly what
+        # the real Route rejects — a fake that accepts any string turns this
+        # suite into a coincidence detector, which is how an invented code
+        # ("blocked", "guard-error") reached the SSRF refusal path unnoticed.
+        if reason not in CDP_ERROR_REASONS:
+            raise ValueError(f"invalid CDP error reason {reason!r}")
         self.abort_reason = reason
 
     async def continue_(self):
         self.continued = True
+
+
+class FakeWebSocket:
+    """Stands in for Patchright's WebSocketRoute: connect_to_server() is
+    SYNCHRONOUS (no await), close() is async and takes code/reason kwargs."""
+
+    def __init__(self, url):
+        self.url = url
+        self.connected = False
+        self.close_code = None
+        self.close_reason = None
+
+    def connect_to_server(self):
+        self.connected = True
+
+    async def close(self, *, code=None, reason=None):
+        self.close_code = code
+        self.close_reason = reason
+
+
+class FakeContext:
+    """Stands in for Patchright's BrowserContext, recording exactly what
+    install_route_guards() registers and at what scope/glob."""
+
+    def __init__(self):
+        self.routes = []
+        self.ws_routes = []
+
+    async def route(self, url, handler):
+        self.routes.append((url, handler))
+
+    async def route_web_socket(self, url, handler):
+        self.ws_routes.append((url, handler))
 
 
 def run(coro):
@@ -37,7 +86,9 @@ def test_denied_ask_aborts_before_connecting():
 
     guard = browser_route_guard(deny)
     run(guard(route))
-    assert route.abort_reason == "blocked", f"expected abort('blocked'), got {route.abort_reason!r}"
+    assert route.abort_reason == "blockedbyclient", (
+        f"expected abort('blockedbyclient'), got {route.abort_reason!r}"
+    )
     assert not route.continued, "denied route was continued() — Chrome would have connected"
 
 
@@ -64,8 +115,8 @@ def test_raising_ask_aborts_never_continues():
 
     guard = browser_route_guard(broken)
     run(guard(route))
-    assert route.abort_reason == "guard-error", (
-        f"expected abort('guard-error'), got {route.abort_reason!r}"
+    assert route.abort_reason == "blockedbyclient", (
+        f"expected abort('blockedbyclient'), got {route.abort_reason!r}"
     )
     assert not route.continued, "a raising ask must never let the request through"
 
@@ -94,6 +145,79 @@ def test_serialized_ask_never_overlaps():
     assert state["max"] == 1, (
         f"asks overlapped (max in-flight {state['max']}) — the protocol raced"
     )
+
+
+def test_install_route_guards_registers_both_routes_at_context_scope():
+    from browser import CONTEXT_OPTIONS, install_route_guards
+
+    context = FakeContext()
+
+    async def allow(url):
+        return True, ""
+
+    run(install_route_guards(context, allow))
+
+    assert len(context.routes) == 1, "context.route() must be registered exactly once"
+    assert context.routes[0][0] == "**/*", (
+        f"context.route() must cover every request, not a narrower glob: {context.routes[0][0]!r}"
+    )
+    assert len(context.ws_routes) == 1, "context.route_web_socket() must be registered exactly once"
+    assert context.ws_routes[0][0] == "**/*", (
+        f"route_web_socket() must cover every websocket, not a narrower glob: {context.ws_routes[0][0]!r}"
+    )
+    assert CONTEXT_OPTIONS.get("service_workers") == "block", (
+        "CONTEXT_OPTIONS must block service workers, or SW-originated fetches skip every guard"
+    )
+
+
+def test_websocket_guard_connects_on_allow():
+    from browser import install_route_guards
+
+    context = FakeContext()
+
+    async def allow(url):
+        return True, ""
+
+    run(install_route_guards(context, allow))
+    _, handler = context.ws_routes[0]
+    ws = FakeWebSocket("wss://example.test/socket")
+    run(handler(ws))
+    assert ws.connected, "an allowed websocket must connect_to_server()"
+    assert ws.close_code is None, "an allowed websocket must not be closed"
+
+
+def test_websocket_guard_closes_on_deny():
+    from browser import install_route_guards
+
+    context = FakeContext()
+
+    async def deny(url):
+        return False, "refusing private/internal host 169.254.169.254"
+
+    run(install_route_guards(context, deny))
+    _, handler = context.ws_routes[0]
+    ws = FakeWebSocket("ws://169.254.169.254/latest/meta-data/")
+    run(handler(ws))
+    assert not ws.connected, "a denied websocket must never connect_to_server() — that reaches the real host"
+    assert ws.close_code is not None, "a denied websocket must be closed, not left dangling"
+
+
+def test_websocket_guard_closes_on_raising_ask():
+    # B2's WebSocket twin: the ask channel can die mid-guard. A raised
+    # handler must not leave the routed socket open for the page to use.
+    from browser import install_route_guards
+
+    context = FakeContext()
+
+    async def broken(url):
+        raise RuntimeError("go closed the ask channel mid-guard")
+
+    run(install_route_guards(context, broken))
+    _, handler = context.ws_routes[0]
+    ws = FakeWebSocket("ws://169.254.169.254/latest/meta-data/")
+    run(handler(ws))
+    assert not ws.connected, "a raising ask must never let the websocket connect_to_server()"
+    assert ws.close_code is not None, "a raising ask must close the websocket, never leave it open"
 
 
 if __name__ == "__main__":
