@@ -199,7 +199,7 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 (account 2 has no global agents)\n%s", warnings, output.String())
 	}
@@ -233,7 +233,7 @@ func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 0 {
 		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
 	}
@@ -264,7 +264,7 @@ func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}
@@ -296,7 +296,7 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}
@@ -317,7 +317,7 @@ func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}
@@ -337,7 +337,7 @@ func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
 func TestGlobalAgentsDoctorNoCloneIsNamedNotWarned(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 0 {
 		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
 	}
@@ -371,7 +371,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	t.Cleanup(func() { _ = os.Chmod(markerDir, 0o755) })
 
 	var output bytes.Buffer
-	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home))
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}
@@ -380,5 +380,28 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 	}
 	if strings.Contains(output.String(), "state=NO-CLONE") {
 		t.Fatalf("a failed look at the marker was rendered as an absent clone:\n%s", output.String())
+	}
+}
+
+// TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount pins D2's
+// second row: with Claude absent, every configured account reports
+// state=NO-CLAUDE, no account is ever certified state=linked (nothing was
+// checked), and none of it counts a warning — the installer never wires an
+// account with no Claude Code binary to run.
+func TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalAgentSources(t, home)
+	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+
+	var output bytes.Buffer
+	warnings := ReportGlobalAgents(&output, home, twoReportAccounts(home), true)
+	if warnings != 0 {
+		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	}
+	if strings.Count(output.String(), "state=NO-CLAUDE") != 2 {
+		t.Fatalf("want one NO-CLAUDE line per account:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "state=linked") {
+		t.Fatalf("an absent-Claude account was certified linked:\n%s", output.String())
 	}
 }

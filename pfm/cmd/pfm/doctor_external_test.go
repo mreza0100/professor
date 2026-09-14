@@ -210,7 +210,7 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if warnings := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); warnings != 2 {
+	if warnings, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); warnings != 2 {
 		t.Fatalf("warnings=%d, want 2\n%s", warnings, output.String())
 	}
 	want := strings.Join([]string{
@@ -262,7 +262,10 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 				}}
 			}
 			var output bytes.Buffer
-			warnings := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
+			warnings, claudeAbsent := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
+			if claudeAbsent != testCase.wantMissed {
+				t.Fatalf("claudeAbsent=%v, want %v", claudeAbsent, testCase.wantMissed)
+			}
 			if testCase.wantMissed {
 				if warnings != 0 {
 					t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
@@ -295,7 +298,7 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	warnings := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
+	warnings, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 — a required timed-out dep still contributes its warning\n%s", warnings, output.String())
 	}
@@ -318,7 +321,7 @@ func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
 		}}
 	}
 	var output bytes.Buffer
-	warnings := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
+	warnings, _ := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 for a required unanswered probe\n%s", warnings, output.String())
 	}
@@ -441,33 +444,5 @@ func TestInstallPreflightFailureStillPreviewsInDryRun(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "if you agree, run again") {
 		t.Fatalf("apply confirmation offered despite failed preflight:\n%s", stdout.String())
-	}
-}
-
-func TestHookDoctorRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
-	saved := hookProbeOverride
-	t.Cleanup(func() { hookProbeOverride = saved })
-	home := t.TempDir()
-	hookProbeOverride = func(string, pfmconfig.Config) []installer.HookProbeResult {
-		return []installer.HookProbeResult{
-			{Hook: installer.ExpectedHook{Target: "claude[1]", File: filepath.Join(home, ".claude", "settings.json"), Event: "SessionEnd", Name: "clear-kill"}, State: "ok"},
-			{Hook: installer.ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
-			{Hook: installer.ExpectedHook{Target: "claude[2]", File: filepath.Join(home, ".cc", "2", "settings.json"), Event: "UserPromptSubmit", Name: "usage"}, State: "broken", Error: "parse error"},
-			{Hook: installer.ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
-		}
-	}
-	var output bytes.Buffer
-	if warnings := printHookDoctor(&output, home, pfmconfig.Config{}); warnings != 3 {
-		t.Fatalf("warnings=%d output=%s", warnings, output.String())
-	}
-	for _, wanted := range []string{
-		"doctor: hook claude[1] settings.json SessionEnd clear-kill ok",
-		"doctor: hook codex hooks.json SessionStart clear-kill MISSING — run pfm install",
-		"doctor: hook claude[2] settings.json UserPromptSubmit usage broken error=parse error",
-		"doctor: hook ownership ledger.json SessionEnd unexpected drift error=ledger owns 1 hook absent from expectations",
-	} {
-		if !strings.Contains(output.String(), wanted) {
-			t.Errorf("output missing %q:\n%s", wanted, output.String())
-		}
 	}
 }

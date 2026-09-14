@@ -46,7 +46,6 @@ type pinnedHarvestDoctor struct{}
 var harvestDoctorOverride harvestDoctor
 
 var dependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
-var hookProbeOverride func(string, config.Config) []installer.HookProbeResult
 
 func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
 	return harvestpy.Inspect(root, platform)
@@ -145,16 +144,17 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
-	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
-	warnings += installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts)
 	verboseDir := ""
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
-	warnings += printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
+	depWarnings, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
-	warnings += printHookDoctor(stdout, resolved.Home, runtime.Config)
+	warnings += depWarnings
+	warnings += printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
+	warnings += installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts, claudeAbsent)
+	warnings += installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {
@@ -249,28 +249,7 @@ func runDoctor(
 		fmt.Fprintf(stdout, "doctor: process_table readable pids=%d\n", len(pids))
 	}
 
-	rootWarnings := 0
-	roots := make([]string, 0, len(runtime.Config.Accounts)+len(runtime.Config.CodexAccounts))
-	for _, account := range runtime.Config.Accounts {
-		roots = append(roots, account.ProjectDir)
-	}
-	for _, account := range runtime.Config.CodexAccounts {
-		roots = append(roots, account.Home)
-	}
-	for _, root := range roots {
-		info, err := os.Stat(root)
-		if err != nil || !info.IsDir() {
-			rootWarnings++
-			fmt.Fprintf(stdout, "doctor: warning unreachable_root=%s\n", root)
-		}
-	}
-	warnings += rootWarnings
-	fmt.Fprintf(
-		stdout,
-		"doctor: roots reachable=%d total=%d\n",
-		len(roots)-rootWarnings,
-		len(roots),
-	)
+	warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
 	warnings += printProfessorDoctor(stdout, ".", resolved.Home)
 
 	warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
@@ -654,8 +633,9 @@ func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, option
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) int {
+func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) (int, bool) {
 	warnings := 0
+	claudeAbsent := false
 	for _, result := range configuredDependencyProbe(ctx, entries, options) {
 		entry := result.Entry
 		switch result.State {
@@ -674,6 +654,7 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 			fmt.Fprintf(stdout, "doctor: dep %s path=(none) MISSING %s — install: %s\n", entry.Name, requirement, entry.InstallHint)
 		case deps.StateBroken:
 			if entry.Engine == pfmengine.Claude && installer.ClaudeAbsent(home, result.Path, result.ExitCode) {
+				claudeAbsent = true
 				fmt.Fprintf(stdout, "doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n", entry.Name, result.Path)
 				continue
 			} else if entry.Required {
@@ -726,45 +707,7 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 			fmt.Fprintf(stdout, "doctor: dep %s verbose broken error=%s\n", entry.Name, result.VerboseErr)
 		}
 	}
-	return warnings
-}
-
-func printHookDoctor(stdout io.Writer, home string, machine config.Config) int {
-	var results []installer.HookProbeResult
-	if hookProbeOverride != nil {
-		results = hookProbeOverride(home, machine)
-	} else {
-		results = installer.ProbeExpectedHooks(home, machine)
-	}
-	warnings := 0
-	for _, result := range results {
-		hook := result.Hook
-		file := filepath.Base(hook.File)
-		if file == "." || file == "" {
-			file = "(unknown)"
-		}
-		prefix := fmt.Sprintf("doctor: hook %s %s %s %s", hook.Target, file, hook.Event, hook.Name)
-		switch result.State {
-		case "ok":
-			fmt.Fprintln(stdout, prefix+" ok")
-		case "missing":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
-		case "broken":
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
-		case "drift":
-			warnings++
-			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
-		case "stale":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
-		default:
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
-		}
-	}
-	return warnings
+	return warnings, claudeAbsent
 }
 
 // printHostOverlayDoctor checks the two contracted ~/.local/bin overlay

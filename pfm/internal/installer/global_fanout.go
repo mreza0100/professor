@@ -72,6 +72,10 @@ const (
 	// global agents to be missing — this is not a warning, but it is also not
 	// a clean bill: nothing was checked, and Describe says why.
 	GlobalAgentsNoClone GlobalAgentsState = "NO-CLONE"
+	// GlobalAgentsNoClaude: the installer never wires an account's agents/
+	// registry on a host with no Claude Code binary (ClaudeAbsent), so
+	// finding it unlinked there is not a defect either — named, not warned.
+	GlobalAgentsNoClaude GlobalAgentsState = "NO-CLAUDE"
 )
 
 // GlobalAgentsStatus is one reported line's worth of facts: either one
@@ -113,6 +117,8 @@ func (status GlobalAgentsStatus) Describe() string {
 		return line
 	case GlobalAgentsNoClone:
 		return line + ` note="no Professor clone recorded or at the default path — global agents install from a clone (INSTALL.md § Build from source)"`
+	case GlobalAgentsNoClaude:
+		return line + ` note="no Claude Code binary installed — the installer never wires this account's agents"`
 	default:
 		return line + ` hint="run pfm install"`
 	}
@@ -132,7 +138,14 @@ func (status GlobalAgentsStatus) Describe() string {
 // status says why nothing was checked instead of quietly certifying a host
 // that was never a Professor clone to begin with. Any other Lstat failure on
 // either path is UNRESOLVED with its error — a failed look is never absence.
-func InspectGlobalAgents(home string, accounts []pfmconfig.Account) []GlobalAgentsStatus {
+func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent bool) []GlobalAgentsStatus {
+	if claudeAbsent {
+		statuses := make([]GlobalAgentsStatus, 0, len(accounts))
+		for _, account := range accounts {
+			statuses = append(statuses, GlobalAgentsStatus{Account: account.ID, Dir: account.ConfigDir, State: GlobalAgentsNoClaude})
+		}
+		return statuses
+	}
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		return []GlobalAgentsStatus{{Dir: home, State: GlobalAgentsUnresolved, Error: err.Error()}}
@@ -166,17 +179,17 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account) []GlobalAgen
 // ReportGlobalAgents reports one line per configured Claude account naming
 // whether the machine-global agents the recorded clone ships are linked into
 // that account's agents/ registry — the check that would have caught `pfm
-// install` wiring the primary account only. Every state but Linked and
-// NoClone is a warning carrying its own remediation: NoClone means pfm was
-// never given a clone to check agents against, which is not a defect in an
-// install that runs without one. The classification and its wording live in
-// InspectGlobalAgents / Describe, so the checker can never drift from the
-// installer it checks.
-func ReportGlobalAgents(w io.Writer, home string, accounts []pfmconfig.Account) int {
+// install` wiring the primary account only. Every state but Linked, NoClone
+// and NoClaude is a warning carrying its own remediation: NoClone means pfm
+// was never given a clone to check agents against, and NoClaude means the
+// account has no Claude Code binary to wire agents for at all — neither is a
+// defect. The classification and its wording live in InspectGlobalAgents /
+// Describe, so the checker can never drift from the installer it checks.
+func ReportGlobalAgents(w io.Writer, home string, accounts []pfmconfig.Account, claudeAbsent bool) int {
 	warnings := 0
-	for _, status := range InspectGlobalAgents(home, accounts) {
+	for _, status := range InspectGlobalAgents(home, accounts, claudeAbsent) {
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
-		if status.State != GlobalAgentsLinked && status.State != GlobalAgentsNoClone {
+		if status.State != GlobalAgentsLinked && status.State != GlobalAgentsNoClone && status.State != GlobalAgentsNoClaude {
 			warnings++
 		}
 	}

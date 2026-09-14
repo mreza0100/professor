@@ -17,7 +17,7 @@ import (
 
 const (
 	// SchemaVersion is the newest database schema understood by this binary.
-	SchemaVersion = 9
+	SchemaVersion = 8
 )
 
 //go:embed schema.sql
@@ -44,9 +44,6 @@ var schemaV7 string
 //go:embed migration_v8.sql
 var schemaV8 string
 
-//go:embed migration_v9.sql
-var schemaV9 string
-
 var migrations = [...]string{
 	schemaV1,
 	schemaV2,
@@ -56,7 +53,6 @@ var migrations = [...]string{
 	schemaV6,
 	schemaV7,
 	schemaV8,
-	schemaV9,
 }
 
 // Store is a single-connection handle to the pfm SQLite database.
@@ -189,8 +185,50 @@ func (s *Store) migrate(ctx context.Context) error {
 				return fmt.Errorf("migrate Codex lineage kills: %w", err)
 			}
 		}
+		// assistant_count is ensured here, never versioned: it is a single
+		// additive column an older binary's explicit column list already
+		// ignores, so ADD COLUMN is idempotent and ignorable both ways.
+		// Bumping user_version for it would instead lock every older pfm on
+		// this machine out of the whole store the moment one binary ran it —
+		// including the very binary pfm update's rollback restores.
+		if err := ensureOcSessionsAssistantCount(ctx, tx); err != nil {
+			return err
+		}
 		return nil
 	})
+}
+
+func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(oc_sessions)")
+	if err != nil {
+		return fmt.Errorf("inspect oc_sessions columns: %w", err)
+	}
+	present := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan oc_sessions column: %w", err)
+		}
+		if name == "assistant_count" {
+			present = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate oc_sessions columns: %w", err)
+	}
+	rows.Close()
+	if present {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "ALTER TABLE oc_sessions ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("ensure oc_sessions.assistant_count: %w", err)
+	}
+	return nil
 }
 
 // adoptedKillsMeta marks the one-time move of kills out of this binary's

@@ -92,7 +92,7 @@ func TestMain(m *testing.M) {
 		}
 		return results
 	}
-	hookProbeOverride = func(home string, machine pfmconfig.Config) []installer.HookProbeResult {
+	installer.HookProbeOverride = func(home string, machine pfmconfig.Config) []installer.HookProbeResult {
 		expected := installer.ExpectedHooks(home, machine)
 		results := make([]installer.HookProbeResult, 0, len(expected))
 		for _, hook := range expected {

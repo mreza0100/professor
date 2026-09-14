@@ -28,7 +28,7 @@ import (
 // runs the real capture below. A jail has no genuine `claude` binary to spawn
 // — that is REAL-SESSION territory (TESTPLAN.md), never jailable — so the
 // command-package TestMain supplies a deterministic stub here, the same
-// pattern as dependencyProbeOverride and hookProbeOverride. Only the CAPTURE
+// pattern as dependencyProbeOverride and installer.HookProbeOverride. Only the CAPTURE
 // step is ever swapped; the baseline read and the verdict comparison stay
 // real, so a test still exercises the actual match/DRIFT/CHECK-FAILED logic.
 type harnessCapture struct {
