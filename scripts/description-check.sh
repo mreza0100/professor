@@ -12,6 +12,7 @@ set -euo pipefail
 # What this reports when IT is broken, each on its own exit code and message:
 #   exit 2  python3 or PyYAML is missing — TOOLCHAIN-MISSING, never a pass
 #   exit 3  the scan matched no files at all — the SCAN is broken, not the tree
+#   exit 4  git could not locate or list the repository — no frontmatter was parsed
 #   exit 1  at least one frontmatter does not parse (the failure it exists for)
 #   exit 0  every frontmatter parses; the budget ledger is INFO only
 #
@@ -23,7 +24,26 @@ usage() {
   echo "  no args: every tracked *.md in the repo" >&2
 }
 
-cd "$(git rev-parse --show-toplevel)"
+# Inside the dev fence a worktree's .git file names a host path the container
+# cannot see; dev.sh hands the real git dir and work tree over as a pair, the
+# same route scripts/leak-check.sh takes.
+if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" || -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
+  if [[ -z "${PFM_DEV_REPO_GIT_DIR:-}" || -z "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
+    echo "description-check: PFM_DEV_REPO_GIT_DIR and PFM_DEV_REPO_WORK_TREE must be set together; no frontmatter was parsed" >&2
+    exit 4
+  fi
+  repo_git() {
+    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
+      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
+  }
+else
+  repo_git() { git "$@"; }
+fi
+if ! repo_root="$(repo_git rev-parse --show-toplevel)" || [[ -z "$repo_root" ]]; then
+  echo "description-check: SCAN-BROKEN — git could not locate the repository; no frontmatter was parsed" >&2
+  exit 4
+fi
+cd "$repo_root"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
@@ -43,7 +63,11 @@ if [[ "${1:-}" == "--files" ]]; then
   shift
   printf '%s\n' "$@" > /tmp/desc-check-files.$$
 else
-  git ls-files '*.md' > /tmp/desc-check-files.$$
+  if ! repo_git ls-files '*.md' > /tmp/desc-check-files.$$; then
+    echo "description-check: SCAN-BROKEN — git ls-files failed; no frontmatter was parsed" >&2
+    rm -f /tmp/desc-check-files.$$
+    exit 4
+  fi
 fi
 trap 'rm -f /tmp/desc-check-files.$$' EXIT
 

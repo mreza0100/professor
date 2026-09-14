@@ -128,7 +128,7 @@
     ".claude/commands/wave/walker.md": "98c8f50044c7c708cb6efd36863b7be3206d1418a8b0bd24e81cb32df24da227",
     ".claude/scripts/build-opencode.mjs": "3c7aa5ed4a16413c7f826c15632b0d28e85a98226036d1ccdb50908aa521838a",
     ".claude/scripts/codex-sync.sh": "a9179abfe7b73717b550e54387e76bc316de4de0acaa2b8a01c6db26faaadbe3",
-    ".claude/scripts/dev.sh": "1acc14d0b5c04a5b3e286092580734df779c56ab5d2f7857e15adad2e175a8ab",
+    ".claude/scripts/dev.sh": "00e8c9efbe0d2c91ee3ed8986e5b1029b7f5bccaaf9527b7f321a117c6f15a4e",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "45e82d48d90e54906b090518d99a6085a83314380960885b2f608aa421e17e9b",
@@ -173,7 +173,7 @@
     "CLAUDE.md": "29e7a4f3590b55a2a2786279c0e0c7894342a6d45360911f4ff8108763d0c391",
     "docs/commands/pfm/references/audit-scopes.md": "8634be6c91bfcdcb3ec7609afea5470e92a24918045806f5c5e48a9ab038f4c1",
     "docs/commands/pfm/references/refresh.md": "f764e9aca097f4d0ed0ad534153b2dc6eba189c02f870216e6751069f698e60b",
-    "docs/commands/pfm/references/release-rehearsal.md": "6a74638dc9b373459f0ee8667821a9eab8e291ad7cfa85d8462fed48ef8252c0",
+    "docs/commands/pfm/references/release-rehearsal.md": "b3b5d55913e851f6e0019c29366c3443047e3931a978e635b90bdc4e4e637dc3",
     "pfm/AGENTS.md": "2f09c3129d14b3e45c8c5d13b605b9de6ee13fe43951756d3763fc02b85a6a66",
     "pfm/CLAUDE.md": "0e696cacb5a04c52e7e1dccd5c34c1d66fc3dd765714cc7bdeb71559a4f526f4"
   }
