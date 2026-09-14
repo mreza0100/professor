@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mreza0100/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/mreza0100/professor"></a>
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/mreza0100/professor"></a>
+  <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
   <img alt="go" src="https://img.shields.io/badge/go-1.24-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey">
   <img alt="works with" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-8A2BE2">
@@ -190,7 +190,7 @@ Two independent halves; adopt either without the other.
 - **The discipline layer** — cloned, then scaffolded into your repo through an interview:
 
 ```bash
-REPO=mreza0100/professor
+REPO=rezzminator/professor
 TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v*' \
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
 git clone "https://github.com/${REPO}.git" "$HOME/.professor"
@@ -253,6 +253,6 @@ From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux
 
 Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.
 
-Built by [@mreza0100](https://github.com/mreza0100). Issues and PRs welcome.
+Built by [@rezzminator](https://github.com/rezzminator). Issues and PRs welcome.
 
 **License:** MIT

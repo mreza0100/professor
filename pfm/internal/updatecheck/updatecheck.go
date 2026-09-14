@@ -22,6 +22,10 @@ import (
 const (
 	lockStaleAfter = 2 * time.Minute
 	checkFreshFor  = 6 * time.Hour
+
+	// ProfessorRepo is the "<owner>/<repo>" GitHub slug every hardcoded
+	// Professor URL is derived from. A repository rename is this one line.
+	ProfessorRepo = "rezzminator/professor"
 )
 
 // Notice is one successful release lookup. Current is rewritten to the
@@ -103,21 +107,23 @@ func Check(ctx context.Context, path, current, latestURL string, client *http.Cl
 	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	response, err := noFollow.Do(request)
+	resolved, location, err := follow(&noFollow, request)
 	if err != nil {
-		return fmt.Errorf("request latest Professor release: %w", err)
+		return err
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 300 || response.StatusCode >= 400 {
-		return fmt.Errorf("latest Professor release returned %s", response.Status)
-	}
-	location := strings.TrimSpace(response.Header.Get("Location"))
-	if location == "" {
-		return errors.New("latest Professor release redirect omitted Location")
-	}
-	resolved, err := request.URL.Parse(location)
-	if err != nil {
-		return fmt.Errorf("parse latest Professor release redirect: %w", err)
+	if hop := renameHopURL(request.URL, resolved); hop != "" {
+		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, nil)
+		if err != nil {
+			return fmt.Errorf("build renamed Professor release request: %w", err)
+		}
+		hopRequest.Header.Set("User-Agent", request.Header.Get("User-Agent"))
+		resolved, location, err = follow(&noFollow, hopRequest)
+		if err != nil {
+			return err
+		}
+		if second := renameHopURL(hopRequest.URL, resolved); second != "" {
+			return fmt.Errorf("renamed Professor release redirect %q renamed again to %q", hop, second)
+		}
 	}
 	latest := pathVersion(resolved)
 	if _, ok := parseReleaseVersion(latest); !ok {
@@ -200,6 +206,63 @@ func writeNotice(path string, notice Notice) error {
 		return fmt.Errorf("encode update notice: %w", err)
 	}
 	return atomicfile.Write(path, append(encoded, '\n'), 0o600)
+}
+
+// follow issues one HEAD request and returns its redirect target, both parsed
+// and as the raw Location header (kept for error messages). A non-3xx status
+// or a missing/unparsable Location is an error, never a silent "no update".
+func follow(client *http.Client, request *http.Request) (*url.URL, string, error) {
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, "", fmt.Errorf("request latest Professor release: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 300 || response.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("latest Professor release returned %s", response.Status)
+	}
+	location := strings.TrimSpace(response.Header.Get("Location"))
+	if location == "" {
+		return nil, "", errors.New("latest Professor release redirect omitted Location")
+	}
+	resolved, err := request.URL.Parse(location)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse latest Professor release redirect: %w", err)
+	}
+	return resolved, location, nil
+}
+
+// renameHopURL recognizes exactly the GitHub repository-rename redirect
+// shape: same scheme+host as the request just made, same repo, a different
+// owner, landing on the sibling "releases/latest" (not yet a tag). It
+// returns "" for anything else — a cross-host Location, a different repo, or
+// a Location that already names a tag — leaving that response to the
+// existing tag rule in Check.
+func renameHopURL(original, resolved *url.URL) string {
+	originalOwner, originalRepo, ok := releasesLatestOwnerRepo(original)
+	if !ok {
+		return ""
+	}
+	if resolved.Scheme != original.Scheme || resolved.Host != original.Host {
+		return ""
+	}
+	resolvedOwner, resolvedRepo, ok := releasesLatestOwnerRepo(resolved)
+	if !ok {
+		return ""
+	}
+	if resolvedRepo != originalRepo || resolvedOwner == originalOwner {
+		return ""
+	}
+	return resolved.String()
+}
+
+// releasesLatestOwnerRepo reports the owner/repo of a /<owner>/<repo>/releases/latest
+// path, and false for anything not shaped exactly like one.
+func releasesLatestOwnerRepo(location *url.URL) (owner, repo string, ok bool) {
+	parts := strings.Split(strings.Trim(location.Path, "/"), "/")
+	if len(parts) != 4 || parts[2] != "releases" || parts[3] != "latest" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func pathVersion(location *url.URL) string {
