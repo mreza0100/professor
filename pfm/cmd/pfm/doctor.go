@@ -275,6 +275,7 @@ func runDoctor(
 		warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
 	}
 	warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
+	warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
 	if warnings != 0 {
 		fmt.Fprintf(stdout, "doctor: warnings=%d\n", warnings)
 		return 1
@@ -788,6 +789,20 @@ func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig)
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: harvester_cache dir=%s entries=%d ttl=%s\n", root, entries, ttlText)
+	return 0
+}
+
+// printHarvestSearchDoctor prints the search tool's one health line; the
+// probe itself (OFF/reachable/UNREACHABLE/configured classification) lives in
+// harvest.ProbeSearch, never here — cmd/pfm is dispatch, not policy (C3).
+func printHarvestSearchDoctor(ctx context.Context, stdout io.Writer, harvester config.HarvesterConfig) int {
+	probe := harvest.ProbeSearch(ctx, harvest.SearchOptions{
+		SearXNGURL: harvester.Search.SearXNGURL, BraveAPIKey: harvester.Search.BraveAPIKey, DisableSearch: !harvester.Search.Enabled,
+	}, nil)
+	fmt.Fprintf(stdout, "doctor: harvester search state=%s backend=%s detail=%s\n", probe.State, probe.Backend, probe.Detail)
+	if probe.Warning {
+		return 1
+	}
 	return 0
 }
 

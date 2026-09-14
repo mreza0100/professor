@@ -21,6 +21,11 @@
   shares (installer servicePath): launchd's bare PATH cannot see Homebrew's
   tmux, and without it every run probed nothing and renamed nothing while
   reporting success.
+
+  StandardOutPath / StandardErrorPath land this job's own stdout/stderr in
+  __PFM_HOME__/Library/Logs/pfm/name-sync.log — launchd otherwise discards a
+  background agent's output, so a crash or a logged error was silent. The
+  installer creates ~/Library/Logs/pfm before loading this agent.
 -->
 <plist version="1.0">
 <dict>
@@ -48,5 +53,9 @@
 	<string>Background</string>
 	<key>LowPriorityIO</key>
 	<true/>
+	<key>StandardOutPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/name-sync.log</string>
+	<key>StandardErrorPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/name-sync.log</string>
 </dict>
 </plist>

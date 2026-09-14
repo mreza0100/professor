@@ -186,7 +186,10 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
 				Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
 		}
-		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — use `search` to find an author preprint or the publisher's page directly.", canonical, checked, skipped)
+		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — %s", canonical, checked, skipped, SearchHint(h.settings.searchAvailable,
+			"use `search` to find an author preprint or the publisher's page directly.",
+			"find an author preprint or the publisher's page directly, or try findWorks again with different terms.",
+		))
 		return Result{Source: source, Error: withRungs(message, trace), ErrorKind: sciHubFailureKind(sciHubFailure),
 			Challenge: sciHubFailureChallenge(sciHubFailure), HTTPStatus: sciHubFailureStatus(sciHubFailure), Rungs: trace}
 	}

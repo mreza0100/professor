@@ -114,7 +114,7 @@ func NewConfigured(version string, runtime Runtime) (*Service, error) {
 		return nil, err
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "harvester", Version: version}, &mcp.ServerOptions{
-		Instructions: "Public-document retrieval. Routing — \"fetch / get / read this URL, DOI, ISBN, PMID, PMCID, or local file\" is fetch; \"find papers / works / a book by TITLE\" is findWorks (bibliographic candidates with a fetch handle, no download); \"search the web for X\" is search (ranked URLs with snippets, not a paper finder); \"fetch this image / figure\" is fetchImage; \"did we already fetch it / grep what we hold\" is searchCache; \"open / list / extract from this .zip, .tar, .7z, or .rar\" is archive (a compressed-archive browser, NOT a webpage snapshotter — a web page goes to fetch). Order for a known document — searchCache, then fetch; for a title — findWorks, then fetch with its handle; for a topic — search, then fetch the URL. Every tool answers per item — an empty list is \"nothing found\", an error is \"the lookup failed\", never one shape for both.",
+		Instructions: serverInstructions(searchEnabled(runtime)),
 	})
 	resolver := &harvest.Resolver{
 		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
@@ -205,6 +205,7 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		SearXNGURL:            runtime.SearXNGURL,
 		BraveAPIKey:           runtime.BraveAPIKey,
 		DisableSearch:         runtime.DisableSearch,
+		SearchAvailable:       searchEnabled(runtime),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct harvester: %w", err)
@@ -436,7 +437,7 @@ func (service *Service) register() {
 		result, _, err := service.findWorks(ctx, request, input)
 		return result, nil, err
 	})
-	if !service.runtime.DisableSearch {
+	if searchEnabled(service.runtime) {
 		mcp.AddTool(service.server, &mcp.Tool{Name: "search", Description: searchDescription, InputSchema: searchInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
 			result, _, err := service.search(ctx, request, input)
 			return result, nil, err
@@ -776,7 +777,10 @@ func (service *Service) searchCache(_ context.Context, _ *mcp.CallToolRequest, i
 	}
 	lines := make([]string, 0, len(hits)+2)
 	if len(hits) == 0 {
-		text := fmt.Sprintf("No cached pages match /%s/. This only searches pages already fetched — it does not search the web; use `search` or `fetch` a source first.", input.Pattern)
+		text := fmt.Sprintf("No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s", input.Pattern, harvest.SearchHint(searchEnabled(service.runtime),
+			"use `search` or `fetch` a source first.",
+			"fetch a source first.",
+		))
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, CacheOutput{Matches: hits}, nil
 	}
 	lines = append(lines, fmt.Sprintf("%d cached page(s) match /%s/ — this lists WHICH pages match, it does not return their text; `fetch` the source or read `md_path` directly for content:", len(hits), input.Pattern), "")
@@ -939,11 +943,6 @@ func renderArchiveListing(source string, members []harvest.Member) string {
 		lines = append(lines, fmt.Sprintf("| %s | %d | %s |", name, member.UncompressedSize, typeName))
 	}
 	return strings.Join(lines, "\n") + "\n"
-}
-
-// Detailed backend errors are logged internally; callers receive actionable failure classes.
-func renderSearchFailure(err error) string {
-	return "Web search failed. " + harvest.PublicFailureMessage(harvest.Result{Error: err.Error()})
 }
 
 func renderSearch(query string, results []harvest.SearchResult, _ string) string {

@@ -341,7 +341,7 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return jsonResponse(request, `{}`), nil
 		})
-		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
+		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, SearchAvailable: true, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
 			return "", nil
 		})})
 		result := h.Fetch(context.Background(), "10.1234/paywalled")
