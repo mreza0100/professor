@@ -79,7 +79,8 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 #
 #   prompt  .claude/**, CLAUDE.md      — an LLM reads it whole at runtime
 #   doc     docs/**, {project}/docs/** — an agent greps, then reads one file
-#   public  README.md                  — a person reads it rendered
+#   public  README.md                  — a person reads it rendered; exempt
+#                                        from MD033
 #   generated / record                 — in `exclude` above
 #
 # A prompt is exempt from four reader-facing rules and two structural ones:
@@ -96,3 +97,7 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 "**/*.prompt.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
 "CLAUDE.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
 "**/CLAUDE.md" = ["MD001", "MD024", "MD025", "MD033", "MD041", "MD059"]
+# The public README renders on GitHub, where allowlisted inline HTML (`p align`,
+# `picture`, `img`, `details`) is the only layout primitive: a centered hero,
+# badge row, and collapsible sections exist only as HTML.
+"README.md" = ["MD033"]

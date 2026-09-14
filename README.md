@@ -1,10 +1,46 @@
-# Professor
+<h1 align="center">Professor</h1>
 
-**An LLM-harness fleet boost framework.** Professor turns the AI coding chats on your machine into a disciplined engineering team — one you can see, message, and hold to the rules.
+<p align="center">
+  <strong>An LLM-harness fleet boost framework.</strong><br>
+  Turns the AI coding chats on your machine into a disciplined engineering team —<br>
+  one you can see, message, and hold to the rules.
+</p>
 
-Under that sentence: a fleet controller and a discipline layer for **Claude Code, Codex, and OpenCode** — chats that talk to each other, agents that follow the rules, and a harvester that reads what the web won't show a bot.
+<p align="center">
+  <a href="https://github.com/mreza0100/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/mreza0100/professor"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/mreza0100/professor"></a>
+  <img alt="go" src="https://img.shields.io/badge/go-1.24-00ADD8">
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey">
+  <img alt="works with" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-8A2BE2">
+</p>
+
+<p align="center">
+  <a href="#six-things-you-can-watch-it-do">Watch it work</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#the-discipline-layer-templates">Discipline layer</a> ·
+  <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
+  <a href="#engines-engines">Engines</a> ·
+  <a href="docs/BLUEPRINT.md">Blueprint</a>
+</p>
+
+<p align="center">
+  <img src="docs/img/pfm-fleet.gif" alt="pfm ls: a fleet of Claude Code chats across four projects and two accounts, fuzzy-found, then the Limits dashboard for two Claude and two Codex accounts, then the cosmos sky with a live comms ledger of chats messaging each other" width="900">
+</p>
+
+A fleet controller and a discipline layer for **Claude Code, Codex, and OpenCode** — chats that talk to each other, agents that follow the rules, and a harvester that reads what the web won't show a bot.
+
+## Why Professor?
 
 You already run more than one AI chat. They cannot see each other, they forget the rules the moment context compacts, and a growing share of the web answers them with a 403. Professor is the layer that fixes all three — without touching what your harness is, only what it does.
+
+| | Without Professor | With Professor |
+| --- | --- | --- |
+| Many chats, many accounts | Scattered terminal tabs; a closed tab is a lost chat | One picker — every chat on every harness, live or resumable |
+| One chat needs another | You copy-paste between windows | `chat_inject` — a signed turn, delivered and acknowledged |
+| The rules, after compaction | Whatever the prompt still remembers | Hooks that refuse, with the unlock steps in the refusal |
+| A bot-blocked page | A 403, or an empty page reported as content | A seven-rung fetch ladder; a block is reported as a block |
+| Claude and Codex rules | Two files that drift apart | One `CLAUDE.md`, compiled mirrors, drift fails the check |
+| An account hits its limit | Start over in a new chat | `/reload --account 2` — same pane, same history |
 
 ---
 
@@ -49,31 +85,27 @@ find › type project or name                                                   
 Two panes, two harnesses. You type one line into the Claude chat on the left; the Codex chat on the right receives it as a signed turn and gets to work.
 
 ```text
-┌──────────────────────────────────────────────────────────────┐        ┌──────────────────────────────────────────────────────────────┐
-│  ▐▛███▛█   Claude Code v2.1.270                              │        │ ╭───────────────────────────────────────────────╮            │
-│ ▝▜██████▀  Fable 5.1 with low effort · Claude Max            │        │ │ >_ OpenAI Codex (v0.154.0)                    │            │
-│   ▝▝ ▝▝    ~/.professor · /rc                                │        │ │                                               │            │
-│                                                              │        │ │ model:       gpt-6-astra xhigh                │            │
-│ ❯ Tell the Codex chat named DEMO_CODEX to run the            │        │ │ directory:   ~/.professor                     │            │
-│   migration test suite and report back when green.           │        │ │ permissions: YOLO mode                        │            │
-│                                                              │        │ ╰───────────────────────────────────────────────╯            │
-│   Called chat_inject                                         │ -----> │ › Run the migration test suite and report back when it       │
-│ ⏺ Sent — DEMO_CODEX has the instruction (delivered live,     │        │   is green.  — sid 0a98b7fe · to reply: chat_inject          │
-│   it's already working) and will report back here when       │        │   DEMO_CLAUDE <message>                                      │
-│   the migration suite is green.                              │        │                                                              │
-│   Verdict: message delivered to DEMO_CODEX — awaiting        │        │ • Explored                                                   │
-│   its green report in this chat. ☕                           │        │   └ Read dev.sh · Search migration (suite|test)              │
-│ ✻ Baked for 9s · done 1:11 AM                                │        │ • The runner has no separate migration target, so I'll       │
-│                                                              │        │   run the full PFM suite, which includes the migration       │
-│ ───────────────────────────────────────────── DEMO_CLAUDE ─  │        │   tests, inside the container fence.                         │
-│ ❯                                                            │        │ • Waiting for background terminal (2m 17s · esc to           │
-│ ────────────────────────────────────────────────────────────  │        │   interrupt) · .claude/scripts/dev.sh iso test pfm           │
-│  🥈 ✦ Fable 5.1 │ 🔖 DEMO_CLAUDE │ 🔹 low │ .professor        │        │                                                              │
-│  │ 🌿 develop ~7 │ ✹9 ·2                                     │        │ › Ask Codex to do anything                                   │
-│  ⛄ ▰▱▱▱▱▱▱▱▱▱ 6% │ 🧮57.3K ✎2 │ 💾5m✓2m:27s │ 💰$1.05        │        │   gpt-6-astra xhigh · ~/.professor · .professor · Working    │
-│  ▰▱▱▱▱ 5h-used:36% ↻1h25m │ ▰▱▱▱▱ 7d-used:35% ↻5d3h          │        │   · Context 82% left · weekly 71% left · 258K window         │
-│  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents│        │   · 52.4K used                                               │
-└──────────────────────────────────────────────────────────────┘        └──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐        ┌────────────────────────────────────────────────────────────┐
+│  ▐▛███▛█   Claude Code v2.1.270                            │        │ ╭──────────────────────────────────────────╮               │
+│ ▝▜██████▀  Fable 5.1 with low effort · Claude Max          │        │ │ >_ OpenAI Codex (v0.154.0)               │               │
+│   ▝▝ ▝▝    ~/.professor                                    │        │ │ model:       gpt-6-astra xhigh           │               │
+│                                                            │        │ │ directory:   ~/.professor                │               │
+│ ❯ Tell the Codex chat named DEMO_CODEX to run the          │        │ │ permissions: YOLO mode                   │               │
+│   migration test suite and report back when green.         │        │ ╰──────────────────────────────────────────╯               │
+│                                                            │        │ › Run the migration test suite and report back when        │
+│   Called chat_inject                                       │ -----> │   it is green.  — sid 0a98b7fe · to reply:                 │
+│ ⏺ Sent — DEMO_CODEX has the instruction (delivered         │        │   chat_inject DEMO_CLAUDE <message>                        │
+│   live, it's already working) and will report back         │        │                                                            │
+│   here when the migration suite is green.                  │        │ • Explored                                                 │
+│   Verdict: message delivered to DEMO_CODEX — awaiting      │        │   └ Read dev.sh · Search migration (suite|test)            │
+│   its green report in this chat. ☕                        │        │ • The runner has no separate migration target, so          │
+│ ✻ Baked for 9s · done 1:11 AM                              │        │   I'll run the full PFM suite, which includes the          │
+│ ─────────────────────────────────────── DEMO_CLAUDE ─      │        │   migration tests, inside the container fence.             │
+│ ❯                                                          │        │ • Waiting for background terminal (2m 17s)                 │
+│ ────────────────────────────────────────────────────       │        │   └ .claude/scripts/dev.sh iso test pfm                    │
+│  🥈 ✦ Fable 5.1 │ 🔖 DEMO_CLAUDE │ 🔹 low │ 🌿 develop     │        │ › Ask Codex to do anything                                 │
+│  ▰▱▱▱▱ 5h-used:36% │ ▰▱▱▱▱ 7d-used:35% ↻5d3h               │        │   gpt-6-astra xhigh · Working · Context 82% left           │
+└────────────────────────────────────────────────────────────┘        └────────────────────────────────────────────────────────────┘
 ```
 
 > The footer on the Codex side is the signature: who spoke (`sid 0a98b7fe`) and the exact command to answer them. A message no sender could be derived for is refused, never delivered anonymously.
@@ -118,9 +150,33 @@ CODEX CHECK PASS
 
 ### 6. Reload without losing the conversation
 
+Account 🥇 is at 94% of its weekly limit. You type `/reload --account 2`; the same pane comes back on 🥈 with the whole conversation, and remembers the codeword it was given on the other account.
+
 ```text
-$ pfm chat reload --account 2 --model opus
+┌────────────────────────────────────────────────────────────┐        ┌────────────────────────────────────────────────────────────┐
+│  ▐▛███▛█   Claude Code v2.1.270                            │        │  ▐▛███▛█   Claude Code v2.1.270                            │
+│ ▝▜██████▀  Opus 5 (1M context) · Claude Max                │        │ ▝▜██████▀  Opus 5 · Claude Max                             │
+│   ▝▝ ▝▝    ~/.professor                                    │        │   ▝▝ ▝▝    ~/.professor                                    │
+│                                                            │        │                                                            │
+│ ❯ Remember this codeword for later: BLUE-HERON.            │        │ ❯ Remember this codeword for later: BLUE-HERON.            │
+│ ⏺ BLUE-HERON — held, my friend. ☕                         │        │ ⏺ BLUE-HERON — held, my friend. ☕                         │
+│   Verdict: codeword stored — note the 7-day cap            │        │   Verdict: codeword stored — note the 7-day cap            │
+│   is at 95%, so /reload may be needed.                     │ reload │   is at 95%, so /reload may be needed.                     │
+│ ✻ Baked for 4s · done 1:34 AM                              │ -----> │ ✻ Baked for 4s · done 1:34 AM                              │
+│                                                            │        │ ⏺ UserPromptSubmit operation blocked by hook:              │
+│                                                            │        │   Original prompt: /reload --account 2                     │
+│                                                            │        │ ❯ What was the codeword I gave you? One line.              │
+│                                                            │        │ ⏺ The codeword is BLUE-HERON.                              │
+│                                                            │        │ ✻ Brewed for 12s · done 1:35 AM                            │
+│ ─────────────────────────────────────── RELOAD_DEMO ─      │        │ ─────────────────────────────────────── RELOAD_DEMO ─      │
+│ ❯ /reload --account 2                                      │        │ ❯                                                          │
+│ ────────────────────────────────────────────────────       │        │ ────────────────────────────────────────────────────       │
+│  🥇 ◆ Opus 5 (1M context) │ 🔖 RELOAD_DEMO                 │        │  🥈 ◆ Opus 5 │ 🔖 RELOAD_DEMO                              │
+│  ▱▱▱▱▱ 5h-used:2% │ ▰▰▰▰▱ 7d-used:94% ↻4d6h                │        │  ▰▱▱▱▱ 5h-used:39% │ ▰▱▱▱▱ 7d-used:36% ↻5d3h               │
+└────────────────────────────────────────────────────────────┘        └────────────────────────────────────────────────────────────┘
 ```
+
+> "Blocked by hook" is the design: the `/reload` hook takes the prompt before the model sees it, so the reboot never spends a turn.
 
 The running chat reboots in place — same pane, same history, new account, model, or effort. `--then "prompt"` hands the baton unattended; `/reload` typed by a human runs through a hook without spending a model turn; `/handoff --branch` carries the full context into a detached successor.
 
@@ -144,7 +200,8 @@ cat "$HOME/.professor/docs/SETUP.md"      # the install interview — start here
 
 The checkout is pinned to the latest semantic version tag. A maintainer checkout also runs `git config core.hooksPath .githooks` so `pfm doctor` reports `pre-push gate=armed`. Upgrading? Follow the [update workflow](INSTALL.md#updating): `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED` with the exact diff, and `pin` / `ignore` / `drop` record your decision — pfm never rewrites a project file after init.
 
-**Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. Both MCP servers ship disabled. The trade-off is deliberate and documented, not hidden.
+> [!WARNING]
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. Both MCP servers ship disabled. The trade-off is deliberate and documented, not hidden.
 
 ---
 
@@ -176,7 +233,12 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 - **Housekeeping.** `doctor` runs the dependency registry and fleet DB checks; `tokens` attributes spend per agent; `context-meter` prices every prompt surface; `statusline` renders identity, session and spend; `codex build|check` is the single writer of the Codex mirror. `pfm dream` keeps its repository-memory commands, with automatic injection removed.
 - **Editor.** `pfm install --vscode` installs the Professor VS Code extension and makes the PFM terminal the default, so each new integrated terminal opens at the fleet picker.
 
-**Requirements** (from `pfm doctor`'s own registry): Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [HARVESTER.md](pfm/HARVESTER.md).
+<details>
+<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.24.13+ for source builds</summary>
+
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [HARVESTER.md](pfm/HARVESTER.md).
+
+</details>
 
 ---
 
