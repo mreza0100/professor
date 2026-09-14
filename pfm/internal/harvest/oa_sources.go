@@ -135,22 +135,22 @@ func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([
 		Sources  []string `json:"sourceFulltextUrls"`
 	}
 	u := "https://api.core.ac.uk/v3/works/" + url.PathEscape(doi)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
+	// Through the fetch gateway, like every other harvester egress — which also
+	// bounds a response this call previously decoded straight off the socket
+	// with no ceiling. The API key rides a header, so this request must never
+	// escalate to a browser rung that would render it somewhere else.
+	headers := map[string]string{}
 	if key := strings.TrimSpace(r.CoreAPIKey); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
+		headers["Authorization"] = "Bearer " + key
 	}
-	resp, err := client.Do(req)
+	body, status, _, err := getBodyWithHeaders(ctx, client, u, contextualUA(ctx), headers, resolverJSONMaxBody)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	if status >= 400 {
+		return nil, fmt.Errorf("HTTP %d", status)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}

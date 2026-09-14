@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -154,24 +153,22 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 	if o.Engines != "" {
 		u += "&engines=" + url.QueryEscape(o.Engines)
 	}
-	req, e := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if e != nil {
-		return nil, fmt.Errorf("build request: %w", e)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", searchUA)
-	resp, e := client.Do(req)
+	// Through the fetch gateway, like every other harvester egress. A search
+	// API answers JSON or nothing, so escalation would buy nothing here.
+	const maxSearchBody = 10 * 1024 * 1024
+	response, e := gatewayAttempt(ctx, gatewayRequest{
+		url: u, client: client, ua: searchUA,
+		headers:       http.Header{"Accept": {"application/json"}},
+		max:           maxSearchBody,
+		policy:        gatewayNoEscalate,
+		trustedOrigin: true, // the operator's own SearXNG, which may be on loopback
+	})
+	body, status := response.body, response.status
 	if e != nil {
 		return nil, e
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	const maxSearchBody = 10 * 1024 * 1024
-	body, e := io.ReadAll(io.LimitReader(resp.Body, maxSearchBody+1))
-	if e != nil {
-		return nil, fmt.Errorf("read response: %w", e)
+	if status >= 400 {
+		return nil, fmt.Errorf("HTTP %d", status)
 	}
 	if len(body) > maxSearchBody {
 		return nil, fmt.Errorf("response exceeds %d bytes", maxSearchBody)
@@ -211,27 +208,25 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 		query.Set("search_lang", o.Lang)
 	}
 	reqURL := "https://api.search.brave.com/res/v1/web/search?" + query.Encode()
-	req, e := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	// Through the fetch gateway, like every other harvester egress. The
+	// subscription token rides a header, so this request must never escalate to
+	// a browser rung that would render it somewhere else.
+	body, status, _, e := getBodyWithHeaders(ctx, client, reqURL, searchUA, map[string]string{
+		"Accept":               "application/json",
+		"X-Subscription-Token": o.BraveAPIKey,
+	}, 10*1024*1024)
 	if e != nil {
 		return nil, e
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", searchUA)
-	req.Header.Set("X-Subscription-Token", o.BraveAPIKey)
-	resp, e := client.Do(req)
-	if e != nil {
-		return nil, e
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	if status >= 400 {
+		return nil, fmt.Errorf("HTTP %d", status)
 	}
 	var data struct {
 		Web struct {
 			Results []struct{ Title, URL, Description string } `json:"results"`
 		} `json:"web"`
 	}
-	if e = json.NewDecoder(resp.Body).Decode(&data); e != nil {
+	if e = json.Unmarshal(body, &data); e != nil {
 		return nil, e
 	}
 	out := []SearchResult{}

@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -67,9 +68,22 @@ type gatewayRequest struct {
 	max     int64
 	jar     http.CookieJar
 	policy  gatewayPolicy
+	// method defaults to GET. body is held as BYTES, not a Reader, because the
+	// ladder may replay the same request on a second rung and a consumed
+	// stream would replay as an empty one — a POST silently losing its form.
+	method string
+	body   []byte
 	// binary marks a request whose BYTES are the artifact (a PDF, an EPUB).
 	// The browser rungs return rendered HTML and can never satisfy one.
 	binary bool
+	// trustedOrigin marks a URL the OPERATOR configured (a self-hosted SearXNG,
+	// which is legitimately allowed to be on loopback). The generic SSRF
+	// assertion refuses private hosts, which is right for attacker-supplied
+	// URLs and wrong for the operator's own server. Trust extends to the exact
+	// configured origin ONLY: the caller's client pins the dial and refuses
+	// every redirect, and the gateway must not paper over that refusal with a
+	// private-host error that names the wrong cause.
+	trustedOrigin bool
 	// oversizeTruncate selects what an over-ceiling body means. The generic web
 	// ladder KEEPS the permitted prefix (matching the oracle's streaming cap,
 	// where a truncated page is still worth converting); the provider path
@@ -208,10 +222,20 @@ func (h *Harvester) gatewayRung(ctx context.Context, req gatewayRequest, client 
 // same code path as the provider ladder.
 func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	var out gatewayResponse
-	if err := assertFetchable(req.url, false); err != nil {
-		return out, err
+	if !req.trustedOrigin {
+		if err := assertFetchable(req.url, false); err != nil {
+			return out, err
+		}
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.url, http.NoBody)
+	method := req.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var payload io.Reader = http.NoBody
+	if len(req.body) > 0 {
+		payload = bytes.NewReader(req.body) // a fresh reader per rung; see gatewayRequest.body
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, payload)
 	if err != nil {
 		return out, fmt.Errorf("build request: %w", err)
 	}
@@ -221,7 +245,7 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 			httpReq.Header.Add(key, value)
 		}
 	}
-	resp, err := gatewayClient(req.client, req.jar).Do(httpReq)
+	resp, err := gatewayRequestClient(req).Do(httpReq)
 	if err != nil {
 		return out, err
 	}
@@ -241,6 +265,21 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 		out.challenge = doiMirrorChallenge(body, status)
 	}
 	return out, nil
+}
+
+// gatewayRequestClient builds the per-request client. A trusted operator origin
+// keeps its own client's redirect policy untouched — that policy refuses every
+// redirect by name, and wrapping it in the generic SSRF check would report a
+// walked-off redirect as a private-host error, naming the wrong cause.
+func gatewayRequestClient(req gatewayRequest) *http.Client {
+	if req.trustedOrigin {
+		clone := *req.client
+		if req.jar != nil {
+			clone.Jar = req.jar
+		}
+		return &clone
+	}
+	return gatewayClient(req.client, req.jar)
 }
 
 // gatewayReadBody decodes the response and applies the byte ceiling under the

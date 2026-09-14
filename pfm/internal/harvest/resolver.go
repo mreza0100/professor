@@ -375,27 +375,40 @@ func getJSON(ctx context.Context, client *http.Client, raw string, dst any) erro
 	return getJSONWithHeaders(ctx, client, raw, nil, dst)
 }
 
+// resolverJSONMaxBody bounds a scholarly JSON API response. Matches the
+// getJSONWithHeaders ceiling so both JSON paths refuse the same size.
+const resolverJSONMaxBody = 10 * 1024 * 1024
+
 func postJSON(ctx context.Context, client *http.Client, raw string, payload any, dst any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode JSON: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, raw, strings.NewReader(string(body)))
+	// Through the fetch gateway, like every other harvester egress. Escalation
+	// is OFF: this is a JSON API, and a browser render can never satisfy one.
+	// The gateway also imposes the byte ceiling this call previously lacked —
+	// it decoded straight off the socket with no bound at all.
+	response, err := gatewayAttempt(ctx, gatewayRequest{
+		url:    raw,
+		method: http.MethodPost,
+		body:   body,
+		client: client,
+		ua:     contextualUA(ctx),
+		headers: http.Header{
+			"Accept":       {"application/json"},
+			"Content-Type": {"application/json"},
+		},
+		max:              resolverJSONMaxBody,
+		policy:           gatewayNoEscalate,
+		oversizeTruncate: false,
+	})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", contextualUA(ctx))
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	if response.status >= 400 {
+		return fmt.Errorf("HTTP %d", response.status)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+	if err := json.Unmarshal(response.body, dst); err != nil {
 		return fmt.Errorf("decode JSON: %w", err)
 	}
 	return nil
