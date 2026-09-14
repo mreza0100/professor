@@ -9,14 +9,14 @@ import (
 
 func TestFindWorksIncludesConfiguredProvidersAndPublicHandleFetchesSelectedPDF(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	md5 := "9de4a86150a39b54d3e01f98678468bf"
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
-		case "annas.test":
+		case "ipfs-catalog.test":
 			return response(r, http.StatusOK, "text/html", `<a href="/md5/`+md5+`">Anna result</a>`), nil
-		case "libgen.test":
-			return response(r, http.StatusOK, "text/html", `<table><tr><td><a href="/edition.php?id=4">LibGen result</a></td><td>Author</td><td>Publisher</td><td>2020</td><td><a href="/ads.php?md5=`+md5+`&key=x">GET</a></td></tr></table>`), nil
+		case "md5-catalog.test":
+			return response(r, http.StatusOK, "text/html", `<table><tr><td><a href="/edition.php?id=4">MD5Catalog result</a></td><td>Author</td><td>Publisher</td><td>2020</td><td><a href="/ads.php?md5=`+md5+`&key=x">GET</a></td></tr></table>`), nil
 		case "scholar.test":
 			if r.URL.Path == "/selected.pdf" {
 				return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nselected\n%%EOF"), nil
@@ -26,7 +26,7 @@ func TestFindWorksIncludesConfiguredProvidersAndPublicHandleFetchesSelectedPDF(t
 			return response(r, http.StatusOK, "application/json", `{}`), nil
 		}
 	})}
-	resolver := &Resolver{Client: client, AnnasURL: "https://annas.test", LibGenURL: "https://libgen.test", GoogleScholarURL: "https://scholar.test"}
+	resolver := &Resolver{Client: client, IPFSCatalogURL: "https://ipfs-catalog.test", MD5CatalogURL: "https://md5-catalog.test", GoogleScholarURL: "https://scholar.test"}
 	candidates, err := resolver.FindWorks(context.Background(), "fixture query", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestFindWorksIncludesConfiguredProvidersAndPublicHandleFetchesSelectedPDF(t
 			selected = candidate
 		}
 	}
-	for _, source := range []string{"annas", "libgen", "google-scholar"} {
+	for _, source := range []string{"ipfs-catalog", "md5-catalog", "google-scholar"} {
 		if !sources[source] {
 			t.Fatalf("FindWorks candidates omitted configured provider %q: %#v", source, candidates)
 		}

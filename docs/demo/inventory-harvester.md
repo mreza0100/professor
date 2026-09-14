@@ -62,8 +62,8 @@ A. Identifier-keyed path (`known_id.go`, then `fetchOA` for DOI):
 1. Cache lookup (`cache.go`) — short-circuits everything below if fresh
 2. Identifier classification (DOI/ISBN/PMID/PMCID) — `identifiers.go`
 3. DOI → OA fan-out, concurrent, priority-merged: `unpaywall → openalex → semanticscholar → europepmc → openaire → zenodo → elife → plos → nber → crossref → core → doaj` — `resolver.go:121-222`, `oa_sources.go`
-4. DOI mirror (if `scholarly.doiMirrorURL` configured) — `known_id.go:224-230`, `harvest/doi_mirror.go`
-5. Mirror chain (`fetchDOIMirrors`): DOI viewer (if `doiViewerURL`) → MD5 catalog (if `md5CatalogURL`) — `mirror_providers.go`
+4. DOI mirror (when configured) — `known_id.go:224-230`, `harvest/doi_mirror.go`
+5. Mirror chain (`fetchDOIMirrors`): DOI viewer → MD5 catalog, each when configured — `mirror_providers.go`
 6. Google Scholar mirror (if `googleScholarURL`) — `known_id.go:241-248`
 7. ISBN path: Google Books — `books.go`
 8. PMID path: NCBI idconv → PMCID → PMC OA / Europe PMC — `mirror.go:14-19,88`

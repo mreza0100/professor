@@ -30,7 +30,7 @@ func TestFetchItemCarriesOnlyPublicResultFields(t *testing.T) {
 		Path:        "/cache/public/opaque.md",
 		CacheStatus: "hit",
 		Bytes:       7,
-		Method:      "scihub",
+		Method:      "doi-mirror",
 		Rungs:       []string{"direct", "mirror:https://mirror.secret.example"},
 	})
 	if item.Source != "10.1234/public.boundary" || item.Path != "/cache/public/opaque.md" || item.Content != "article" {

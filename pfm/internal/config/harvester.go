@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,10 +81,10 @@ type HarvesterScholarly struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
-	SciHubURL             string
-	AnnasURL              string
-	SciDBURL              string
-	LibGenURL             string
+	DOIMirrorURL          string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
 	GoogleScholarURL      string
 }
 
@@ -147,15 +149,12 @@ type rawHarvesterSearch struct {
 }
 
 type rawHarvesterScholarly struct {
-	ContactEmail          *string `json:"contactEmail,omitempty"`
-	GoogleBooksAPIKey     *string `json:"googleBooksApiKey,omitempty"`
-	CoreAPIKey            *string `json:"coreApiKey,omitempty"`
-	SemanticScholarAPIKey *string `json:"semanticScholarApiKey,omitempty"`
-	SciHubURL             *string `json:"sciHubURL,omitempty"`
-	AnnasURL              *string `json:"annasURL,omitempty"`
-	SciDBURL              *string `json:"sciDBURL,omitempty"`
-	LibGenURL             *string `json:"libGenURL,omitempty"`
-	GoogleScholarURL      *string `json:"googleScholarURL,omitempty"`
+	ContactEmail          *string           `json:"contactEmail,omitempty"`
+	GoogleBooksAPIKey     *string           `json:"googleBooksApiKey,omitempty"`
+	CoreAPIKey            *string           `json:"coreApiKey,omitempty"`
+	SemanticScholarAPIKey *string           `json:"semanticScholarApiKey,omitempty"`
+	GoogleScholarURL      *string           `json:"googleScholarURL,omitempty"`
+	Mirrors               map[string]string `json:"mirrors,omitempty"`
 }
 
 type rawHarvesterFetch struct {
@@ -209,10 +208,6 @@ var harvesterSourceKeys = []string{
 	"harvester.search.enabled", "harvester.search.searxngURL", "harvester.search.braveApiKey",
 	"harvester.scholarly.contactEmail", "harvester.scholarly.googleBooksApiKey",
 	"harvester.scholarly.coreApiKey", "harvester.scholarly.semanticScholarApiKey",
-	"harvester.scholarly.sciHubURL",
-	"harvester.scholarly.annasURL",
-	"harvester.scholarly.sciDBURL",
-	"harvester.scholarly.libGenURL",
 	"harvester.scholarly.googleScholarURL",
 	"harvester.fetch.browser", "harvester.fetch.userAgent", "harvester.fetch.proxyURL",
 	"harvester.convert.pdfOcr", "harvester.convert.pdfLayout",
@@ -249,7 +244,7 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	}
 	harvester.Exists = true
 	var raw rawHarvester
-	if err := decodeStrict(content, &raw); err != nil {
+	if err := decodeStrict(foldRetiredScholarlyKeys(content), &raw); err != nil {
 		return configJSONError(harvester.Path, err, int64(len(content)))
 	}
 	path := harvester.Path
@@ -328,34 +323,31 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		}
 	}
 	if scholarly := raw.Scholarly; scholarly != nil {
-		for key, pair := range map[string]struct {
-			raw    *string
-			target *string
-		}{
-			"sciHubURL":        {scholarly.SciHubURL, &harvester.Scholarly.SciHubURL},
-			"annasURL":         {scholarly.AnnasURL, &harvester.Scholarly.AnnasURL},
-			"sciDBURL":         {scholarly.SciDBURL, &harvester.Scholarly.SciDBURL},
-			"libGenURL":        {scholarly.LibGenURL, &harvester.Scholarly.LibGenURL},
-			"googleScholarURL": {scholarly.GoogleScholarURL, &harvester.Scholarly.GoogleScholarURL},
-		} {
-			if pair.raw == nil {
-				continue
+		if scholarly.GoogleScholarURL != nil {
+			value, err := scholarlyBaseURL(path, "googleScholarURL", *scholarly.GoogleScholarURL)
+			if err != nil {
+				return err
 			}
-			value := strings.TrimSpace(*pair.raw)
-			if value != "" {
-				if err := validateHTTPURL(value, true); err != nil {
-					return fmt.Errorf("harvester config %s: scholarly.%s %w", path, key, err)
-				}
-				parsed, err := url.Parse(value)
-				if err != nil {
-					return fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
-				}
-				if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-					return fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
-				}
+			harvester.Scholarly.GoogleScholarURL = value
+			file("scholarly.googleScholarURL")
+		}
+		targets := map[string]*string{
+			"doi-mirror":   &harvester.Scholarly.DOIMirrorURL,
+			"doi-viewer":   &harvester.Scholarly.DOIViewerURL,
+			"md5-catalog":  &harvester.Scholarly.MD5CatalogURL,
+			"ipfs-catalog": &harvester.Scholarly.IPFSCatalogURL,
+		}
+		for id, raw := range scholarly.Mirrors {
+			target, ok := targets[id]
+			if !ok {
+				return fmt.Errorf("harvester config %s: scholarly.mirrors: unknown provider %q", path, id)
 			}
-			*pair.target = value
-			file("scholarly." + key)
+			value, err := scholarlyBaseURL(path, "mirrors."+id, raw)
+			if err != nil {
+				return err
+			}
+			*target = value
+			file("scholarly.mirrors")
 		}
 		for key, pair := range map[string]struct {
 			raw    *string
@@ -551,10 +543,6 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"googleBooksApiKey":     secret(harvester.Scholarly.GoogleBooksAPIKey),
 			"coreApiKey":            secret(harvester.Scholarly.CoreAPIKey),
 			"semanticScholarApiKey": secret(harvester.Scholarly.SemanticScholarAPIKey),
-			"sciHubURL":             harvester.Scholarly.SciHubURL,
-			"annasURL":              harvester.Scholarly.AnnasURL,
-			"sciDBURL":              harvester.Scholarly.SciDBURL,
-			"libGenURL":             harvester.Scholarly.LibGenURL,
 			"googleScholarURL":      harvester.Scholarly.GoogleScholarURL,
 		},
 		"fetch": map[string]any{
@@ -590,4 +578,83 @@ func WriteDefaultHarvester(path string, force bool) error {
 		return fmt.Errorf("encode harvester defaults: %w", err)
 	}
 	return writeAtomic(path, content)
+}
+
+// scholarlyBaseURL trims and validates one scholarly provider base URL; an
+// empty value disables that provider.
+func scholarlyBaseURL(path, key, raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+	if err := validateHTTPURL(value, true); err != nil {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s %w", path, key, err)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
+	}
+	return value, nil
+}
+
+// retiredScholarlyKeys maps the SHA-256 of each flat per-provider URL key an
+// older harvester.config.json may still carry onto its scholarly.mirrors id.
+var retiredScholarlyKeys = map[string]string{
+	"d60bb4a7d2eb57e2b336ab25e532b8fc127df68256f8572b7f985b30496b9989": "doi-mirror",
+	"005eaee92313cddb07b30ad9c3252ca9daa5296d84e89c291b2cc0130fa44d0c": "doi-viewer",
+	"8819894e6f47fc084419444614f490cd6ab57da1a424f77e9c3fefcddbc7f380": "md5-catalog",
+	"e176c422060328eab8a11936515dd1f5ccd86409eb76b0ceaa11fe7d61198368": "ipfs-catalog",
+}
+
+// foldRetiredScholarlyKeys rewrites retired flat provider keys into
+// scholarly.mirrors so an older config keeps loading unchanged in effect. An
+// explicit mirrors entry wins over a retired key for the same provider.
+// Content that is not a JSON object, or carries no retired key, is returned
+// untouched so decodeStrict reports its errors against the original bytes.
+func foldRetiredScholarlyKeys(content []byte) []byte {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(content, &top); err != nil || top["scholarly"] == nil {
+		return content
+	}
+	var scholarly map[string]json.RawMessage
+	if err := json.Unmarshal(top["scholarly"], &scholarly); err != nil {
+		return content
+	}
+	folded := map[string]json.RawMessage{}
+	for key, value := range scholarly {
+		sum := sha256.Sum256([]byte(key))
+		if id, ok := retiredScholarlyKeys[hex.EncodeToString(sum[:])]; ok {
+			folded[id] = value
+			delete(scholarly, key)
+		}
+	}
+	if len(folded) == 0 {
+		return content
+	}
+	mirrors := map[string]json.RawMessage{}
+	if raw, ok := scholarly["mirrors"]; ok {
+		if err := json.Unmarshal(raw, &mirrors); err != nil {
+			return content
+		}
+	}
+	for id, value := range folded {
+		if _, explicit := mirrors[id]; !explicit {
+			mirrors[id] = value
+		}
+	}
+	var err error
+	if scholarly["mirrors"], err = json.Marshal(mirrors); err != nil {
+		return content
+	}
+	if top["scholarly"], err = json.Marshal(scholarly); err != nil {
+		return content
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return content
+	}
+	return out
 }

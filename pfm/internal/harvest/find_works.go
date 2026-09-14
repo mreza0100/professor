@@ -40,20 +40,20 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	}
 	wait.Wait()
 	providerFailures := []string{}
-	if r.configuredProviderBase("annas") != "" {
-		candidates, err := r.annasSearch(ctx, query, limit)
+	if r.configuredProviderBase("ipfs-catalog") != "" {
+		candidates, err := r.ipfsCatalogSearch(ctx, query, limit)
 		if err != nil {
-			log.Printf("harvest: annas book discovery failed for %s: %v", query, err)
-			providerFailures = append(providerFailures, "Anna's: "+err.Error())
+			log.Printf("harvest: ipfs-catalog book discovery failed for %s: %v", query, err)
+			providerFailures = append(providerFailures, "ipfs-catalog: "+err.Error())
 		} else {
 			parts = append(parts, candidates)
 		}
 	}
-	if r.configuredProviderBase("libgen") != "" {
-		candidates, err := r.libGenSearch(ctx, query, limit)
+	if r.configuredProviderBase("md5-catalog") != "" {
+		candidates, err := r.md5CatalogSearch(ctx, query, limit)
 		if err != nil {
-			log.Printf("harvest: libgen book discovery failed for %s: %v", query, err)
-			providerFailures = append(providerFailures, "LibGen: "+err.Error())
+			log.Printf("harvest: md5-catalog book discovery failed for %s: %v", query, err)
+			providerFailures = append(providerFailures, "md5-catalog: "+err.Error())
 		} else {
 			parts = append(parts, candidates)
 		}

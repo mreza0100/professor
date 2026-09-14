@@ -4,19 +4,15 @@ Harvester reads `harvester.config.json` beside `pfm.config.json`. CLI fetches an
 
 ## Scholarly providers
 
-Open-access resolution runs first. Optional mirror providers extend retrieval when that chain cannot supply a readable document. Empty or omitted mirror URLs disable the corresponding provider.
+Open-access resolution runs first.
 
 | Configuration | Retrieval and discovery |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `scholarly.contactEmail` | Enables the existing Unpaywall DOI API with the operator's real contact email. |
-| `scholarly.doiMirrorURL` | DOI mirror: POSTs a DOI/PMID to the configured mirror, extracts the embedded PDF link from the HTML, downloads the PDF. |
-| `scholarly.doiViewerURL` | DOI viewer: fetches a DOI page and follows its embedded PDF-viewer link. |
-| `scholarly.ipfsCatalogURL` | IPFS catalog: catalog search and MD5 records with keyless IPFS copies. |
-| `scholarly.md5CatalogURL` | MD5 catalog: catalog search, exact DOI records, MD5 lookup, and download-page resolution. |
 | `scholarly.googleScholarURL` | Google Scholar discovery, including linked document copies. |
 | No extra setting | PubMed Central resolution through NCBI ID conversion, OA PDF links, and Europe PMC. |
 
-Mirror settings are absolute HTTP(S) base URLs without credentials, query, or fragment. Public-network checks cover requests, redirects, and discovered file hosts. TLS verification remains enabled. HTML parsing and downloads have size and time limits; MD5-addressed copies are checked against their record digest.
+Provider URLs are absolute HTTP(S) base URLs without credentials, query, or fragment. Public-network checks cover requests, redirects, and discovered file hosts. TLS verification remains enabled. HTML parsing and downloads have size and time limits; MD5-addressed copies are checked against their record digest.
 
 Mirror availability and document coverage vary. A successful homepage response is insufficient: the selected record, download host, and conversion must all work. HTTP errors, malformed responses, challenges, and conversion failures remain failures. Interactive CAPTCHAs are not solved. A missing Unpaywall contact email disables its requests; no substitute identity is generated.
 

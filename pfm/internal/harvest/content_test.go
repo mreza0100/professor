@@ -10,7 +10,7 @@ import (
 
 func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	const sourceA = "https://publisher.test/a"
 	const sourceB = "https://publisher.test/b"
 	var aRequests, bRequests int
@@ -46,7 +46,7 @@ func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 
 func TestBibliographicLandingFollowsFullTextDocumentLink(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	const landingURL = "https://publisher.test/landing"
 	const documentURL = "https://publisher.test/files/fulltext.pdf"
 	var documentRequests int

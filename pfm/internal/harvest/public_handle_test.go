@@ -48,7 +48,7 @@ func TestPublicSourceAndHandleBoundariesRejectPrivateOrSymlinkNamespaces(t *test
 	if err := os.Symlink(filepath.Join(cacheDir, "public"), filepath.Join(privateDir, "handles")); err != nil {
 		t.Fatal(err)
 	}
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	if _, err := h.PublicHandle("https://repository.test/public.boundary.pdf"); err == nil {
 		t.Fatal("private handles symlink into public namespace accepted")
 	}
@@ -56,7 +56,7 @@ func TestPublicSourceAndHandleBoundariesRejectPrivateOrSymlinkNamespaces(t *test
 
 func TestPublicCandidatesDoNotTreatUnsafeDOIURLsOrISBNLocationsAsIdentity(t *testing.T) {
 	setHarvestTestJail(t)
-	withPublicDNSForSciHubTest(t)
+	withPublicDNSForProviderTest(t)
 	h := mustNew(t, Options{CacheDir: t.TempDir()})
 	for _, source := range []string{
 		"ftp://doi.org/10.1234/public.boundary",

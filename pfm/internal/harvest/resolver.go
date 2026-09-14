@@ -37,9 +37,9 @@ type Resolver struct {
 	GoogleBooksAPIKey     string
 	CoreAPIKey            string
 	SemanticScholarAPIKey string
-	AnnasURL              string
-	SciDBURL              string
-	LibGenURL             string
+	IPFSCatalogURL        string
+	DOIViewerURL          string
+	MD5CatalogURL         string
 	GoogleScholarURL      string
 }
 
@@ -114,7 +114,7 @@ func (h *Harvester) resolver() *Resolver {
 	}
 	return &Resolver{Client: h.oa, ContactEmail: h.settings.contactEmail, GoogleBooksAPIKey: h.settings.googleBooksAPIKey,
 		CoreAPIKey: h.settings.coreAPIKey, SemanticScholarAPIKey: h.settings.semanticScholarKey,
-		AnnasURL: h.settings.annasURL, SciDBURL: h.settings.sciDBURL, LibGenURL: h.settings.libGenURL,
+		IPFSCatalogURL: h.settings.ipfsCatalogURL, DOIViewerURL: h.settings.doiViewerURL, MD5CatalogURL: h.settings.md5CatalogURL,
 		GoogleScholarURL: h.settings.googleScholarURL}
 }
 
