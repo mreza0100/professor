@@ -113,7 +113,19 @@ func browserHostResolverRuleFrom(rawURL string, ips []net.IP) string {
 			return ""
 		}
 	}
-	return fmt.Sprintf("MAP %s %s", host, ips[0].String())
+	// A rule pins Chrome to ONE address, and the browser rung has no
+	// multi-address fallback of its own the way the HTTP dialer does. The
+	// resolved set is sorted by string, so without this an IPv6 address could
+	// win the pin purely on lexical order and strand the browser rung on a
+	// route this host cannot reach while every HTTP rung succeeds over IPv4.
+	pin := ips[0]
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			pin = ip
+			break
+		}
+	}
+	return fmt.Sprintf("MAP %s %s", host, pin.String())
 }
 
 // dohResolver answers host lookups over HTTPS, with a TTL cache and a system

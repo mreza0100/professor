@@ -67,15 +67,32 @@ def browser_route_guard(ask_fetchable):
             allowed, reason = await ask_fetchable(target)
         except Exception as e:  # noqa: BLE001 — a broken ask channel must ABORT, never continue
             print(f"browser route guard RAISED for {redact(target)}: {e}", file=sys.stderr)
-            await route.abort("guard-error")
+            await abort_request(route, redact(target))
             return
         if not allowed:
             print(f"browser route refused (ssrf) {redact(target)}: {reason}", file=sys.stderr)
-            await route.abort("blocked")
+            await abort_request(route, redact(target))
             return
         await route.continue_()
 
     return _ssrf_route_guard
+
+
+# Route.abort validates its argument against the fixed CDP Network.ErrorReason
+# enum. An invented code ("blocked", "guard-error") raises inside the route
+# handler INSTEAD of aborting, which leaves the intercepted request's fate
+# unresolved — on the refusal branch, the one path that must deterministically
+# stop a request the SSRF guard rejected.
+ABORT_REASON = "blockedbyclient"
+
+
+async def abort_request(route, redacted_target):
+    """Abort one intercepted request, reporting a failure to abort rather than
+    letting it surface as an unexplained hang."""
+    try:
+        await route.abort(ABORT_REASON)
+    except Exception as e:  # noqa: BLE001 — a guard that cannot abort must SAY so
+        print(f"browser route guard could not abort {redacted_target}: {e}", file=sys.stderr)
 
 
 def redact(url):

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"sync"
 	"testing"
@@ -159,5 +160,60 @@ func TestGatewayNeverSpendsBrowserRungOnBinaryDownload(t *testing.T) {
 	}
 	if flags := browser.headlessFlags(); len(flags) != 0 {
 		t.Fatalf("browser calls = %v, want NONE for a binary download", flags)
+	}
+}
+
+// TestGatewayClientJarSemantics pins both branches of the jar rule. A supplied
+// jar always wins; a nil jar LEAVES THE BASE CLIENT'S OWN jar in place, which
+// is what the generic web ladder needs — it passes no jar and must not have a
+// session an earlier rung established silently cleared. The reviewer flagged
+// this branch as untested and therefore free to drift.
+func TestGatewayClientJarSemantics(t *testing.T) {
+	baseJar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New: %v", err)
+	}
+	requestJar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New: %v", err)
+	}
+	base := &http.Client{Jar: baseJar}
+
+	if got := gatewayClient(base, requestJar); got.Jar != requestJar {
+		t.Fatalf("gatewayClient with a jar used %v, want the supplied jar", got.Jar)
+	}
+	if got := gatewayClient(base, nil); got.Jar != baseJar {
+		t.Fatalf("gatewayClient with a nil jar used %v, want the base client's own jar preserved", got.Jar)
+	}
+	if got := gatewayClient(nil, nil); got.Jar != nil {
+		t.Fatalf("gatewayClient with no base and no jar used %v, want no jar", got.Jar)
+	}
+	// The clone must never mutate the shared base client.
+	if base.Jar != baseJar {
+		t.Fatalf("gatewayClient mutated the shared base client's jar")
+	}
+}
+
+// TestGatewayBothRungsFailingReportsBothErrors: when neither rung reached the
+// server, reporting only the first hides the rung carrying the more diagnostic
+// failure.
+func TestGatewayBothRungsFailingReportsBothErrors(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	withPublicDNSForProviderTest(t)
+	direct := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("direct rung exploded")
+	})}
+	chrome := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("chrome rung exploded")
+	})}
+	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Converter: &fakeConverter{}})
+	_, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil, providerHTMLMaxBody)
+	if err == nil {
+		t.Fatal("providerGet error = nil, want both rungs' failures reported")
+	}
+	for _, want := range []string{"direct rung exploded", "chrome rung exploded"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to name %q", err, want)
+		}
 	}
 }

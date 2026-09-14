@@ -12,13 +12,29 @@ import types
 from browser import browser_route_guard
 
 
+# The complete CDP Network.ErrorReason enum Playwright's Route.abort accepts.
+CDP_ERROR_REASONS = {
+    "aborted", "accessdenied", "addressunreachable", "blockedbyclient",
+    "blockedbyresponse", "connectionaborted", "connectionclosed",
+    "connectionfailed", "connectionrefused", "connectionreset",
+    "internetdisconnected", "namenotresolved", "timedout", "failed",
+}
+
+
 class FakeRoute:
     def __init__(self, url):
         self.request = types.SimpleNamespace(url=url)
         self.abort_reason = None
         self.continued = False
 
-    async def abort(self, reason="blocked"):
+    async def abort(self, reason="failed"):
+        # Playwright validates this against the fixed CDP Network.ErrorReason
+        # enum and RAISES on anything else. The fake must reject exactly what
+        # the real Route rejects — a fake that accepts any string turns this
+        # suite into a coincidence detector, which is how an invented code
+        # ("blocked", "guard-error") reached the SSRF refusal path unnoticed.
+        if reason not in CDP_ERROR_REASONS:
+            raise ValueError(f"invalid CDP error reason {reason!r}")
         self.abort_reason = reason
 
     async def continue_(self):
@@ -37,7 +53,9 @@ def test_denied_ask_aborts_before_connecting():
 
     guard = browser_route_guard(deny)
     run(guard(route))
-    assert route.abort_reason == "blocked", f"expected abort('blocked'), got {route.abort_reason!r}"
+    assert route.abort_reason == "blockedbyclient", (
+        f"expected abort('blockedbyclient'), got {route.abort_reason!r}"
+    )
     assert not route.continued, "denied route was continued() — Chrome would have connected"
 
 
@@ -64,8 +82,8 @@ def test_raising_ask_aborts_never_continues():
 
     guard = browser_route_guard(broken)
     run(guard(route))
-    assert route.abort_reason == "guard-error", (
-        f"expected abort('guard-error'), got {route.abort_reason!r}"
+    assert route.abort_reason == "blockedbyclient", (
+        f"expected abort('blockedbyclient'), got {route.abort_reason!r}"
     )
     assert not route.continued, "a raising ask must never let the request through"
 

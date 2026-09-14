@@ -133,6 +133,13 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		if bestErr == nil && candidateErr != nil {
 			return // never downgrade a real answer to a transport failure.
 		}
+		if bestErr != nil && candidateErr != nil {
+			// Both rungs failed to reach the server, for possibly different
+			// reasons. Keep both: reporting only the first hides the rung that
+			// may carry the more diagnostic failure.
+			bestErr = errors.Join(bestErr, candidateErr)
+			return
+		}
 		if bestErr == nil && candidateErr == nil && best.challenge && !candidate.challenge {
 			best = candidate
 		}
@@ -289,35 +296,66 @@ func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, atte
 		return gatewayResponse{}, false
 	}
 
+	// renderHeadlessFirst owns the headless-then-headed sequencing; the gateway
+	// only records which rungs it spent and judges the result.
 	*attempted = append(*attempted, "browser-headless")
-	html, status, err := fetcher.FetchBrowser(ctx, req.url, true)
+	outcome := renderHeadlessFirst(ctx, fetcher, req.url)
+	if outcome.headed {
+		*attempted = append(*attempted, "browser-headed")
+	}
 	switch {
-	case errors.Is(err, ErrBrowserPolicyDenied):
-		log.Printf("harvest: gateway browser rung refused %s by policy: %v", req.url, err)
+	case errors.Is(outcome.err, ErrBrowserPolicyDenied):
+		log.Printf("harvest: gateway browser rung refused %s by policy: %v", req.url, outcome.err)
 		return gatewayResponse{}, false
-	case err != nil:
-		log.Printf("harvest: gateway headless browser rung could not run for %s: %v", req.url, err)
-		return gatewayResponse{}, false
-	}
-	if html != "" && !isChallenge([]byte(html), status) {
-		return browserGatewayResponse(req.url, html, status), true
-	}
-
-	// The LAST rung in the whole gateway. A headed launch opens a visible
-	// window on the operator's desktop, so it is spent only on a wall that
-	// headless already failed to pass, and its failure leaves the headless
-	// verdict standing rather than masking it.
-	*attempted = append(*attempted, "browser-headed")
-	headedHTML, headedStatus, headedErr := fetcher.FetchBrowser(ctx, req.url, false)
-	if headedErr != nil {
-		log.Printf("harvest: gateway headed browser retry for %s could not run after a headless wall: %v", req.url, headedErr)
+	case outcome.err != nil:
+		log.Printf("harvest: gateway browser rung could not run for %s: %v", req.url, outcome.err)
 		return gatewayResponse{}, false
 	}
-	if headedHTML != "" && !isChallenge([]byte(headedHTML), headedStatus) {
-		return browserGatewayResponse(req.url, headedHTML, headedStatus), true
+	if outcome.html != "" && !outcome.wall {
+		return browserGatewayResponse(req.url, outcome.html, outcome.status), true
 	}
-	log.Printf("harvest: gateway browser rungs both met a wall for %s (HTTP %d) — this wall is not passable unattended from this network", req.url, headedStatus)
+	log.Printf("harvest: gateway browser rungs met a wall for %s (HTTP %d) — this wall is not passable unattended from this network", req.url, outcome.status)
 	return gatewayResponse{}, false
+}
+
+// browserRenderOutcome is what the browser rungs produced. It names a WALL
+// separately from an OUTAGE and from an empty render, so a caller never has to
+// re-derive which of the three it got.
+type browserRenderOutcome struct {
+	html   string
+	status int
+	headed bool  // a VISIBLE window was spent
+	wall   bool  // the render completed and is still a challenge page
+	err    error // the rung could not run at all
+}
+
+// renderHeadlessFirst is the ONE implementation of the headless-first /
+// headed-last policy, shared by the gateway and the generic web ladder. Two
+// copies of this sequencing would drift, and the direction it drifts in is a
+// browser window opening on the operator's desktop when it should not.
+//
+// Headless is ALWAYS attempted. A visible window is spent only on a wall the
+// headless render actually met, and a headed launch that fails (a display-less
+// host) leaves the completed headless verdict standing rather than masking it.
+func renderHeadlessFirst(ctx context.Context, fetcher BrowserFetcher, source string) browserRenderOutcome {
+	html, status, err := fetcher.FetchBrowser(ctx, source, true)
+	if err != nil {
+		return browserRenderOutcome{err: err}
+	}
+	if html == "" || !isChallenge([]byte(html), status) {
+		return browserRenderOutcome{html: html, status: status}
+	}
+	headedHTML, headedStatus, headedErr := fetcher.FetchBrowser(ctx, source, false)
+	if headedErr != nil {
+		log.Printf("harvest: headed browser retry for %s could not run after a headless wall: %v", source, headedErr)
+		return browserRenderOutcome{html: html, status: status, wall: true}
+	}
+	return browserRenderOutcome{
+		html:   headedHTML,
+		status: headedStatus,
+		headed: true,
+		wall:   headedHTML != "" && isChallenge([]byte(headedHTML), headedStatus),
+	}
 }
 
 func browserGatewayResponse(source, html string, status int) gatewayResponse {

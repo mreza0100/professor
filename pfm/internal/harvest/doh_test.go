@@ -219,3 +219,19 @@ func TestBrowserHostResolverRuleRefusesPrivateAndUnpinnable(t *testing.T) {
 		})
 	}
 }
+
+// TestBrowserHostResolverRulePrefersIPv4: a rule pins Chrome to ONE address and
+// the browser rung has no multi-address fallback of its own. The resolved set is
+// string-sorted, so without an explicit preference an IPv6 address could win the
+// pin on lexical order alone and strand the browser rung on an unreachable route
+// while every HTTP rung succeeds over IPv4.
+func TestBrowserHostResolverRulePrefersIPv4(t *testing.T) {
+	ips := []net.IP{net.ParseIP("2001:db8::1"), net.ParseIP("198.51.100.7")}
+	if rule := browserHostResolverRuleFrom("https://mirror.example.com/doc", ips); rule != "MAP mirror.example.com 198.51.100.7" {
+		t.Fatalf("rule = %q, want the IPv4 address pinned", rule)
+	}
+	only6 := []net.IP{net.ParseIP("2001:db8::1")}
+	if rule := browserHostResolverRuleFrom("https://mirror.example.com/doc", only6); rule != "MAP mirror.example.com 2001:db8::1" {
+		t.Fatalf("rule = %q, want the IPv6 address when it is the only one", rule)
+	}
+}
