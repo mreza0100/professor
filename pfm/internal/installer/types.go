@@ -66,6 +66,12 @@ type Options struct {
 	// ClaudeRegistries carries actual user-scope paths, including implicit accounts.
 	// Nil derives legacy paths from ConfigDirs; empty means no Claude clients.
 	ClaudeRegistries []string
+	// ClaudeRegistryReasons explains, for a path also present in
+	// ClaudeRegistries, why that file is a registry a pfm-launched Claude
+	// reads (see ClaudeUserRegistries). A path with no entry writes with the
+	// historical unreasoned message; callers that populate ClaudeRegistries
+	// from ClaudeUserRegistries populate this too.
+	ClaudeRegistryReasons map[string]string
 	// CodexHomes is the config-driven hooks.json fanout. A nil value retains
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.

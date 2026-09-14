@@ -1236,39 +1236,6 @@ func printHarvesterConfigDoctor(stdout io.Writer, runtime commandRuntime) int {
 	return warnings
 }
 
-func printMCPClientCutover(stdout io.Writer, runtime commandRuntime) int {
-	warnings := 0
-	claudeDirs := make([]string, 0, len(runtime.Config.Accounts))
-	for _, account := range runtime.Config.Accounts {
-		claudeDirs = append(claudeDirs, installer.ClaudeUserRegistry(runtime.Paths.Home, account.ConfigDir, account.Implicit))
-	}
-	codexHomes := make([]string, 0, len(runtime.Config.CodexAccounts))
-	for _, account := range runtime.Config.CodexAccounts {
-		codexHomes = append(codexHomes, account.Home)
-	}
-	for _, report := range installer.InspectHarvesterClientCutover(runtime.Paths.Home, runtime.Config.MCP.HTTP.Port, claudeDirs, codexHomes) {
-		switch report.State {
-		case installer.MCPClientAbsent, installer.MCPClientPFM:
-			continue
-		case installer.MCPClientUnreadable:
-			warnings++
-			fmt.Fprintf(stdout, "doctor: mcp client=%s harvester=unreadable error=%v path=%s\n", report.Client, report.Error, report.Path)
-		default:
-			warnings++
-			fmt.Fprintf(
-				stdout,
-				"doctor: mcp client=%s harvester=%s warning=consumer cutover incomplete remediation=repoint to PFM, verify it, then remove the foreign registration path=%s\n",
-				report.Client,
-				report.State, report.Path,
-			)
-		}
-	}
-	if warnings == 0 {
-		fmt.Fprintln(stdout, "doctor: mcp client-cutover=complete")
-	}
-	return warnings
-}
-
 // pfmPathWarnings checks both precedence and byte identity. A copied binary
 // later on PATH can become the next active binary after a shell/toolchain
 // change, so checking command resolution alone is insufficient.

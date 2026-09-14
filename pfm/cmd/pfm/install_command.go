@@ -207,10 +207,15 @@ func newInstallerOptions(
 		}
 		if configDir == "" {
 			options.ConfigDirs = make([]string, 0, len(runtime.Config.Accounts))
-			options.ClaudeRegistries = make([]string, 0, len(runtime.Config.Accounts))
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
-				options.ClaudeRegistries = append(options.ClaudeRegistries, installer.ClaudeUserRegistry(runtime.Paths.Home, account.ConfigDir, account.Implicit))
+			}
+			registries := installer.ClaudeUserRegistries(runtime.Paths.Home, runtime.Config.Accounts, pfmconfig.AmbientClaudeConfigDir())
+			options.ClaudeRegistries = make([]string, 0, len(registries))
+			options.ClaudeRegistryReasons = make(map[string]string, len(registries))
+			for _, registry := range registries {
+				options.ClaudeRegistries = append(options.ClaudeRegistries, registry.Path)
+				options.ClaudeRegistryReasons[registry.Path] = registry.Reason
 			}
 		}
 	}

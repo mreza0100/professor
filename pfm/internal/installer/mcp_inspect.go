@@ -21,10 +21,13 @@ const (
 	MCPClientUnreadable          = "unreadable"
 )
 
-// MCPClientCutover is one consumer's visible Harvester route. Unreadable is a
-// first-class state so doctor cannot mistake a failed inspection for cutover.
+// MCPClientCutover is one consumer's visible route for one server. Unreadable
+// is a first-class state so doctor cannot mistake a failed inspection for
+// cutover. Name is the server this report classifies ("harvester", "chat");
+// callers that only ever inspect one server may ignore it.
 type MCPClientCutover struct {
 	Client string
+	Name   string
 	Path   string
 	State  string
 	Error  error
@@ -42,9 +45,20 @@ type mcpClientRegistration struct {
 // InspectHarvesterClientCutover inspects both supported client config files.
 // It never mutates a foreign registration; doctor turns non-PFM states into an
 // actionable warning for the operator completing the standalone migration.
+// registries is mandatory: a nil list is a programming error (the caller must
+// resolve the actual registry roster — installer.ClaudeUserRegistries for
+// Claude's account fanout — never a silent single-file guess), and reports a
+// single MCPClientUnreadable naming the missing list rather than inspecting
+// an unrelated default. An explicitly empty (non-nil) slice means "no Claude
+// registries to inspect" and is valid.
 func InspectHarvesterClientCutover(home string, port int, registries, codexHomes []string) []MCPClientCutover {
 	if registries == nil {
-		registries = []string{filepath.Join(home, ".claude.json")}
+		return []MCPClientCutover{{
+			Client: pfmengine.MustLookup(pfmengine.Claude).LongName,
+			Name:   "harvester",
+			State:  MCPClientUnreadable,
+			Error:  errors.New("no Claude registries supplied"),
+		}}
 	}
 	if codexHomes == nil {
 		codexHomes = []string{filepath.Join(home, ".codex")}
@@ -53,7 +67,7 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 	seen := map[string]bool{}
 	for _, path := range registries {
 		if !seen[path] {
-			reports = append(reports, inspectClaudeHarvester(path, port))
+			reports = append(reports, inspectClaudeServers(path, port, "harvester")...)
 			seen[path] = true
 		}
 	}
@@ -61,38 +75,63 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 		reports = append(reports, inspectCodexHarvester(filepath.Join(dir, "config.toml"), port))
 	}
 	// Root .mcp.json is historical/project-scope evidence, not Claude user scope.
-	reports = append(reports, inspectClaudeHarvester(filepath.Join(home, ".mcp.json"), port))
+	reports = append(reports, inspectClaudeServers(filepath.Join(home, ".mcp.json"), port, "harvester")...)
 	return reports
 }
 
-func inspectClaudeHarvester(path string, port int) MCPClientCutover {
-	report := MCPClientCutover{Client: pfmengine.MustLookup(pfmengine.Claude).LongName, State: MCPClientAbsent, Path: path}
+// InspectClaudeServers is InspectHarvesterClientCutover's per-registry,
+// per-server primitive exported for doctor's registry+reason row, which needs
+// both "harvester" and "chat" classified for the same path in one call.
+func InspectClaudeServers(path string, port int, names ...string) []MCPClientCutover {
+	return inspectClaudeServers(path, port, names...)
+}
+
+// inspectClaudeServers classifies every name's registration in path's
+// mcpServers object, one report per name (in the order given). A missing or
+// unreadable file/document reports every name Absent/Unreadable identically —
+// there is only one file to blame, not one per server.
+func inspectClaudeServers(path string, port int, names ...string) []MCPClientCutover {
+	client := pfmengine.MustLookup(pfmengine.Claude).LongName
+	base := func(name string) MCPClientCutover {
+		return MCPClientCutover{Client: client, Name: name, State: MCPClientAbsent, Path: path}
+	}
+	uniform := func(state string, err error) []MCPClientCutover {
+		reports := make([]MCPClientCutover, len(names))
+		for index, name := range names {
+			report := base(name)
+			report.State, report.Error = state, err
+			reports[index] = report
+		}
+		return reports
+	}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return report
+		return uniform(MCPClientAbsent, nil)
 	}
 	if err != nil {
-		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err)
-		return report
+		return uniform(MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err))
 	}
 	var document struct {
 		Servers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &document); err != nil {
-		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err)
-		return report
+		return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err))
 	}
-	encoded, present := document.Servers["harvester"]
-	if !present {
-		return report
+	reports := make([]MCPClientCutover, 0, len(names))
+	for _, name := range names {
+		report := base(name)
+		encoded, present := document.Servers[name]
+		if present {
+			var registration mcpClientRegistration
+			if err := json.Unmarshal(encoded, &registration); err != nil {
+				report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s %s registration: %w", path, name, err)
+			} else {
+				report.State = classifyRegistration(name, registration, port)
+			}
+		}
+		reports = append(reports, report)
 	}
-	var registration mcpClientRegistration
-	if err := json.Unmarshal(encoded, &registration); err != nil {
-		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s harvester registration: %w", path, err)
-		return report
-	}
-	report.State = classifyHarvesterRegistration(registration, port)
-	return report
+	return reports
 }
 
 func inspectCodexHarvester(path string, port int) MCPClientCutover {
@@ -116,12 +155,17 @@ func inspectCodexHarvester(path string, port int) MCPClientCutover {
 	if !present {
 		return report
 	}
-	report.State = classifyHarvesterRegistration(registration, port)
+	report.State = classifyRegistration("harvester", registration, port)
 	return report
 }
 
-func classifyHarvesterRegistration(registration mcpClientRegistration, port int) string {
-	wantedURL := fmt.Sprintf("http://127.0.0.1:%d/mcp/harvester", port)
+// classifyRegistration is the one implementation shared by every server
+// inspection (Claude's stdio "chat", Claude's and Codex's HTTP "harvester"):
+// name binds both the expected HTTP URL (/mcp/<name>) and the expected stdio
+// argv (mcp <name> serve) to the server actually being classified, so a
+// second copy never drifts as a new MCP server is added.
+func classifyRegistration(name string, registration mcpClientRegistration, port int) string {
+	wantedURL := fmt.Sprintf("http://127.0.0.1:%d/mcp/%s", port, name)
 	typeName := strings.ToLower(strings.TrimSpace(registration.Type))
 	command := strings.TrimSpace(registration.Command)
 	if command != "" {
@@ -132,8 +176,11 @@ func classifyHarvesterRegistration(registration mcpClientRegistration, port int)
 	if registration.URL == wantedURL && (typeName == "" || typeName == "http") && command == "" && len(registration.Args) == 0 && noExtras {
 		return MCPClientPFM
 	}
-	if command == "pfm" && registration.URL == "" && noExtras && containsArgumentSequence(registration.Args, "mcp", "harvester", "serve") {
+	if command == "pfm" && registration.URL == "" && noExtras && containsArgumentSequence(registration.Args, "mcp", name, "serve") {
 		return MCPClientPFM
+	}
+	if name != "harvester" {
+		return MCPClientForeignRegistration
 	}
 	joined := strings.ToLower(strings.Join(registration.Args, " "))
 	if strings.Contains(command, "harvest") || strings.Contains(joined, "harvest") || command == "uv" {
