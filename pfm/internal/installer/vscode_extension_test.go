@@ -254,10 +254,10 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 		filepath.Join(home, "z-product", "extensions", "professor"),
 		filepath.Join(home, "a-product", "extensions", "professor"),
 	}
-	if err := installer.writeVSCodeOwnership(path, nil, map[string]vscodeOwnershipRecord{}, unsorted); err != nil {
+	if err := installer.writeVSCodeOwnership(path, nil, map[string]vscodeOwnershipRecord{}, unsorted, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, extensions, _, err := readVSCodeOwnership(path)
+	_, extensions, _, _, err := readVSCodeOwnership(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(relativeDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "invalid extension link path") {
+	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "invalid extension link path") {
 		t.Fatalf("a relative extension path was accepted: err=%v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(duplicateDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "duplicate extension link") {
+	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "duplicate extension link") {
 		t.Fatalf("a duplicate extension path was accepted: err=%v", err)
 	}
 }

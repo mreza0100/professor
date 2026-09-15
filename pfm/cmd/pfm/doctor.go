@@ -162,6 +162,7 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
+	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, runtime.Config)
 	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(stdout, resolved.Home, runtime.Config.Claude.Binary, gather.NewProcFS(resolved.ProcRoot))
 	tally.warnings += claudeVersionsWarnings
 	tally.failures += claudeVersionsFailures

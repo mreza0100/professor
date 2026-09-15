@@ -231,7 +231,7 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 - **Crash-safety by construction.** `reap`, `archive`, `heal`, and `install` default to a dry run, and the dry run **is** the apply's preview. `heal` backs up the store before it deletes a row.
 - **Headless exec.** `pfm headless exec` is one scriptable interface for Claude and Codex: prompt, system prompt, schema, timeout in; normalized result and native streaming out. See [HEADLESS.md](pfm/HEADLESS.md).
 - **Housekeeping.** `doctor` runs the dependency registry and fleet DB checks; `tokens` attributes spend per agent; `context-meter` prices every prompt surface; `statusline` renders identity, session and spend; `codex build|check` is the single writer of the Codex mirror. `pfm dream` keeps its repository-memory commands, with automatic injection removed.
-- **Editor.** `pfm install --vscode` installs the Professor VS Code extension and makes the PFM terminal the default, so each new integrated terminal opens at the fleet picker.
+- **Editor.** `pfm install --vscode` installs the Professor VS Code extension — visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown — and makes the `PFM` settings profile (its own icon and colour) the default, so each new integrated terminal opens at the fleet picker.
 
 <details>
 <summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.24.13+ for source builds</summary>
