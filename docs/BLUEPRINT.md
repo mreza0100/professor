@@ -69,7 +69,7 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The plumbing (Tier C — invisible)
 
-- `mono-planner`, `mono-architect`, `mono-documenter`, `gitter`, `rndier`, and one `{role}-{project}` wrapper per roster entry per role (the `qa-{project}` gates among them) — root agents; `tracer`, `scheduler`, `architect`, `reviewer`, and `rr` are machine-global originals under `templates/global/agents/`, linked by `pfm install`. Role-defined, not character-defined.
+- `mono-planner`, `mono-architect`, `mono-documenter`, `gitter`, `rndier`, and one `{role}-{project}` wrapper per roster entry per role (the `qa-{project}` gates among them) — root agents; `tracer`, `scheduler`, `architect`, `reviewer`, `rr`, and `rr-super` are machine-global originals under `templates/global/agents/`, linked by `pfm install`. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.

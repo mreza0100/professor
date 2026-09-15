@@ -40,6 +40,9 @@
     "global/agents/rr.md": {
       "curated": true
     },
+    "global/agents/rr-super.md": {
+      "curated": true
+    },
     "global/agents/scheduler.md": {
       "curated": true
     },
