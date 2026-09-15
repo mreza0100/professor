@@ -179,7 +179,6 @@ func newInstallerOptions(
 	options := installer.Options{
 		Mode:               mode,
 		ConfigDir:          configDir,
-		SourceRepo:         discoverSourceRepo(),
 		Stdout:             stdout,
 		ProvisionHarvest:   !skipHarvest,
 		HarvestProvisioner: installHarvestProvisioner(),
@@ -219,7 +218,29 @@ func newInstallerOptions(
 			}
 		}
 	}
+	options.SourceRepo = resolveInstallSourceRepo(options.Home)
 	return options
+}
+
+// resolveInstallSourceRepo resolves the source clone install records and the
+// theme loader reads: cwd discovery (discoverSourceRepo) wins when it finds
+// a clone; otherwise the source-repo marker a prior install/init recorded
+// under home, the same recorded clone `pfm update` prefers via
+// preferredUpdateSourceRepo. `pfm install --yes` run outside the source
+// checkout (a cron job, a different cwd) must still find its own clone
+// rather than falling through empty to the release manifest URL.
+func resolveInstallSourceRepo(home string) string {
+	if repo := discoverSourceRepo(); repo != "" {
+		return repo
+	}
+	if strings.TrimSpace(home) == "" {
+		return ""
+	}
+	recorded, err := installer.ReadSourceRepoMarker(home)
+	if err != nil {
+		return ""
+	}
+	return recorded
 }
 
 func runInstallerCommand(command string, options installer.Options, stderr io.Writer) int {

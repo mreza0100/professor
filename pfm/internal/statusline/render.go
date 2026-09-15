@@ -301,15 +301,6 @@ func effortSegment(runtime Runtime, data input) string {
 	case "max":
 		color, emoji = red, "👑"
 	}
-	sessionID := runtime.getenv("CLAUDE_CODE_SESSION_ID")
-	if sessionID == "" {
-		sessionID = data.SessionID
-	}
-	if data.Effort.Level == "xhigh" && sessionID != "" {
-		if _, err := os.Stat(filepath.Join(runtime.Home, ".claude", "ultracode", sessionID)); err == nil {
-			return red + "🚀 ultracode" + reset
-		}
-	}
 	if !data.Thinking.Enabled {
 		return dim + "💤 " + data.Effort.Level + " (off)" + reset
 	}

@@ -193,3 +193,56 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 		t.Fatalf("unknown base err=%v, want a named manifest refusal", err)
 	}
 }
+
+// TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal is a
+// REGRESSION test for the 2026-09-14 retro finding: `pfm install --yes` run
+// outside the source checkout falls back to a release manifest URL built
+// from an -alpha VERSION, which pfm never publishes and which therefore
+// 404s. loadThemeSources must recognise the -alpha reference in the URL and
+// return a named refusal instead of surfacing a bare HTTP error — and must
+// never even attempt the doomed fetch. FAILS on unfixed code because the URL
+// is fetched unconditionally and the error is a bare "fetch failed"/network
+// error, not the named refusal.
+func TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal(t *testing.T) {
+	_, err := loadThemeSources(context.Background(), Options{
+		ThemeManifestURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/sources.json",
+	})
+	if err == nil {
+		t.Fatal("loadThemeSources() error = nil, want a named refusal for an unpublished -alpha release manifest")
+	}
+	want := "release manifest for an unpublished -alpha build; run pfm install from the source clone"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("loadThemeSources() error = %v, want it to contain %q", err, want)
+	}
+}
+
+// TestThemePreviewLabelsBundledPaletteAsReadNotFetch is a REGRESSION test for
+// the 2026-09-14 retro finding: the preview change line for a bundled
+// palette read from the source clone said "fetch theme X -> target", the
+// same verb used for a source-fetched theme downloaded over HTTP. A bundled
+// palette is read from disk (loadThemeContent, source.local != ""), so its
+// preview line must say "read bundled theme X -> target". FAILS on unfixed
+// code because the preview line always says "fetch theme X -> target".
+func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), `{"name":"Sonar Gold","overrides":{"accent":"#fff"}}`+"\n")
+	manifest := `{"bundled":{"sonar-gold":{"file":"sonar-gold.json","target":"~/.claude/themes/sonar-gold.json","activate":"/theme","requires":"fixture"}}}`
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		Mode: ModeDryRun, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
+	})
+	if err != nil {
+		t.Fatalf("bundled theme preview: %v\n%s", err, output.String())
+	}
+	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
+	want := "read bundled theme sonar-gold -> " + target
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("preview output = %q, want the read-bundled label %q", output.String(), want)
+	}
+	if strings.Contains(output.String(), "fetch theme sonar-gold") {
+		t.Fatalf("preview output still labels the bundled palette as fetched:\n%s", output.String())
+	}
+}

@@ -148,8 +148,8 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 		actual = ""
 	}
 
-	if actual == ".githooks" {
-		installer.ok("pre-push gate armed core.hooksPath=.githooks in " + repo)
+	if PrePushGateArmed(repo, actual) {
+		installer.ok("pre-push gate armed core.hooksPath=" + actual + " in " + repo)
 		return nil
 	}
 
@@ -160,6 +160,24 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 		}
 		return nil
 	})
+}
+
+// PrePushGateArmed reports whether a recorded core.hooksPath value resolves
+// to repository's shipped .githooks directory — a relative spelling
+// (git's own default reading) and its absolute equivalent are the same
+// armed state. Both the install-time arm step (armSourceRepoPrePushGate,
+// above) and `pfm doctor`'s inspectPrePushGate compare through this one
+// function, so a clone armed with either spelling is recognised the same
+// way by both and install never rewrites an already-armed clone.
+func PrePushGateArmed(repository, actual string) bool {
+	if actual == "" {
+		return false
+	}
+	configured := actual
+	if !filepath.IsAbs(configured) {
+		configured = filepath.Join(repository, configured)
+	}
+	return filepath.Clean(configured) == filepath.Join(repository, ".githooks")
 }
 
 func binaryOwnershipPath(home string) string {
