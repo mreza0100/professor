@@ -147,8 +147,8 @@ An earlier version of this template shipped a Codex Teams orchestration model th
 | `CODEX_EXPERIMENTAL_AGENT_TEAMS = "1"` | Teams-gated `Agent(role, "...")` spawning is not the dispatch mechanism; `spawn_agent` is |
 | `[agents] max_threads` / `max_depth` / `job_max_runtime_seconds` | configure a Teams scheduler that never runs the pipeline |
 | `[features] personality` / `codex_hooks` | not load-bearing; voice comes from `AGENTS.md` and the role manuals |
-| `approval_policy = "never"` | a LAUNCH decision (`-a never`), and this file is read by interactive sessions too |
-| `sandbox_mode = "danger-full-access"` | same — a per-launch, explicitly-authorized escalation, never a repo default |
+| `approval_policy` set to never-ask | a LAUNCH decision (`-a never`), and this file is read by interactive sessions too |
+| `sandbox_mode` set to Codex's full-access sandbox | same — a per-launch, explicitly-authorized escalation, never a repo default |
 | `[shell_environment_policy]`, `project_doc_max_bytes` | not needed by the working config; add back only with a reason you can state |
 
 **Launch flags belong with the launcher.** `-s workspace-write -a never` goes in the tmux command that starts a lane. Putting them here changes the human's interactive defaults out from under them.

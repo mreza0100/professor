@@ -59,6 +59,6 @@ tmux -L codex-{lane} new-session -d -s codex-{lane} \
   'codex --cd {REPO_ROOT} -s workspace-write -a never'
 ```
 
-Standing default: workspace-write (kernel sandbox on, spool-only pings). The full-toolset variant (`-s danger-full-access -a never`, where `pfm chat` works) requires explicit, plain-text human authorization per launch policy — never inferred, never menu-selected. **Launch flags live HERE, with the launcher — never in `.codex/config.toml`**, which interactive sessions also read.
+Standing default: workspace-write (kernel sandbox on, spool-only pings). The full-toolset variant (`-s` with Codex's full-access sandbox plus `-a never`, where `pfm chat` works) requires explicit, plain-text human authorization per launch policy — never inferred, never menu-selected. **Launch flags live HERE, with the launcher — never in `.codex/config.toml`**, which interactive sessions also read.
 
 The tmux session name `codex-{lane}` is the lane's address in `lanes.md` — `pfm chat` resolves exact tmux session names across every socket, and its busy-detection matches Codex's "Esc to interrupt" indicator. Dispatch = inject the pane with: `Use the wave-builder skill: BRIEF {path}`. Resume after a death: `codex exec resume {SESSION_ID}`, or relaunch and re-dispatch the BRIEF (the report cards on disk carry the position).

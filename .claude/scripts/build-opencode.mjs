@@ -14,6 +14,7 @@
 //                                          OpenCode itself — nothing to compile)
 //   .mcp.json                            → the managed `mcp` object inside
 //                                          .opencode/opencode.jsonc
+//   LICENSE, SECURITY.md                 → .opencode/{LICENSE,SECURITY.md} (byte copies)
 //
 // .opencode/opencode.jsonc — the script owns exactly three keys: `$schema`,
 // `permission` (repo law pinned at the harness layer: guarded-file edit denies,
@@ -355,6 +356,18 @@ function serializeConfig(extra, mcpProblems) {
   outputs.set(cfgPath, { content: serializeConfig(extra, { exists: hasMcp, mcp }) });
 }
 
+// 4) .opencode/{LICENSE,SECURITY.md} — byte copies of the root files. Plugin
+// scanners score .opencode/ as a package of its own and read LICENSE without
+// following symlinks, so only a real copy counts. A copy carries no marker;
+// these two paths are claimable by name instead (see claimable). A missing
+// root source is a note, not a silent skip.
+const MIRROR_COPIES = new Set(['LICENSE', 'SECURITY.md'].map((f) => join(ROOT, '.opencode', f)));
+for (const f of ['LICENSE', 'SECURITY.md']) {
+  const src = join(ROOT, f);
+  if (!existsSync(src)) { notes.push(`missing ${src} — nothing to mirror into .opencode/${f}`); continue; }
+  outputs.set(join(ROOT, '.opencode', f), { content: read(src) });
+}
+
 // ---------- reconcile --------------------------------------------------------
 
 function isLink(p) {
@@ -362,6 +375,7 @@ function isLink(p) {
 }
 const claimable = (p) => {
   if (isLink(p)) return true;
+  if (MIRROR_COPIES.has(p)) return true;
   if (!existsSync(p)) return true;
   const st = lstatSync(p);
   if (st.isFile()) return GENERATED_RE.test(read(p).slice(0, 600));
@@ -452,7 +466,7 @@ for (const d of managedDirs) {
 // ---------- report -----------------------------------------------------------
 
 for (const n of notes) console.log(`note: ${n}`);
-const counts = `${outputs.size} outputs (${agentSources.length} agents, repo+global commands, skill symlinks, opencode.jsonc) — coverage: repo commands+skills+agents, $HOME commands, repo .mcp.json; NOT covered: hooks (Claude-harness-only), $HOME-level MCP registries, $HOME skills (OpenCode auto-loads them)`;
+const counts = `${outputs.size} outputs (${agentSources.length} agents, repo+global commands, skill symlinks, opencode.jsonc, LICENSE+SECURITY.md copies) — coverage: repo commands+skills+agents, $HOME commands, repo .mcp.json; NOT covered: hooks (Claude-harness-only), $HOME-level MCP registries, $HOME skills (OpenCode auto-loads them)`;
 if (problems.length) {
   for (const p of problems) console.error(p);
   console.error(`${MODE === 'generate' ? 'GENERATE INCOMPLETE' : MODE.toUpperCase() + ' FAIL'} — ${problems.length} problem(s); ${counts}`);
