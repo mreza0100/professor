@@ -555,10 +555,10 @@ func (runner *Runner) awaitPromptTaskStarted(
 			runner.promptProofTimeout,
 		)
 	}
+	// The boundary is examined before the deadline is honoured: a window
+	// spent between arming and the first poll still gets one look, so the
+	// verdict is always an examined one — never "unproven" without a look.
 	for {
-		if err := proofContext.Err(); err != nil {
-			return proofFailure()
-		}
 		chat, found, err := runner.dependencies.Rollouts.Locate(proofContext, snapshot, match)
 		if err != nil {
 			if proofContext.Err() != nil {

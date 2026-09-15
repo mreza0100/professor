@@ -975,3 +975,26 @@ func writeCodexTranscriptWithConfig(
 		t.Fatal(err)
 	}
 }
+
+// TestPromptProofExaminesTheRolloutOnceEvenWhenItsWindowIsAlreadySpent pins
+// the proof loop's order: the rollout boundary is examined BEFORE the proof
+// deadline is honoured, so a window that expires between arming and the
+// first poll (a starved scheduler, a tiny timeout) still yields an examined
+// verdict — never "unproven" without a single look.
+func TestPromptProofExaminesTheRolloutOnceEvenWhenItsWindowIsAlreadySpent(t *testing.T) {
+	runner, host, rollouts, _, _, request := successfulRunner(t)
+	host.cropPrompt = true
+	host.dropPromptKey = true
+	rollouts.chats = nil
+	runner.spawnTimings.Step = 5 * time.Millisecond
+	runner.promptProofTimeout = time.Nanosecond
+	runner.seatTimeout = 100 * time.Millisecond
+
+	_, err := runTestNight(context.Background(), runner, request)
+	if err == nil || !strings.Contains(err.Error(), "task_started") {
+		t.Fatalf("RunNight() error = %v, want missing task_started proof", err)
+	}
+	if rollouts.locates == 0 {
+		t.Fatal("task-start proof honoured its deadline without examining the rollout boundary once")
+	}
+}

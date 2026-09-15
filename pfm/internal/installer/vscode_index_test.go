@@ -240,7 +240,9 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		// Each file carries the owned profile: the readable row must classify
+		// as "owned", so the assertion tests survival, not a missing profile.
+		if err := os.WriteFile(path, []byte(`{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}}}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
