@@ -13,8 +13,8 @@ Resolved:            ← /pfm retro stamps this in place: `Resolved: {date} — 
 ```
 
 Entries without a `Resolved:` line are the open queue. `/pfm retro` folds each `Amend:` into the
-named file through the normal change flow, stamps the entry, and logs the fold to `drift.md` or
-`release.md` like any other change.
+named file through the normal change flow, stamps the entry, and logs a local-only fold to `drift.md`
+like any other change.
 
 ## Entries
 

@@ -232,8 +232,7 @@ your-project/
 │   ├── VERSION                        ← installed blueprint version (e.g., vX.Y.Z)
 │   ├── manifest.json                  ← interview answers (user-owned install record)
 │   ├── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
-│   ├── drift.md                       ← local customization notes (human-readable)
-│   └── release.md                     ← framework changes pending upstream sync
+│   └── drift.md                       ← local customization notes (human-readable)
 ├── .claude/
 │   ├── agents/                        ← root agents (mono-planner, mono-architect, mono-documenter, gitter, rndier, {role}-{project} wrappers; tracer/scheduler/architect are machine-global)
 │   ├── commands/                      ← /wave:{orchestrator,builder,refine,walker,live,ccc}, /pfm and framework release tools, /context-meter, /dev, /git, /documenter, /audit:{code-hygiene,security,ai-output}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/reload` is NOT here — `pfm install` installs it host-level)

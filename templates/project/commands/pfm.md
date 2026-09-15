@@ -98,16 +98,14 @@ For things that must happen every time (formatting, validation, secret-scanning)
 
 Classify FIRST — before any edit. The classification decides the source of truth. **Unsure? Ask the user — never guess.**
 
-- **Framework change** → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates, then log `.professor/release.md` for its release flow. Never put project-specific behavior into the blueprint.
+- **Framework change** → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release reviewers write the notes from the diff. Never put project-specific behavior into the blueprint.
 - **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template. Use `.professor/drift.md` only when a human-readable customization note is useful, never as merge machinery.
 - **Engine mirror** → never edit the generated output by hand. Change its local Claude source, then run `pfm codex build` and `pfm codex check` (or the owning compiler for another engine).
 - **Upstream project-template delta** → run `pfm update check`, inspect the printed template diff, hand-apply the parts that belong locally, then advance that file's pin with `pfm update pin <local>`. New or retired mappings use the report's `pin --template` or `drop` action; a template this project will never take: `pfm update ignore <template>...`. No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.
 
 There is no local-stopgap-to-regeneration ceremony. A framework fix and a project customization are separate changes in their respective sources of truth.
 
-Ledger entries append as FINAL changelog bullets — `- {Tier}: {scope} — {semantic change}`, plus `#### → For:` when adopters must act and `(cost)` on env/hook/permission/model deltas — the framework repo's release copies them verbatim.
-
-**Standalone-skill special case:** a change to a `sources.json` skill logs one `release.md` line and bumps the skill's `version:` frontmatter — the framework repo's release flow ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
+**Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — the framework repo's release flow ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
 
 **Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header; wave retros archive with their wave) — an inbox `/pfm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and logs every fold to drift/release as usual.
 
@@ -175,9 +173,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 ### Step 6 — Report
 
-Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; pipeline flow valid; agent definitions consistent) — for a framework change, "Logged to: release.md — {one-line entry}"; for a project customization, "Local source changed directly" — repos touched beyond this one ({BLUEPRINT_CLONE_PATH}, $HOME) with their uncommitted state, or "none" — manual verification needed (list, or "none").
-
-For a release-bound framework change, record the `.professor/release.md` ledger line (§ Where a change lands) before reporting.
+Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; pipeline flow valid; agent definitions consistent) — for a framework change, "Blueprint changed: {commit-message line}"; for a project customization, "Local source changed directly" — repos touched beyond this one ({BLUEPRINT_CLONE_PATH}, $HOME) with their uncommitted state, or "none" — manual verification needed (list, or "none").
 
 ---
 

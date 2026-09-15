@@ -11,7 +11,7 @@
 - `scripts/`: repo-level gates (`leak-check.sh`, `refresh-scope.sh`); `.githooks/` runs the leak gate `pre-push`.
 - `releases/` + root `README.md` / `INSTALL.md` / `CHANGELOG.md` / `VERSION`: the public face — edited with template-grade care.
 - `.claude/`: this repo's own project-tier install — the commands, agents, skills, and scripts THIS repo uses, the source of truth for its mirrors. Global agents/commands are never copied here: they are the symlinked originals under `templates/global/`. `.codex/` and `.opencode/`: pointer layers compiled over it, never a restatement.
-- `.professor/`: ledgers — `release.md` (framework changes pending upstream; `/pfm:release` consumes and clears it), `drift.md` (this install's keep-local customizations; never consumed), `retro.md` (steering inbox; `/pfm retro` folds it).
+- `.professor/`: ledgers — `drift.md` (this install's keep-local customizations; never consumed), `retro.md` (steering inbox; `/pfm retro` folds it). Release notes are never written during development: `/pfm:release` derives them from `develop`'s diff against `main`.
 - `tmp/`: gitignored scratch — every generated artifact lands here, never in a tracked dir.
 
 Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verify|test} {templates|pfm|walker}`.
@@ -22,7 +22,7 @@ Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verif
 - **Project** (`templates/project/` → an adopter's `CLAUDE.md`, `.claude/**`, `docs/`, `.codex/` keepers): truth is the adopter's local file, full stop. `pfm init` scaffolds once and pins every file in `.professor/baseline.json`; `pfm update adopt [--at REF]` pins an install that predates scaffolding. `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED`, each with the exact `git diff` to read; the adopter's session hand-applies what belongs, then `pfm update pin` (accept) / `ignore` (never adopt) / `drop` (forget). pfm never rewrites a project file after init.
 - **Engine mirrors** (`AGENTS.md`, `.codex/**`, `.opencode/**`): generated from the project's Claude sources by `pfm codex build|check` and `build-opencode.mjs`; never hand-edited.
 
-The reverse direction is the release: `/pfm:release` sweeps every `.professor/release.md` it is pointed at into `releases/vX.Y.Z.md` + `CHANGELOG.md`; with `--from {live-project}` its refresh pass re-derives `templates/project/**` from that project's live files per `templates/refresh-map.json` (`scripts/refresh-scope.sh` + `scripts/genericize.sh`); without it, hand-authored template edits ship as they are.
+The reverse direction is the release: `/pfm:release` sends reviewers over `develop`'s diff against `main` (commit messages included) to write `releases/vX.Y.Z.md` + `CHANGELOG.md` and every adopter instruction; with `--from {live-project}` its refresh pass re-derives `templates/project/**` from that project's live files per `templates/refresh-map.json` (`scripts/refresh-scope.sh` + `scripts/genericize.sh`); without it, hand-authored template edits ship as they are.
 
 ## Three-runtime team — Claude + Codex + OpenCode
 
@@ -58,7 +58,7 @@ node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-o
 - **The judge is never the thing being judged:** read the artifact from disk, never trust a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; dead code/references/deps — remove entirely, end to end (including `README.md`, `BLUEPRINT.md`, `SETUP.md`, `refresh-map.json`).
 - NO duplication: grep for the existing rule/section/script and reference it; never keep a near-copy that will drift.
-- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass and logs to `release.md`; a customization only this repo wants logs to `drift.md`. Unsure → ask.
+- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, its commit message carrying the adopter-facing change; a customization only this repo wants logs to `drift.md`. Unsure → ask.
 - Right-size and finish: simplest thing that works, no speculative abstractions, no stubs or deferred TODOs.
 
 ### Engine code (Go / TS / JS / Python)

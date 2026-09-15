@@ -2,7 +2,7 @@
 
 Executed inside `/pfm:release` (step 3). Re-derives the blueprint from the CURRENT `.claude/` and `CLAUDE.md` state. Edit files directly inside this repo's `templates/project/` tree — this repo IS the upstream clone.
 
-**Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates (plus files named by any bullet the `refresh-scope.sh ledgers` sweep collected, from this repo's ledger or a linked project's); UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
+**Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
 
 **Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm update check` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing. The session reviews each printed template diff, hand-applies wanted changes, and advances accepted pins. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
 
@@ -233,8 +233,6 @@ bash scripts/refresh-scope.sh scan {live-project-root}
 
 `CHANGED` is the work list. `UNCHANGED` is a mechanical untouched-proof — skipped, never re-read. A scan that fails to RUN is a failed look, not an empty one: stop and report it.
 
-Add any template named by a bullet the `refresh-scope.sh ledgers` sweep collected, from any ledger — a linked project's bullet earns its template a re-derivation exactly as this repo's does.
-
 `MISSING-SOURCE` exits 3 and blocks the pass → Step 2. `curated` templates have no live source and are never derived here.
 
 ### Step 2 — `rulings`
@@ -283,7 +281,7 @@ Tier and effort per the fleet prompt § Model Selection: **spec-execution (sonne
 
 Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
 
-**Quote every ledger bullet naming this template's mechanism into the brief.** The source project's `.professor/release.md` is where that project ALREADY ruled the change framework-bound — a bullet carrying a `#### → For:` adopter migration line is a declaration of SYNC intent, and a worker that cannot see it will read a generic mechanism as install-specific topology and rule it LOCAL. Grep the Step 2b sweep output for the template's subject before dispatching; a template with no matching bullet is briefed as such, so "no bullet quoted" means the orchestrator looked, not that it skipped.
+**Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `release:` commit on `main`. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
 
 > Re-derive ONE blueprint template from its live source. Read at most these 2 files: the template `templates/{key}` and the live source `{live-root}/{source}`. Read nothing else.
 >
@@ -297,7 +295,7 @@ Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent di
 > 4. Apply only SYNC and TOKEN, surgically, with `Edit`. A template IS the live source file verbatim — same structure, mechanics, character, logic; only project-specific values swap for tokens. Never abstract, skeletonize, or thin prose, and never trim a persona's voice sections.
 > 5. Verify: `bash scripts/leak-check.sh --files templates/{key}` and quote its exit status. No machine-absolute path (`/home/…`, `/Users/…`), no brand current or former, no PII.
 >
-> Return: one line per hunk (`SYNC` / `LOCAL` / `TOKEN` / `UNRULED` + a phrase naming it), the leak-check exit status quoted, and a draft `release.md` bullet for the SYNC set in the ledger's final-bullet shape. Report a tool that would not run as a failure naming the tool — never as a clean result.
+> Return: one line per hunk (`SYNC` / `LOCAL` / `TOKEN` / `UNRULED` + a phrase naming it), the leak-check exit status quoted, and one draft release-note bullet for the SYNC set (`- {Tier}: {scope} — {semantic change}`) for the release reviewers to weigh. Report a tool that would not run as a failure naming the tool — never as a clean result.
 
 ### Step 4 — Review, then continue
 
@@ -316,12 +314,12 @@ Reconcile telemetry per batch: workers dispatched vs reports received, and the c
 ### Step 5 — Close
 
 1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next release's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
-2. Every SYNC set logs its bullet to `.professor/release.md`; a change this repo alone wants logs to `drift.md` (§ Logging in `/pfm`).
+2. A change this repo alone wants logs to `drift.md` (§ Logging in `/pfm`); a SYNC set needs no ledger — the release reviewers write its note from the diff.
 3. Report: templates re-derived / skipped-unchanged / ruled, the per-verdict hunk totals, every UNRULED hunk and how it was ruled, workers dispatched vs reports received, leak-check status, and what a reader must verify by hand.
 
 ### Rules
 
-- `--dry-run` classifies and reports; it writes no template, no map entry, and no ledger line.
+- `--dry-run` classifies and reports; it writes no template, no map entry, and no drift line.
 - Never regen hashes for a template a worker did not actually re-derive — the baseline would claim a sync that never happened.
 - A worker that reports zero hunks names the command it ran; "found nothing" and "failed to look" are different results and are reported differently.
 - The public repo is the stakes: a leaked identifier cannot be unpublished. Leak-check is the backstop, never the plan.
