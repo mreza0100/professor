@@ -124,7 +124,11 @@ func (installer *engine) installThemes(ctx context.Context) {
 			if owned && exists {
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
 			} else {
-				if changeErr := installer.change("fetch theme "+name+" -> "+target, nil); changeErr != nil {
+				verb := "fetch theme"
+				if source.local != "" {
+					verb = "read bundled theme"
+				}
+				if changeErr := installer.change(verb+" "+name+" -> "+target, nil); changeErr != nil {
 					installer.skip("theme " + name + " preview failed: " + changeErr.Error())
 				}
 			}
@@ -303,6 +307,25 @@ func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
 	return append(content, '\n'), nil
 }
 
+// releaseManifestUnpublishedAlpha reports whether a release theme manifest
+// URL names an -alpha version reference. professorThemeManifestURL builds
+// this URL from VERSION, and pfm never publishes an -alpha tag on GitHub, so
+// that raw.githubusercontent.com URL 404s every time; loadThemeSources turns
+// that predictable failure into a named refusal instead of a bare HTTP
+// error, and skips the doomed fetch entirely.
+func releaseManifestUnpublishedAlpha(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if strings.HasSuffix(segment, "-alpha") {
+			return true
+		}
+	}
+	return false
+}
+
 func loadThemeSources(ctx context.Context, options Options) (map[string]themeSource, error) {
 	var content []byte
 	var origin string
@@ -322,6 +345,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			if origin == "" {
 				return nil, fmt.Errorf("read local manifest: %w; no release manifest URL is configured", localErr)
 			}
+			if releaseManifestUnpublishedAlpha(origin) {
+				return nil, fmt.Errorf("local theme manifest unavailable: %v; release manifest for an unpublished -alpha build; run pfm install from the source clone", localErr)
+			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {
 				return nil, fmt.Errorf("local theme manifest unavailable: %v; fetch release manifest %s: %w", localErr, origin, err)
@@ -331,6 +357,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		origin = strings.TrimSpace(options.ThemeManifestURL)
 		if origin == "" {
 			return nil, errors.New("no source repository or release manifest URL is configured")
+		}
+		if releaseManifestUnpublishedAlpha(origin) {
+			return nil, errors.New("release manifest for an unpublished -alpha build; run pfm install from the source clone")
 		}
 		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 		if err != nil {

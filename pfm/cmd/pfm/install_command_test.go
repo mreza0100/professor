@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	goRuntime "runtime"
@@ -38,6 +39,39 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	}
 	if _, found := options.CodexYolo[4]; found {
 		t.Fatalf("Codex policies inherited Claude account IDs: %#v", options.CodexYolo)
+	}
+}
+
+// TestInstallOptionsSourceRepoFallsBackToTheRecordedClone is a REGRESSION
+// test for the 2026-09-14 retro finding: `pfm install --yes` run outside the
+// source checkout (cwd discovery finds nothing) must still resolve
+// options.SourceRepo from the recorded source-repo marker rather than
+// leaving it empty and falling through to the release manifest URL. FAILS on
+// unfixed code because newInstallerOptions sets SourceRepo from
+// discoverSourceRepo() alone, which returns "" outside a clone.
+func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	t.Setenv("PFM_SOURCE_REPO", "")
+	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
+	home := t.TempDir()
+	clone := t.TempDir()
+	if err := installer.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
+	got, err := filepath.EvalSymlinks(options.SourceRepo)
+	if err != nil {
+		t.Fatalf("options.SourceRepo = %q: %v", options.SourceRepo, err)
+	}
+	want, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("options.SourceRepo = %q, want the recorded clone %q", got, want)
 	}
 }
 

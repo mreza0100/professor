@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/installer"
 )
 
 const expectedHooksPath = ".githooks"
@@ -103,11 +104,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		return prePushGate{Repository: repository, Actual: actual, State: "broken", Error: fmt.Errorf("%s is not an executable regular file", hook)}
 	}
 
-	configured := actual
-	if configured != "" && !filepath.IsAbs(configured) {
-		configured = filepath.Join(repository, configured)
-	}
-	if filepath.Clean(configured) != filepath.Join(repository, expectedHooksPath) {
+	if !installer.PrePushGateArmed(repository, actual) {
 		return prePushGate{Repository: repository, Actual: actual, State: "unwired"}
 	}
 	return prePushGate{Repository: repository, Actual: actual, State: "armed"}
