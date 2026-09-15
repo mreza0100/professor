@@ -345,7 +345,15 @@ func PlanClaudeVersionPrune(report ClaudeVersionsReport, keep int) (remove []Cla
 		parsedSeen++
 		if parsedSeen <= keep {
 			if _, already := kept[version.Path]; !already {
-				kept[version.Path] = "newest"
+				// Only the FIRST parsed build inside the keep window is
+				// actually the newest (report.Versions is sorted newest
+				// first) — every other build the window keeps is a real,
+				// distinct build, not a second "newest" (issue #24 F7).
+				if parsedSeen == 1 {
+					kept[version.Path] = "newest"
+				} else {
+					kept[version.Path] = "within keep window"
+				}
 			}
 			continue
 		}

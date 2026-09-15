@@ -219,3 +219,72 @@ func TestVSCodeExtensionUninstallRemovesOnlyItsOwnIndexEntry(t *testing.T) {
 		t.Fatalf("uninstall removed the wrong entry: %v", after)
 	}
 }
+
+// TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow
+// is a REGRESSION test for issue #24 F6: InspectVSCode used to abort with a
+// bare error the instant ONE owned settings file returned a non-ENOENT read
+// error, discarding every already-classified product and settings row —
+// a BROKEN link on another product would go unreported behind it. Unfixed,
+// this returns (VSCodeReport{}, non-nil error) instead of a report carrying
+// both rows.
+func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	t.Setenv("VSCODE_PORTABLE", "")
+	home := t.TempDir()
+
+	readablePath := filepath.Join(home, "readable-product", "settings.json")
+	unreadablePath := filepath.Join(home, "unreadable-product", "settings.json")
+	for _, path := range []string{readablePath, unreadablePath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(unreadablePath, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(unreadablePath, 0o644) })
+
+	installer := newVSCodeExtensionEngine(home, nil, true)
+	ownership := map[string]vscodeOwnershipRecord{
+		readablePath:   {Path: readablePath, Platform: "linux", ProfileOwned: true},
+		unreadablePath: {Path: unreadablePath, Platform: "linux", ProfileOwned: true},
+	}
+	ownershipPath := filepath.Join(installer.managedRoot, vscodeOwnershipName)
+	if err := installer.writeVSCodeOwnership(ownershipPath, nil, ownership, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := InspectVSCode(home)
+	if err != nil {
+		t.Fatalf("InspectVSCode(%q) returned an error instead of a per-row unreadable status: %v", home, err)
+	}
+	if len(report.Settings) != 2 {
+		t.Fatalf("report.Settings has %d rows, want 2 (the readable row must survive the unreadable one): %+v", len(report.Settings), report.Settings)
+	}
+	var sawReadable, sawUnreadable bool
+	for _, status := range report.Settings {
+		switch status.Path {
+		case readablePath:
+			sawReadable = true
+			if status.Profile != "owned" {
+				t.Fatalf("readable settings row Profile=%q, want %q", status.Profile, "owned")
+			}
+		case unreadablePath:
+			sawUnreadable = true
+			if status.Profile != "unreadable" {
+				t.Fatalf("unreadable settings row Profile=%q, want %q", status.Profile, "unreadable")
+			}
+			if status.Error == "" {
+				t.Fatal("unreadable settings row carries no Error text — a read error must never render as bare absence")
+			}
+		}
+	}
+	if !sawReadable || !sawUnreadable {
+		t.Fatalf("report.Settings missing a row: sawReadable=%v sawUnreadable=%v: %+v", sawReadable, sawUnreadable, report.Settings)
+	}
+}

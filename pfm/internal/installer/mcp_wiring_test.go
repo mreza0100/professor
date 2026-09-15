@@ -337,6 +337,11 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 // shape on the next apply, rather than being frozen in place forever or
 // treated as a manual conflict.
 func TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio(t *testing.T) {
+	// Issue #24 F11: pin CLAUDE_CONFIG_DIR to empty so a host that exports it
+	// ambiently cannot steer MCP registration at an extra, real
+	// $CLAUDE_CONFIG_DIR/.claude.json this fixture never wrote (host-only —
+	// cannot be watched failing inside a fence that does not export it).
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -407,6 +412,8 @@ func TestMCPInstallPreservesAForeignChatClientRegistration(t *testing.T) {
 // "manual conflict" skip — the whole point of isPFMStdioClient existing
 // alongside isPFMHTTPClient.
 func TestMCPInstallRecognizesAnOwnedStdioChatClientWithoutRewriteOrConflict(t *testing.T) {
+	// Issue #24 F11: see TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)

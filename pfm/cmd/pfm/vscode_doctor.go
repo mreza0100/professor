@@ -61,6 +61,9 @@ func printVSCodeDoctor(stdout io.Writer, home string, machine config.Config) int
 	}
 	for _, settings := range report.Settings {
 		fmt.Fprintf(stdout, "doctor: vscode settings=%s profile=PFM(%s) default=%s\n", settings.Path, settings.Profile, settings.Default)
+		if settings.Error != "" {
+			fmt.Fprintf(stdout, "doctor: vscode settings=%s error=%s\n", settings.Path, settings.Error)
+		}
 		if settings.Profile == "missing" || settings.Profile == "unreadable" {
 			warnings++
 		}

@@ -425,18 +425,76 @@ func retiredHookCommandName(command string) (string, bool) {
 	return "", false
 }
 
+// subcommandRegistry is implementedSubcommands' type, named so a test can
+// reset it to its unset zero value between cases.
+type subcommandRegistry struct {
+	set      bool
+	topLevel map[string]bool
+	internal map[string]bool
+}
+
+// implementedSubcommands is the seam cmd/pfm's main() fills in via
+// SetImplementedSubcommands before argv dispatch — installer cannot import
+// cmd/pfm (a main package), so this package-level registry, set once at
+// process start, is how unknownPFMHookCommand learns what THIS binary's own
+// dispatch actually reaches (issue #24 F1). Left unset (any test or tool
+// that never calls SetImplementedSubcommands), the predicate fails CLOSED:
+// it never reports a command unknown, so nothing in this package ever
+// deletes a hook on the strength of a guess about implementation.
+var implementedSubcommands subcommandRegistry
+
+// SetImplementedSubcommands records the exact top-level and `internal <x>`
+// subcommand names cmd/pfm's own dispatch (main.go's topLevelSubcommands and
+// internalSubcommands) reaches — the single fact unknownPFMHookCommand needs
+// to tell an operator's own hand-wired hook (`pfm doctor`, `pfm internal
+// claude-version`) apart from genuine residue a rolled-back or
+// newer-then-reverted pfm left behind. Call it once, before dispatching
+// argv; every pfm process that skips this call keeps the fail-closed
+// (never-unknown) default above.
+func SetImplementedSubcommands(topLevel, internal []string) {
+	implementedSubcommands.topLevel = make(map[string]bool, len(topLevel))
+	for _, name := range topLevel {
+		implementedSubcommands.topLevel[name] = true
+	}
+	implementedSubcommands.internal = make(map[string]bool, len(internal))
+	for _, name := range internal {
+		implementedSubcommands.internal[name] = true
+	}
+	implementedSubcommands.set = true
+}
+
+// subcommandIsImplemented reports whether the registry SetImplementedSubcommands
+// filled in names word as a subcommand THIS binary's dispatch reaches — a
+// no-op "yes" (fail closed toward keeping the hook) until the registry is
+// set. word is the first token only: a hook naming "doctor --verbose" is
+// judged on "doctor", the subcommand dispatch itself switches on.
+func subcommandIsImplemented(isInternal bool, name string) bool {
+	if !implementedSubcommands.set {
+		return true
+	}
+	word, _, _ := strings.Cut(name, " ")
+	if isInternal {
+		return implementedSubcommands.internal[word]
+	}
+	return implementedSubcommands.topLevel[word]
+}
+
 // unknownPFMHookCommand reports whether command is shaped like a hook this
 // or a prior pfm binary would have written — "<pfmBinary> internal <name>"
 // or "<pfmBinary> <name>", or the bare "pfm"/"cc-fleet" and any-path "/pfm"/
 // "/cc-fleet" suffix forms retiredHookCommandName already accepts — naming a
-// subcommand neither this binary's own templates (claudeHookTemplates,
-// codexHookTemplate) nor the retiredHookCommands table knows. That
+// subcommand this binary's OWN dispatch does not implement, per the registry
+// SetImplementedSubcommands fills in from cmd/pfm's topLevelSubcommands /
+// internalSubcommands (issue #24 F1). Unlike the table-retired shapes, that
 // combination only arises when a newer or rolled-back pfm wrote it: this
 // binary can name the entry but not run it, and no exact-string removal path
 // this binary owns ever strips it. The guard is on the binary token alone —
 // a command that merely CONTAINS "pfm" elsewhere (an operator's own script
 // invoked with a "--tag pfm" argument, say) never matches, because its first
-// token is not one of these forms.
+// token is not one of these forms. A subcommand this binary DOES implement —
+// an operator's own `pfm doctor` or `pfm internal claude-version` hook — is
+// never reported unknown, whether or not it also happens to be one of the
+// installer's own automatic templates.
 func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -461,11 +519,16 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 		return "", false
 	}
 	name := rest
+	isInternal := false
 	if sub, ok := strings.CutPrefix(rest, "internal "); ok {
 		name = sub
+		isInternal = true
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
+		return "", false
+	}
+	if subcommandIsImplemented(isInternal, name) {
 		return "", false
 	}
 	return name, true

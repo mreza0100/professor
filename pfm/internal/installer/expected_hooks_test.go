@@ -114,6 +114,7 @@ func TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale(t *testing.T) {
 // exactly like the already-fixed table-retired case above, but for a
 // subcommand no table entry or template will ever know by name.
 func TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale(t *testing.T) {
+	setTestImplementedSubcommands(t)
 	home, machine := stageExpectedHookFixtures(t)
 	hook := findExpectedHook(t, home, machine, "claude[2]", "exit-intercept")
 	unknown := strings.Replace(hook.Command, "internal exit-intercept", "internal hook-from-a-newer-pfm", 1)

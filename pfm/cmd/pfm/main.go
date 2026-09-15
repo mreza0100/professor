@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/spawn"
@@ -23,7 +24,37 @@ import (
 
 var version = "dev"
 
+// topLevelSubcommands names every case the switch in run dispatches by
+// argv[0] — the single source both TestTopLevelSubcommandsReachTheirHandler
+// and installer.SetImplementedSubcommands read, so the installer's
+// unknown-pfm-hook predicate (issue #24 F1) can never drift from what this
+// binary actually implements.
+var topLevelSubcommands = []string{
+	"version", "ls", "chat", "harvest", "headless", "index", "doctor",
+	"config", "dream", "reap", "archive", "heal", "name-sync", "statusline",
+	"usage-hook", "install", "uninstall", "update", "init", "whoami",
+	"issues", "mcp", pfmengine.MustLookup(pfmengine.Codex).LongName, "internal",
+}
+
+// internalSubcommands names every case runInternal dispatches by args[0] —
+// the usage line below and TestInternalSubcommandsReachTheirHandler both
+// derive from this one list, alongside installer.SetImplementedSubcommands.
+var internalSubcommands = []string{
+	"agent-open", "chat-server", "claude-version", "clear-kill",
+	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
+	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
+	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
+	"reload-run", "stale", "then", "update-check",
+}
+
 func main() {
+	// installer cannot import cmd/pfm (main package); this package-level
+	// registry is the seam that tells it which pfm-shaped hook subcommands
+	// THIS binary implements, so removeRetiredHookCommands only ever strips
+	// a hook naming a subcommand no version of this binary's dispatch would
+	// recognize (issue #24 F1) — never an operator's own `pfm doctor` or
+	// `pfm internal claude-version` hook.
+	installer.SetImplementedSubcommands(topLevelSubcommands, internalSubcommands)
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
@@ -467,6 +498,14 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
+		// This literal stays in sync with internalSubcommands by
+		// construction, not derivation: scripts/arch-check.sh's C15 check
+		// greps the pipe-joined subcommand names out of main.go's raw
+		// source text below, so a runtime-joined string here (fine for Go,
+		// blind to a static grep) would defeat that ratchet.
+		// TestInternalSubcommandsReachTheirHandler is the runtime half of
+		// the same guarantee: every internalSubcommands name reaches a real
+		// branch in runInternal's if-chain below.
 		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
 		return 2
 	}

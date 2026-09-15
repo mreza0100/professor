@@ -330,6 +330,18 @@ func TestPlanClaudeVersionPruneKeepsNewestTwoAndRemovesTheRest(t *testing.T) {
 			t.Fatalf("kept=%v wrongly protects %s", kept, path)
 		}
 	}
+	// REGRESSION for issue #24 F7: only the actual newest build (report.Versions
+	// sorted newest-first, so "2.1.270" here) is labelled "newest" — the
+	// second-newest kept build must carry a distinct, honest label, never a
+	// second "newest" claim about a build that is not.
+	newestPath := filepath.Join(versions, "2.1.270")
+	secondPath := filepath.Join(versions, "2.1.269")
+	if got := kept[newestPath]; got != "newest" {
+		t.Fatalf("kept[%s]=%q, want %q", newestPath, got, "newest")
+	}
+	if got := kept[secondPath]; got == "newest" {
+		t.Fatalf("kept[%s]=%q, want a label distinct from the actual newest build", secondPath, got)
+	}
 }
 
 // TestInspectClaudeVersionsRefusesWhenIdentifyingTheConfiguredBinaryFailsForAReasonOtherThanAbsence

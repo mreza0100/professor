@@ -122,8 +122,10 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	if !strings.Contains(previewOutput, "keep "+live+" (live (pids 4242))") {
 		t.Fatalf("preview did not name the live version kept, with its pids:\n%s", previewOutput)
 	}
-	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") || !strings.Contains(previewOutput, "keep "+second+" (newest)") {
-		t.Fatalf("preview did not name the two newest versions kept:\n%s", previewOutput)
+	// issue #24 F7: only the actual newest build is labelled "newest" — the
+	// second-newest kept build carries a distinct, honest label.
+	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") || !strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
+		t.Fatalf("preview did not name the two newest versions kept, one honestly labelled second:\n%s", previewOutput)
 	}
 	for _, path := range []string{newest, second, live, prunable} {
 		if _, err := os.Stat(path); err != nil {

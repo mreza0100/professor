@@ -9,11 +9,16 @@ import (
 
 // runInternalClaudeVersion is the Go half of D: the launcher shim
 // (assets/bin/claude) delegates the versions/ choice here instead of
-// picking a candidate by mtime in shell. It prints the newest parsed
-// version's absolute path and exits 0, or prints nothing and exits 127 —
-// the same "no real Claude binary" contract the shim's PATH fallback uses,
-// so a caller reading only the exit code never has to special-case which
-// branch answered.
+// picking a candidate by mtime in shell. Three exits: 0 prints the newest
+// parsed version's absolute path on stdout; 127 prints nothing — the same
+// "no real Claude binary" contract the shim's PATH fallback uses, so a
+// caller reading only the exit code never has to special-case which branch
+// answered; 1 means InspectClaudeVersions itself could not read the
+// versions/ directory (a real read error, not "no versions installed") and
+// prints the error to stderr — the shim (F5) lets that one reach the
+// terminal instead of discarding it, since exit 127 already prints nothing
+// and collapsing 1 into 127 would silently misreport a read error as
+// absence.
 //
 // This runs on EVERY `claude` launch, so it calls installer.InspectClaudeVersions
 // alone — enumeration and ordering only, no process table read at all. The

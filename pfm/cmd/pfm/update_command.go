@@ -131,12 +131,16 @@ func diffNewDoctorWarningRows(baselineOutput, candidateOutput string) []string {
 }
 
 // rollbackDoctorPredatesFailureTiers reports whether a rollback doctor's
-// exit-1 output carries neither the M2 `doctor: failures=` line nor
-// `doctor: clean` — the two markers only a tier-aware doctor ever prints.
-// Such a binary predates this milestone and exits 1 on warnings alone; its
-// rollback is not residue.
+// exit-1 output carries none of the three markers only a tier-aware doctor
+// ever prints: `doctor: failures=` (only emitted when failures > 0 —
+// doctor.go's printCombinedDoctor), `doctor: warnings=` (only emitted when
+// warnings > 0, so a warnings-only run NEVER prints `doctor: failures=`),
+// or `doctor: clean`. Such a binary predates this milestone and exits 1 on
+// warnings alone; its rollback is not residue.
 func rollbackDoctorPredatesFailureTiers(output string) bool {
-	return !strings.Contains(output, "doctor: failures=") && !strings.Contains(output, "doctor: clean")
+	return !strings.Contains(output, "doctor: failures=") &&
+		!strings.Contains(output, "doctor: warnings=") &&
+		!strings.Contains(output, "doctor: clean")
 }
 
 func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -374,7 +378,13 @@ func updateRepository(
 			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
 		)
 	}
-	candidateConfigPath, candidateConfigNote := updateConfigPathAfterInstall(runtime)
+	candidateConfigPath, candidateConfigNote, configPathErr := updateConfigPathAfterInstall(runtime)
+	if configPathErr != nil {
+		return updateFailure(
+			fmt.Errorf("locate config after update: %w", configPathErr),
+			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+		)
+	}
 	if candidateConfigNote != "" {
 		fmt.Fprintln(stdout, candidateConfigNote)
 	}

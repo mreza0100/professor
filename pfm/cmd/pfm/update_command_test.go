@@ -687,7 +687,12 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 		return nil
 	}
 	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: failures=0\ndoctor: warnings=3\n"}, nil
+		// doctor.go's printCombinedDoctor only ever prints "doctor: failures="
+		// when failures > 0 (doctor.go:304-306) — a tier-aware binary with
+		// warnings alone prints ONLY "doctor: warnings=N", never a
+		// "doctor: failures=0" line. A test stub carrying a shape production
+		// never emits would pass against F3's bug; this is the real shape.
+		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: warnings=3\n"}, nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -699,6 +704,9 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "rollback residue") {
 		t.Fatalf("stderr=%q, a warnings-only rollback doctor must not be claimed as residue", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "an older pfm exits 1") {
+		t.Fatalf("stderr=%q, a tier-aware warnings-only rollback must never be misreported as an older binary", stderr.String())
 	}
 }
 
@@ -730,7 +738,12 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 		return nil
 	}
 	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{Exit: 1, Warnings: 3, Output: "doctor: warnings=3\n"}, nil
+		// A genuinely pre-M2 binary's doctor output carries NONE of the
+		// three tier markers (issue #24 F3): not "doctor: failures=", not
+		// "doctor: warnings=" (only ever emitted when warnings > 0, and only
+		// by a tier-aware binary), not "doctor: clean" — just whatever text
+		// that release printed before exiting 1.
+		return doctorOutcome{Exit: 1, Warnings: 3, Output: "3 warnings found\n"}, nil
 	}
 
 	var stdout, stderr bytes.Buffer

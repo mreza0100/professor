@@ -256,6 +256,11 @@ type VSCodeSettingsStatus struct {
 	// Profile is one of "owned", "relinquished", "missing", "unreadable".
 	Profile string
 	Default string
+	// Error carries a read or decode failure's text when Profile ==
+	// "unreadable" — an error never renders as bare absence (issue #24 F6):
+	// one settings file's unreadable state names its own cause instead of
+	// aborting InspectVSCode and silently dropping every other row.
+	Error string
 }
 
 // VSCodeReport is InspectVSCode's answer — the product-index reader doctor
@@ -336,11 +341,17 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 				status.Profile = "relinquished"
 			}
 		case readErr != nil:
-			return VSCodeReport{}, fmt.Errorf("read VS Code settings %s: %w", path, readErr)
+			// A non-ENOENT read error (EACCES, EIO, …) on ONE settings file
+			// is this row's own state, never a reason to abort the whole
+			// report and drop every other row's already-classified state
+			// (issue #24 F6).
+			status.Profile = "unreadable"
+			status.Error = readErr.Error()
 		default:
 			document, decodeErr := decodeJSONCObject(raw)
 			if decodeErr != nil {
 				status.Profile = "unreadable"
+				status.Error = decodeErr.Error()
 				break
 			}
 			profileKey, defaultKey := vscodeSettingKeys(record.Platform)

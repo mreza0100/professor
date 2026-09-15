@@ -154,17 +154,26 @@ func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
 // updateConfigPathAfterInstall resolves the --config path the candidate's OWN
 // install left behind (issue #24 finding 4): runtime.Config.Path was
 // resolved BEFORE the migration renamed it inside the candidate process only.
-func updateConfigPathAfterInstall(runtime commandRuntime) (path string, note string) {
+// A non-ENOENT stat error on either candidate path (issue #24 F2 — EACCES,
+// ENOTDIR, or anything else) is returned as an error, exactly like sibling
+// readUpdateHookFile: it is never folded into the "gone/migrated" notes,
+// which would misreport a stat failure as an absent file. The caller treats
+// a returned error as a failed update step.
+func updateConfigPathAfterInstall(runtime commandRuntime) (path string, note string, err error) {
 	original := runtime.Config.Path
 	if original == "" {
-		return "", ""
+		return "", "", nil
 	}
-	if _, err := os.Stat(original); err == nil {
-		return original, ""
+	if _, statErr := os.Stat(original); statErr == nil {
+		return original, "", nil
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return "", "", fmt.Errorf("stat config %s: %w", original, statErr)
 	}
 	migrated := filepath.Join(filepath.Dir(original), pfmconfig.FileName)
-	if _, err := os.Stat(migrated); err == nil {
-		return migrated, fmt.Sprintf("config migrated by the update: %s → %s", original, migrated)
+	if _, statErr := os.Stat(migrated); statErr == nil {
+		return migrated, fmt.Sprintf("config migrated by the update: %s → %s", original, migrated), nil
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return "", "", fmt.Errorf("stat migrated config %s: %w", migrated, statErr)
 	}
-	return "", fmt.Sprintf("config %s is gone after install and no %s replaced it", original, pfmconfig.FileName)
+	return "", fmt.Sprintf("config %s is gone after install and no %s replaced it", original, pfmconfig.FileName), nil
 }

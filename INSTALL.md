@@ -171,6 +171,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
+| MCP client registration (`chat`/`harvester` servers) | `pfm install` — the only writer | every user-scope `.claude.json` a pfm-launched Claude can read: `~/.claude.json` for the account pfm spawns without `CLAUDE_CONFIG_DIR`, `<config dir>/.claude.json` for every explicit account, and `$CLAUDE_CONFIG_DIR/.claude.json` when the shell exports it |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

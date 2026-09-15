@@ -172,3 +172,40 @@ func TestUpdateRollbackInstallSeesAnExistingConfigPath(t *testing.T) {
 		t.Fatalf("rollback install ran with runtime.Config.Path=%q missing from disk", runtime.Config.Path)
 	}
 }
+
+// TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError is a
+// REGRESSION test for issue #24 F2: updateConfigPathAfterInstall used to
+// treat ANY os.Stat error on the original config path — not only
+// fs.ErrNotExist — as "gone", falling through to the migrated-path probe
+// and then to the "config is gone" note, silently handing the candidate
+// doctor an empty configPath. A non-ENOENT stat error (here: the config's
+// parent directory loses execute permission, so the kernel refuses to even
+// traverse into it) must surface as an error the caller treats as a failed
+// update step, never as a path handoff.
+func TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	runtime := updateTestRuntime(t)
+	parent := filepath.Join(t.TempDir(), "locked")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(parent, pfmconfig.FileName)
+	if err := os.WriteFile(original, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o700) })
+	runtime.Config = pfmconfig.Config{Path: original, Exists: true}
+
+	path, note, err := updateConfigPathAfterInstall(runtime)
+	if err == nil {
+		t.Fatalf("updateConfigPathAfterInstall(...) = (%q, %q, nil), want a non-nil error for a non-ENOENT stat failure", path, note)
+	}
+	if !strings.Contains(err.Error(), original) {
+		t.Fatalf("error=%v, want it to name the path %q", err, original)
+	}
+}
