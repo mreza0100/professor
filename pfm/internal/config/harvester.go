@@ -22,8 +22,8 @@ const (
 	LegacyFileName = "config.json"
 	// HarvesterFileName holds every Harvester setting, beside FileName.
 	HarvesterFileName = "harvester.config.json"
-	// legacyBackupName is where the migration parks the pre-split file.
-	legacyBackupName = "config.json.pre-split"
+	// LegacyBackupName is where the migration parks the pre-split file.
+	LegacyBackupName = "config.json.pre-split"
 
 	// DefaultMCPPort is the loopback daemon port (chat + harvester, no auth).
 	DefaultMCPPort = 18377

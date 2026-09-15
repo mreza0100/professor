@@ -136,7 +136,8 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 			domain := "gui/" + strconv.Itoa(os.Getuid())
 			_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+mcpLaunchdLabel)
 		}
-		return installer.change("remove "+path, func() error { return os.Remove(path) })
+		message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", path, installer.options.MCPConfigPath)
+		return installer.change(message, func() error { return os.Remove(path) })
 	}
 	template, err := readAsset(mcpLaunchdAsset)
 	if err != nil {

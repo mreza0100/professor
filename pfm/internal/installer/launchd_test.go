@@ -214,3 +214,43 @@ func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
 		t.Fatalf("dry run created %s; a preview must not touch the filesystem", logDir)
 	}
 }
+
+// TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom is a REGRESSION
+// test for issue #24 finding 3/4 (M3 change E): a rollback (or any install
+// run over a config with every MCP server disabled) removes the MCP launch
+// agent with a bare "remove <path>" — indistinguishable from a deliberate
+// opt-out. The removal must name the config it read the disabled state from,
+// so "enabled=false because that file is gone after a migration" reads
+// differently from "the operator turned it off". Unfixed: the change line is
+// "remove <path>" with no config named.
+func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, ".config", "pfm", "pfm.config.json")
+	installer := &engine{
+		options: Options{
+			Home:          home,
+			Stdout:        io.Discard,
+			MCPEnabled:    map[string]bool{"chat": false, "harvester": false},
+			MCPConfigPath: configPath,
+			Runner:        &loadedRunner{},
+			Sleep:         func(time.Duration) {},
+		},
+		apply: false,
+		stamp: "test",
+	}
+	if err := os.MkdirAll(filepath.Dir(installer.mcpLaunchAgentPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installer.mcpLaunchAgentPath(), []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout strings.Builder
+	installer.options.Stdout = &stdout
+	if err := installer.wireMCPLaunchAgent(context.Background()); err != nil {
+		t.Fatalf("wireMCPLaunchAgent() error = %v", err)
+	}
+	want := "(no MCP server is enabled in " + configPath + ")"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("wireMCPLaunchAgent() output=%q, want the removal to name %q", stdout.String(), want)
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "hostops/pfm/internal/config"
 )
 
 func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
@@ -335,6 +337,11 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 // shape on the next apply, rather than being frozen in place forever or
 // treated as a manual conflict.
 func TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio(t *testing.T) {
+	// Issue #24 F11: pin CLAUDE_CONFIG_DIR to empty so a host that exports it
+	// ambiently cannot steer MCP registration at an extra, real
+	// $CLAUDE_CONFIG_DIR/.claude.json this fixture never wrote (host-only —
+	// cannot be watched failing inside a fence that does not export it).
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -405,6 +412,8 @@ func TestMCPInstallPreservesAForeignChatClientRegistration(t *testing.T) {
 // "manual conflict" skip — the whole point of isPFMStdioClient existing
 // alongside isPFMHTTPClient.
 func TestMCPInstallRecognizesAnOwnedStdioChatClientWithoutRewriteOrConflict(t *testing.T) {
+	// Issue #24 F11: see TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio.
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -473,12 +482,70 @@ func TestMCPInstallCodexChatStaysOnHTTPDespiteClaudeStdio(t *testing.T) {
 	}
 }
 
+// TestInstallRegistersMCPServersInEveryRegistryAPFMLaunchedClaudeReads pins
+// issue #24 finding 5: on a host whose shell exports CLAUDE_CONFIG_DIR, an
+// install driven by ClaudeUserRegistries must wire chat and harvester into
+// BOTH the implicit account's $HOME/.claude.json AND the ambient
+// CLAUDE_CONFIG_DIR's .claude.json — not just the one the pre-M5 resolver
+// assumed — and the ownership ledger must own both.
+func TestInstallRegistersMCPServersInEveryRegistryAPFMLaunchedClaudeReads(t *testing.T) {
+	home := t.TempDir()
+	canonical := filepath.Join(home, ".claude")
+	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
+	ambient := filepath.Join(home, ".cc", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", ambient)
+
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: canonical, Implicit: true}}
+	resolved := ClaudeUserRegistries(home, accounts, pfmconfig.AmbientClaudeConfigDir())
+	claudeRegistries := make([]string, 0, len(resolved))
+	reasons := make(map[string]string, len(resolved))
+	for _, registry := range resolved {
+		claudeRegistries = append(claudeRegistries, registry.Path)
+		reasons[registry.Path] = registry.Reason
+	}
+
+	options := Options{
+		Mode: ModeApply, Home: home, ConfigDir: canonical,
+		ConfigDirs: []string{canonical}, ClaudeRegistries: claudeRegistries, ClaudeRegistryReasons: reasons,
+		MCPEnabled: map[string]bool{"chat": true, "harvester": true}, MCPPort: 8377,
+		Runner: &fakeRunner{}, Stdout: io.Discard,
+	}
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatal(err)
+	}
+
+	implicitPath := filepath.Join(home, ".claude.json")
+	ambientPath := filepath.Join(ambient, ".claude.json")
+	for _, path := range []string{implicitPath, ambientPath} {
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(readFixture(t, path)), &doc); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		servers, ok := doc["mcpServers"].(map[string]any)
+		if !ok || servers["chat"] == nil || servers["harvester"] == nil {
+			t.Fatalf("registry %s did not receive chat+harvester: %#v", path, doc)
+		}
+	}
+
+	var ledger mcpOwnership
+	if err := json.Unmarshal([]byte(readFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName))), &ledger); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{implicitPath, ambientPath} {
+		owned, ok := ledger.Registrations[physicalSettingsPath(path)]
+		if !ok || owned["chat"] == nil || owned["harvester"] == nil {
+			t.Fatalf("ledger did not own chat+harvester in %s: %#v", path, ledger.Registrations)
+		}
+	}
+}
+
 func TestInspectHarvesterClientCutoverNamesHealthyLegacyAndUnreadableStates(t *testing.T) {
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`)
 	writeFixture(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/harvester\", \"run\", \"harvester\"]\n")
 
-	reports := InspectHarvesterClientCutover(home, 8377, nil, nil)
+	registries := []string{filepath.Join(home, ".claude.json")}
+	reports := InspectHarvesterClientCutover(home, 8377, registries, nil)
 	if len(reports) != 3 || reports[0].Client != "claude" || reports[0].State != MCPClientPFM || reports[0].Error != nil {
 		t.Fatalf("Claude cutover report=%#v, want healthy PFM route", reports)
 	}
@@ -487,7 +554,7 @@ func TestInspectHarvesterClientCutoverNamesHealthyLegacyAndUnreadableStates(t *t
 	}
 
 	writeFixture(t, filepath.Join(home, ".codex", "config.toml"), "broken = [\n")
-	reports = InspectHarvesterClientCutover(home, 8377, nil, nil)
+	reports = InspectHarvesterClientCutover(home, 8377, registries, nil)
 	if reports[1].State != MCPClientUnreadable || reports[1].Error == nil || !strings.Contains(reports[1].Error.Error(), "config.toml") {
 		t.Fatalf("Codex unreadable report=%#v, want path-bearing parse error", reports[1])
 	}

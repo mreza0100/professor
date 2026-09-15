@@ -204,7 +204,12 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 	// A retired command sitting in a file is invisible to the loop above —
 	// it matches no expected hook — so walk every probed file's raw command
 	// inventory once for any hook that matches the shared retired-command
-	// table, regardless of whether the installer ever wrote or owned it.
+	// table, regardless of whether the installer ever wrote or owned it. The
+	// same walk also catches a hook of pfm's own shape naming a subcommand
+	// this binary does not implement — what a rolled-back or newer-then-
+	// reverted update leaves behind (issue #24 finding 2) — since that shape
+	// matches no expected hook either.
+	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
 	for physical, file := range files {
 		if file.err != nil {
 			continue
@@ -213,17 +218,25 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 			if count == 0 {
 				continue
 			}
-			name, retired := retiredHookCommandName(key.Command)
-			if !retired {
+			if name, retired := retiredHookCommandName(key.Command); retired {
+				results = append(results, HookProbeResult{
+					Hook: ExpectedHook{
+						Target: fileTargets[physical], File: fileDisplayPaths[physical],
+						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
+					},
+					State: "stale", Error: "retired hook command is still present",
+				})
 				continue
 			}
-			results = append(results, HookProbeResult{
-				Hook: ExpectedHook{
-					Target: fileTargets[physical], File: fileDisplayPaths[physical],
-					Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
-				},
-				State: "stale", Error: "retired hook command is still present",
-			})
+			if name, unknown := unknownPFMHookCommand(key.Command, pfmBinary); unknown {
+				results = append(results, HookProbeResult{
+					Hook: ExpectedHook{
+						Target: fileTargets[physical], File: fileDisplayPaths[physical],
+						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unknown:" + name,
+					},
+					State: "stale", Error: "hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm) — run pfm install --yes",
+				})
+			}
 		}
 	}
 	for path, counts := range ownership {
@@ -342,19 +355,22 @@ func codexHookTemplate(home string) ExpectedHook {
 var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
 
 // ReportHooks prints one doctor line per expected hook, and returns the
-// warnings they earned. When claudeAbsent, every claude[N] target collapses
-// to ONE named skip line per account instead of nine per-hook MISSING rows,
-// and earns no warning — the installer never wires Claude hooks on a host
-// with no Claude Code binary, so doctor must not fault it for that. Codex
-// targets are reported exactly as before regardless of Claude's presence.
-func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) int {
+// (warnings, failures) it earned. A hook missing/broken/stale is a state
+// `pfm install --yes` owns and did not produce, so it is a FAILURE; a drift
+// row (the ownership ledger naming a hook absent from expectations) is
+// advisory and stays a warning. When claudeAbsent, every claude[N] target
+// collapses to ONE named skip line per account instead of nine per-hook
+// MISSING rows, and earns neither — the installer never wires Claude hooks
+// on a host with no Claude Code binary, so doctor must not fault it for
+// that. Codex targets are reported exactly as before regardless of Claude's
+// presence.
+func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) (warnings, failures int) {
 	var results []HookProbeResult
 	if HookProbeOverride != nil {
 		results = HookProbeOverride(home, machine)
 	} else {
 		results = ProbeExpectedHooks(home, machine)
 	}
-	warnings := 0
 	skipped := map[string]bool{}
 	for _, result := range results {
 		hook := result.Hook
@@ -374,21 +390,21 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claude
 		case "ok":
 			fmt.Fprintln(stdout, prefix+" ok")
 		case "missing":
-			warnings++
+			failures++
 			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
 		case "broken":
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
 		case "drift":
 			warnings++
 			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
 		case "stale":
-			warnings++
+			failures++
 			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
 		default:
-			warnings++
+			failures++
 			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
 		}
 	}
-	return warnings
+	return warnings, failures
 }

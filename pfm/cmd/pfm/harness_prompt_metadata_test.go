@@ -17,11 +17,11 @@ func TestHarnessDoctorModelVersionAloneDoesNotWarn(t *testing.T) {
 	stageHarnessPromptBaseline(t, home)
 	saved := harnessCaptureOverride
 	t.Cleanup(func() { harnessCaptureOverride = saved })
-	harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
+	harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
 		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-sonnet-5-1-20260906", CLIVersion: "2.2.0"}, nil
 	}
 	var out bytes.Buffer
-	if warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{}); warnings != 0 {
+	if warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, ""); warnings != 0 {
 		t.Fatalf("identity-only change warned: %s", &out)
 	}
 }
@@ -66,7 +66,7 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 				stageModelHarnessPromptBaseline(t, home, model, prompts[model.alias], model.alias+"-fixture.md")
 			}
 			var calls []string
-			harnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias string) (harnessCapture, error) {
+			harnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias, _ string) (harnessCapture, error) {
 				calls = append(calls, alias)
 				if alias == scenario.failed {
 					return harnessCapture{}, fmt.Errorf("capture unavailable")
@@ -78,7 +78,7 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 				return harnessCapture{Prompt: prompt, ResolvedModel: "claude-" + alias + "-6-1", CLIVersion: "3.0.0"}, nil
 			}
 			var out bytes.Buffer
-			warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{})
+			warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, "")
 			if warnings != scenario.wantWarnings || strings.Join(calls, ",") != "sonnet,opus" {
 				t.Fatalf("warnings=%d calls=%v output=%s", warnings, calls, &out)
 			}

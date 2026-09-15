@@ -1,10 +1,11 @@
 package main
 
 import (
-	"hostops/pfm/internal/nudge"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"hostops/pfm/internal/nudge"
 )
 
 func TestDoctorCrumbHealthAcceptsNudgeMetadataAndRejectsAnEmptyIdentity(t *testing.T) {

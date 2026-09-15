@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ func (migration Migration) rewrites() bool {
 func (migration Migration) Steps() []string {
 	var steps []string
 	if migration.LegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, legacyBackupName))
+		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, LegacyBackupName))
 	}
 	if migration.HarvesterEnabled != nil {
 		steps = append(steps, fmt.Sprintf("move mcp.servers.harvester.enabled=%t → %s", *migration.HarvesterEnabled, migration.harvesterPath))
@@ -54,7 +55,7 @@ func (migration Migration) Steps() []string {
 		steps = append(steps, migration.PortKept)
 	}
 	if migration.StrayLegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, legacyBackupName, migration.Path))
+		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, LegacyBackupName, migration.Path))
 	}
 	return steps
 }
@@ -154,16 +155,60 @@ func ApplyMigration(migration Migration) error {
 	if park == "" {
 		return nil
 	}
-	backup := filepath.Join(filepath.Dir(park), legacyBackupName)
+	backup := filepath.Join(filepath.Dir(park), LegacyBackupName)
 	if exists, err := pathExists(backup); err != nil {
 		return err
 	} else if exists {
-		return fmt.Errorf("park pre-split config %s: %s already exists; compare the two, remove the one you no longer need, and rerun", park, backup)
+		identical, err := filesIdentical(park, backup)
+		if err != nil {
+			return err
+		}
+		if identical {
+			if err := os.Remove(park); err != nil {
+				return fmt.Errorf("remove pre-split config %s already parked as %s: %w", park, backup, err)
+			}
+			return nil
+		}
+		parkSize, backupSize, err := fileSizes(park, backup)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("park pre-split config %s: %s already exists with different content (%d vs %d bytes); compare the two, remove the one you no longer need, and rerun",
+			park, backup, parkSize, backupSize)
 	}
 	if err := os.Rename(park, backup); err != nil {
 		return fmt.Errorf("park pre-split config %s as %s: %w", park, backup, err)
 	}
 	return nil
+}
+
+// filesIdentical compares two local files byte-for-byte; a SHA is not needed
+// for two files already on disk.
+func filesIdentical(a, b string) (bool, error) {
+	aContent, err := os.ReadFile(a)
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", a, err)
+	}
+	bContent, err := os.ReadFile(b)
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", b, err)
+	}
+	return bytes.Equal(aContent, bContent), nil
+}
+
+// fileSizes reads both files' sizes for the differing-content refusal
+// message; a read error is reported against the file it came from, never
+// folded into "differ".
+func fileSizes(a, b string) (int64, int64, error) {
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return 0, 0, fmt.Errorf("inspect %s: %w", a, err)
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return 0, 0, fmt.Errorf("inspect %s: %w", b, err)
+	}
+	return aInfo.Size(), bInfo.Size(), nil
 }
 
 func rewriteMigratedConfig(migration Migration) error {

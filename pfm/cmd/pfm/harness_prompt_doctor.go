@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	config "hostops/pfm/internal/config"
@@ -22,6 +23,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/paths"
 )
 
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
@@ -37,18 +39,26 @@ type harnessCapture struct {
 	CLIVersion    string
 }
 
-var harnessCaptureOverride func(context.Context, string, config.Config, string) (harnessCapture, error)
+var harnessCaptureOverride func(context.Context, string, config.Config, string, string) (harnessCapture, error)
 
 // errClaudeAbsent marks a capture failure as "no Claude Code binary
 // installed" — installer.ClaudeAbsent's verdict — so the doctor row can
 // skip it rather than counting a warning it never earned.
 var errClaudeAbsent = errors.New("no Claude Code binary installed")
 
-func configuredHarnessCapture(ctx context.Context, home string, machine config.Config, model string) (harnessCapture, error) {
+// errHarnessBypassedSink marks a capture where the CLI produced a real,
+// priced answer (stop_reason and usage both present) without ever reaching
+// the local capture sink — OAuth/subscription routing that ignores
+// ANTHROPIC_BASE_URL (issue #24 finding 6). Distinct from errClaudeAbsent and
+// from a bare timeout: the doctor row names it CANNOT CAPTURE, not CHECK
+// FAILED, because a real request answered and may have been billed.
+var errHarnessBypassedSink = errors.New("the CLI answered from the real endpoint and ignored ANTHROPIC_BASE_URL")
+
+func configuredHarnessCapture(ctx context.Context, home string, machine config.Config, model, verboseDir string) (harnessCapture, error) {
 	if harnessCaptureOverride != nil {
-		return harnessCaptureOverride(ctx, home, machine, model)
+		return harnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
-	return captureHarnessPrompt(ctx, home, machine, model)
+	return captureHarnessPrompt(ctx, home, machine, model, verboseDir)
 }
 
 // harnessBuildStamp is the CLI build stamp inside the billing-header system
@@ -112,6 +122,9 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 	if errors.Is(captureErr, errClaudeAbsent) {
 		return "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare", false
 	}
+	if errors.Is(captureErr, errHarnessBypassedSink) {
+		return fmt.Sprintf("doctor: harness-prompt: CANNOT CAPTURE (%v) — drift unknown", captureErr), true
+	}
 	if captureErr != nil {
 		return fmt.Sprintf("doctor: harness-prompt: CHECK FAILED to run (%v) — drift unknown", captureErr), true
 	}
@@ -125,15 +138,35 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 
 // captureHarnessPrompt uses the shared headless runner with the unmodified
 // harness prompt and a local sink that captures the request and returns 400.
-func captureHarnessPrompt(ctx context.Context, home string, machine config.Config, model string) (harnessCapture, error) {
+// verboseDir, when non-empty, keeps the run's raw stdout/stderr and the sink
+// hit count under it (change A) — a check that fails still leaves what it
+// saw. The run launches under a throwaway CLAUDE_CONFIG_DIR, created here and
+// removed before return (change B): the documented Keychain scoping means
+// that directory is always logged out, so the dummy ANTHROPIC_API_KEY is the
+// only credential the CLI can find.
+func captureHarnessPrompt(ctx context.Context, home string, machine config.Config, model, verboseDir string) (harnessCapture, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return harnessCapture{}, fmt.Errorf("open capture sink: %w", err)
 	}
 	bodies := make(chan []byte, 1)
-	server := &http.Server{Handler: harnessSinkHandler(bodies)}
+	hits := &harnessSinkHits{}
+	server := &http.Server{Handler: hits.wrap(harnessSinkHandler(bodies))}
 	go func() { _ = server.Serve(listener) }()
 	defer func() { _ = server.Close() }()
+
+	resolvedPaths, pathErr := paths.Resolve()
+	if pathErr != nil {
+		return harnessCapture{}, fmt.Errorf("resolve harness capture scratch directory: %w", pathErr)
+	}
+	if err := os.MkdirAll(resolvedPaths.SIDDir, 0o700); err != nil {
+		return harnessCapture{}, fmt.Errorf("create harness capture scratch base %s: %w", resolvedPaths.SIDDir, err)
+	}
+	configDir, err := os.MkdirTemp(resolvedPaths.SIDDir, "pfm-harness-configdir-")
+	if err != nil {
+		return harnessCapture{}, fmt.Errorf("create throwaway CLAUDE_CONFIG_DIR: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(configDir) }()
 
 	binary := machine.Claude.Binary
 	if binary == "" {
@@ -142,7 +175,7 @@ func captureHarnessPrompt(ctx context.Context, home string, machine config.Confi
 	versionCtx, versionCancel := context.WithTimeout(ctx, 5*time.Second)
 	versionCmd := exec.CommandContext(versionCtx, binary, "--version")
 	versionCmd.WaitDelay = 500 * time.Millisecond
-	versionCmd.Env = harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String())
+	versionCmd.Env = harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir)
 	versionRaw, versionErr := versionCmd.Output()
 	versionCancel()
 	if versionErr != nil {
@@ -157,14 +190,34 @@ func captureHarnessPrompt(ctx context.Context, home string, machine config.Confi
 		}
 		return harnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
 	}
-	_, runErr := headlessrun.Run(ctx, headlessrun.Request{
+	version := strings.TrimSpace(string(versionRaw))
+	devNull, stdinErr := os.Open(os.DevNull)
+	if stdinErr != nil {
+		return harnessCapture{}, fmt.Errorf("open %s for the capture run's stdin: %w", os.DevNull, stdinErr)
+	}
+	defer func() { _ = devNull.Close() }()
+	result, runErr := headlessrun.Run(ctx, headlessrun.Request{
 		Config: config.Config{Claude: config.Claude{Binary: binary}},
-		Engine: pfmengine.Claude, Model: model, Prompt: "x", Native: true, WithoutAccount: true,
+		Engine: pfmengine.Claude, Model: model, Native: true, WithoutAccount: true,
 		Timeout: 20 * time.Second,
-		Args: []string{"--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+		// "x" travels as the CLI's own positional prompt argument, never on
+		// stdin — matching the documented `claude -p x ...` invocation
+		// exactly. Stdin is pinned to /dev/null so the CLI never waits on a
+		// stream that carries nothing (issue #24 finding 6 observed a "no
+		// stdin data received in 3s" warning when stdin was left ambiguous).
+		Args: []string{"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections"},
-		Env: harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String()),
+		Env:   harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
+		Stdin: devNull,
 	})
+	if verboseDir != "" {
+		if writeErr := deps.WriteVerboseFile(verboseDir, "harness-prompt.stdout", []byte(result.Stdout)); writeErr != nil {
+			return harnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
+		}
+		if writeErr := deps.WriteVerboseFile(verboseDir, "harness-prompt.stderr", []byte(result.Stderr)); writeErr != nil {
+			return harnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
+		}
+	}
 	// The CLI exits nonzero by design — the sink refused its request; the
 	// capture, not the exit code, is the result. The grace window covers the
 	// handler goroutine still finishing its send after Run returns; a ctx case
@@ -173,11 +226,73 @@ func captureHarnessPrompt(ctx context.Context, home string, machine config.Confi
 	select {
 	case body := <-bodies:
 		captured, err := decodeHarnessCapture(body)
-		captured.CLIVersion = strings.TrimSpace(string(versionRaw))
+		captured.CLIVersion = version
+		if verboseDir != "" {
+			_ = writeHarnessSinkHits(verboseDir, hits)
+		}
 		return captured, err
 	case <-time.After(2 * time.Second):
-		return harnessCapture{CLIVersion: strings.TrimSpace(string(versionRaw))}, errors.Join(errors.New("no API request reached the capture sink"), runErr)
+		if verboseDir != "" {
+			_ = writeHarnessSinkHits(verboseDir, hits)
+		}
+		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
+			return harnessCapture{CLIVersion: version}, fmt.Errorf("%w (OAuth-only routing on cli=%s) — one minimal request may have been billed", errHarnessBypassedSink, version)
+		}
+		message := errors.New("no API request reached the capture sink")
+		if verboseDir != "" {
+			message = fmt.Errorf("%w — see %s (--verbose)", message, filepath.Join(verboseDir, "harness-prompt.stderr"))
+		}
+		return harnessCapture{CLIVersion: version}, errors.Join(message, runErr)
 	}
+}
+
+// claudeAnsweredWithoutSink reports whether the CLI's own stdout is a
+// complete, priced Claude Code envelope — stop_reason and usage both present
+// — the shape a real /v1/messages exchange produces. A blocked or empty run
+// never satisfies this, so it can never masquerade as a spend.
+func claudeAnsweredWithoutSink(stdout string) bool {
+	var envelope struct {
+		StopReason string          `json:"stop_reason"`
+		Usage      json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		return false
+	}
+	return strings.TrimSpace(envelope.StopReason) != "" && len(envelope.Usage) > 0 && string(envelope.Usage) != "null"
+}
+
+// harnessSinkHits records every request the sink handler ever saw — not just
+// the first /messages body harnessSinkHandler forwards — so a failed capture
+// can still report what, if anything, reached the sink (change A).
+type harnessSinkHits struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (hits *harnessSinkHits) wrap(next http.HandlerFunc) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		hits.mu.Lock()
+		hits.paths = append(hits.paths, request.Method+" "+request.URL.Path)
+		hits.mu.Unlock()
+		next(writer, request)
+	}
+}
+
+func (hits *harnessSinkHits) count() int {
+	hits.mu.Lock()
+	defer hits.mu.Unlock()
+	return len(hits.paths)
+}
+
+func writeHarnessSinkHits(verboseDir string, hits *harnessSinkHits) error {
+	hits.mu.Lock()
+	lines := append([]string(nil), hits.paths...)
+	hits.mu.Unlock()
+	content := fmt.Sprintf("TOTAL_HITS %d\n", len(lines))
+	for _, line := range lines {
+		content += line + "\n"
+	}
+	return deps.WriteVerboseFile(verboseDir, "sink-hits.txt", []byte(content))
 }
 
 // harnessSinkHandler refuses every request with the non-retryable 400 and
@@ -201,8 +316,11 @@ func harnessSinkHandler(bodies chan<- []byte) http.HandlerFunc {
 
 // harnessCaptureEnv is the fleet hygiene strip applied in-process: inherited
 // session identity, endpoint and cache overrides are dropped, then the sink
-// endpoint, dummy credentials and the full-prompt arm are pinned.
-func harnessCaptureEnv(environ []string, sinkURL string) []string {
+// endpoint, dummy credentials, the throwaway config dir, and the full-prompt
+// arm are pinned. configDir is created fresh per capture by the caller
+// (change B) — CLAUDE_CONFIG_DIR is stripped first so the inherited value
+// never leaks through even if this pin were ever omitted.
+func harnessCaptureEnv(environ []string, sinkURL, configDir string) []string {
 	stripped := map[string]bool{
 		"CLAUDE_CODE_SESSION_ID": true, "CLAUDECODE": true, "CLAUDE_CODE_CHILD_SESSION": true,
 		"CLAUDE_CONFIG_DIR": true, "ENABLE_PROMPT_CACHING_1H": true, "FORCE_PROMPT_CACHING_5M": true,
@@ -210,7 +328,7 @@ func harnessCaptureEnv(environ []string, sinkURL string) []string {
 		"ANTHROPIC_MODEL": true, "ANTHROPIC_SMALL_FAST_MODEL": true,
 		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": true, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": true,
 	}
-	result := make([]string, 0, len(environ)+5)
+	result := make([]string, 0, len(environ)+6)
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")
 		if stripped[name] {
@@ -224,6 +342,7 @@ func harnessCaptureEnv(environ []string, sinkURL string) []string {
 		"ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0",
 		"FORCE_PROMPT_CACHING_5M=1",
+		"CLAUDE_CONFIG_DIR="+configDir,
 	)
 }
 

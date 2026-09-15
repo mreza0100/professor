@@ -6,10 +6,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
 	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/gather"
 )
 
 type LauncherState string
@@ -137,6 +140,48 @@ func (installer *engine) wireClaudeLauncher() error {
 		_, err := RepairClaudeLauncher(installer.options.Home)
 		return err
 	})
+}
+
+// pruneClaudeVersions is wireClaudeLauncher's sibling: since pfm's launcher
+// disables Claude Code's own version cleanup (it never symlinks the
+// canonical binary straight into versions/), pfm owns retention instead.
+// Preview mode prints the plan without touching a file — the same preview
+// that pfm install's own dry run gives every other change; apply mode
+// removes exactly the planned set. A live-process probe failure removes
+// nothing and names why, rather than guess a version is unused.
+func (installer *engine) pruneClaudeVersions() error {
+	home := installer.options.Home
+	report, err := InspectClaudeVersions(home, installer.options.ClaudeBinary)
+	if err != nil {
+		return fmt.Errorf("inspect Claude versions: %w", err)
+	}
+	if len(report.Versions) == 0 {
+		return nil
+	}
+	procs := gather.NewProcFS(installer.options.ProcRoot)
+	report = ProbeLiveClaudeVersions(report, procs, syscall.Kill)
+	if report.LiveProbeErr != nil {
+		installer.say("  skip    claude versions: retention not applied — %v", report.LiveProbeErr)
+		return nil
+	}
+	remove, kept := PlanClaudeVersionPrune(report, ClaudeVersionKeepCount)
+	for _, version := range remove {
+		description := fmt.Sprintf("remove %s (%s, %s)", version.Path, filepath.Base(version.Path), FormatClaudeVersionBytes(version.Bytes))
+		if err := installer.change(description, func() error {
+			return os.Remove(version.Path)
+		}); err != nil {
+			return fmt.Errorf("prune Claude version %s: %w", version.Path, err)
+		}
+	}
+	keptPaths := make([]string, 0, len(kept))
+	for path := range kept {
+		keptPaths = append(keptPaths, path)
+	}
+	sort.Strings(keptPaths)
+	for _, path := range keptPaths {
+		installer.ok(fmt.Sprintf("keep %s (%s)", path, kept[path]))
+	}
+	return nil
 }
 
 func (installer *engine) unwireClaudeLauncher() error {

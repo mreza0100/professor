@@ -361,15 +361,31 @@ func commandError(err error, output []byte) string {
 }
 
 func writeVerbose(directory, name string, output []byte) error {
-	if directory == "" || len(output) == 0 {
+	if len(output) == 0 {
+		return nil
+	}
+	safe := regexp.MustCompile(`[^a-zA-Z0-9._-]+`).ReplaceAllString(name, "-")
+	return WriteVerboseFile(directory, safe+".log", output)
+}
+
+// WriteVerboseFile is the one raw-filesystem writer for ad hoc verbose
+// evidence outside a dependency probe's own name+".log" convention (see
+// writeVerbose above) — a no-op when directory is empty. name is written
+// exactly as given; the caller owns its shape (a fixed evidence filename like
+// "harness-prompt.stderr"), never untrusted input, so it is neither
+// sanitized nor suffixed here. Centralizing this keeps cmd/pfm's raw
+// os.WriteFile count at zero — every verbose-evidence write routes through
+// this package, the same discipline atomicfile.Write applies to a whole-file
+// replace.
+func WriteVerboseFile(directory, name string, output []byte) error {
+	if directory == "" {
 		return nil
 	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create verbose probe directory: %w", err)
+		return fmt.Errorf("create verbose directory: %w", err)
 	}
-	safe := regexp.MustCompile(`[^a-zA-Z0-9._-]+`).ReplaceAllString(name, "-")
-	if err := os.WriteFile(filepath.Join(directory, safe+".log"), output, 0o600); err != nil {
-		return fmt.Errorf("write verbose probe output: %w", err)
+	if err := os.WriteFile(filepath.Join(directory, name), output, 0o600); err != nil {
+		return fmt.Errorf("write verbose output %s: %w", name, err)
 	}
 	return nil
 }

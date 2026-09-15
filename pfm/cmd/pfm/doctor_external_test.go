@@ -210,8 +210,8 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if warnings, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); warnings != 2 {
-		t.Fatalf("warnings=%d, want 2\n%s", warnings, output.String())
+	if _, failures, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); failures != 2 {
+		t.Fatalf("failures=%d, want 2\n%s", failures, output.String())
 	}
 	want := strings.Join([]string{
 		"doctor: dep tmux path=/fixture/tmux version=3.4 min=1.8 ok",
@@ -262,21 +262,21 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 				}}
 			}
 			var output bytes.Buffer
-			warnings, claudeAbsent := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
+			_, failures, claudeAbsent := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
 			if claudeAbsent != testCase.wantMissed {
 				t.Fatalf("claudeAbsent=%v, want %v", claudeAbsent, testCase.wantMissed)
 			}
 			if testCase.wantMissed {
-				if warnings != 0 {
-					t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+				if failures != 0 {
+					t.Fatalf("failures=%d, want 0\n%s", failures, output.String())
 				}
 				want := "doctor: dep claude path=" + testCase.path + " MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n"
 				if output.String() != want {
 					t.Fatalf("output=%q, want %q", output.String(), want)
 				}
 			} else {
-				if warnings != 1 {
-					t.Fatalf("warnings=%d, want 1 (still broken, still counted)\n%s", warnings, output.String())
+				if failures != 1 {
+					t.Fatalf("failures=%d, want 1 (still broken, still counted)\n%s", failures, output.String())
 				}
 				if !strings.Contains(output.String(), "broken") {
 					t.Fatalf("output never called it broken:\n%s", output.String())
@@ -298,9 +298,9 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	warnings, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1 — a required timed-out dep still contributes its warning\n%s", warnings, output.String())
+	_, failures, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
+	if failures != 1 {
+		t.Fatalf("failures=%d, want 1 — a required timed-out dep still contributes its failure\n%s", failures, output.String())
 	}
 	if !strings.Contains(output.String(), "timeout") {
 		t.Fatalf("dependency row missing %q:\n%s", "timeout", output.String())
@@ -321,9 +321,9 @@ func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
 		}}
 	}
 	var output bytes.Buffer
-	warnings, _ := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
-	if warnings != 1 {
-		t.Fatalf("warnings=%d, want 1 for a required unanswered probe\n%s", warnings, output.String())
+	_, failures, _ := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
+	if failures != 1 {
+		t.Fatalf("failures=%d, want 1 for a required unanswered probe\n%s", failures, output.String())
 	}
 	if want := "doctor: dep tmux path=/fixture/tmux cancelled error=cancelled by parent context — probe stopped by its caller; unverified, no fault established"; !strings.Contains(output.String(), want) {
 		t.Fatalf("output=%q, want caller cancellation row %q", output.String(), want)

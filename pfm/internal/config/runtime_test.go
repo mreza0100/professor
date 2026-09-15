@@ -63,6 +63,33 @@ func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 	}
 }
 
+// TestLoadRuntimeRecordsWhetherConfigWasExplicit is a REGRESSION test for
+// issue #24 finding 4: an explicit --config path resolved before an update's
+// candidate install is indistinguishable from the default location unless
+// the runtime remembers the caller asked for it by name. Unfixed, Runtime
+// carries no ConfigExplicit field at all — this test does not compile
+// against the unfixed code, and that compile failure IS the watched-failing
+// run.
+func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
+	t.Setenv(paths.EnvHome, t.TempDir())
+	implicit, err := LoadRuntime("")
+	if err != nil {
+		t.Fatalf("LoadRuntime(\"\") = %v", err)
+	}
+	if implicit.ConfigExplicit {
+		t.Fatalf("LoadRuntime(\"\").ConfigExplicit = true, want false for the default location")
+	}
+
+	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
+	explicit, err := LoadRuntime(explicitPath)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", explicitPath, err)
+	}
+	if !explicit.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true for a named path", explicitPath)
+	}
+}
+
 // TestRuntimeOrDefaultUsesTheCallersRuntimeAsGiven pins the optional-runtime
 // rule: a caller's runtime is used as given, and only a nil one loads the
 // default — whose broken config is still an error, never silent defaults.
