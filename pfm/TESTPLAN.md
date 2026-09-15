@@ -290,6 +290,16 @@ A hand-linked `extensions/professor` directory is never loaded on its own: moder
 | --- | --- | --- | --- |
 | on this macOS host, with VS Code Insiders present: `pfm install --yes --vscode`, open Insiders cold, `code-insiders --list-extensions \| grep professor` lists it, and `pfm doctor \| grep 'vscode product'` reports `index=registered` for every linked product | REAL-SESSION | manual: install, cold-launch Insiders, grep its extension list and `pfm doctor` | not automated — see § Flows that CANNOT be jailed, item 38 |
 
+### A.10 — VS Code terminal surfaces (issue #24 findings 10/11/12)
+
+`professor.newChatTerminal` now delegates to the SAME contributed-profile route (`workbench.action.terminal.newWithProfile` addressed at `professor.terminal`) the terminal `+` dropdown's **Professor** entry uses, instead of calling `createTerminal` with its own options, which rendered the default profile's icon (finding 10); the extension contributes a default keybinding for the command (finding 11b), collapsing the third redundant surface (finding 11a).
+
+| flow | safety | expected | regression |
+| --- | --- | --- | --- |
+| `professor.newChatTerminal`'s registered command body never calls `createTerminal(` with its own options and delegates through `workbench.action.terminal.newWithProfile` addressed at `id: 'professor.terminal'` | JAIL | `internal/installer/vscode_extension_test.go:TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions` | |
+| the staged `package.json` contributes exactly one keybinding for `professor.newChatTerminal` — `ctrl+shift+alt+t` / `cmd+shift+alt+t` | JAIL | `internal/installer/vscode_extension_test.go:TestVSCodeExtensionContributesOneKeybindingForTheCommand` | |
+| the operator matrix — keybinding press, command palette, terminal `+` dropdown pick — each produces a tab whose icon is NOT the default profile's `mortar-board`, with a window reload between rounds | REAL-SESSION | manual: run all three, reload between rounds, confirm each tab's icon cycles | not automated — see § Flows that CANNOT be jailed, item 39 |
+
 | `reap` dry run classifies every socket, changes nothing | JAIL+tmux | `cmd/pfm/reap_jail_test.go:134-189`, `internal/reap/reap.go:139-160` | |
 | `reap` KEEP rules: attached, self, `cc-new-*`, busy, transcript written < 60s | JAIL | `internal/reap/reap_test.go:14-200` | |
 | `reap` never kills a socket hosting non-chat processes (dev servers, `uv`) | JAIL+tmux | `internal/reap/proc.go:78-110`, `cmd/pfm/reap_jail_test.go:134-189` | |
@@ -763,6 +773,8 @@ Schedule these deliberately on a scratch project directory. Rows tagged `REAL-SE
 **Needs a real host with several live Claude chats running an older `versions/` build (issue #24 finding 8):** 37. `pfm install` (preview) against a genuine `~/.local/share/claude/versions/` several builds deep, with real `claude` chats attached to a build that is not the newest — the jail proves the plan and protection logic against fake process tables (`gather.ProcImage` fixtures), but nothing jailed proves `lsof`/`/proc` actually resolve a REAL claude process's executing image back to its version file on this host; confirm the preview's `remove`/`keep` lines match reality — on the reporting host this was 6 versions retained (1.3 GB), 4 live chats on a build that was not the newest, and a plan that removed 3 while naming every live pid it protected.
 
 **Needs a real VS Code product loading its own extension index (issue #24 finding 9a/9b):** 38. `pfm install --yes --vscode` on a genuine macOS host with VS Code Insiders present, then a COLD Insiders launch (not a reload) — the jail proves `registerVSCodeExtension` writes and re-verifies the `identifier.id=professor.professor` entry against fixture indexes, but nothing jailed proves a REAL VS Code build actually scans `extensions.json` and loads the linked folder from it rather than the directory walk 9a showed it skips; confirm `code-insiders --list-extensions | grep professor` lists it and `pfm doctor | grep 'vscode product'` reports `index=registered` for every linked product.
+
+**Needs a real VS Code terminal-rendering host (issue #24 findings 10/11/12):** 39. The operator matrix on the reporter's VS Code version — press the keybinding (`ctrl+shift+alt+t` / `cmd+shift+alt+t`), run **Professor: New Chat Terminal** from the command palette, and pick **Professor** from the terminal `+` dropdown, with a window reload between each round — the jail proves the command body delegates through `workbench.action.terminal.newWithProfile` and the keybinding is contributed, but nothing jailed proves VS Code actually RENDERS the resulting tab with the cycling icon rather than the default profile's `mortar-board`, since the extension API only echoes back the `creationOptions` it was passed, never the rendered tab; confirm all three surfaces produce a tab whose icon differs from the default profile's.
 
 ---
 

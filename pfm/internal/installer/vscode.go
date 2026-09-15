@@ -30,7 +30,11 @@ const (
 	// extension contributes (its title in assets/vscode/professor/package.json):
 	// offered in the + dropdown, never selected as the default. An owned
 	// default holding it — written by the release that briefly selected it —
-	// is pfm's own earlier value and moves back to vscodeProfileName.
+	// is pfm's own earlier value and moves back to vscodeProfileName. The
+	// professor.newChatTerminal command now delegates to this same
+	// contributed-profile route (workbench.action.terminal.newWithProfile)
+	// instead of building its own createTerminal options, and the extension
+	// carries a default keybinding for it (extension.js, package.json).
 	vscodeExtensionProfileTitle = "Professor"
 	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
 	// product's extensions directory, and the extension id VS Code records
