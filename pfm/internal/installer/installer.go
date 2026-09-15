@@ -221,6 +221,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.wireClaudeLauncher(); err != nil {
 		return err
 	}
+	if err := installer.pruneClaudeVersions(); err != nil {
+		return err
+	}
 	if err := installer.wireHostOverlays(); err != nil {
 		return err
 	}

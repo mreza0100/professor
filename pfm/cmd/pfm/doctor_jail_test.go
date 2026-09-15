@@ -109,6 +109,63 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	}
 }
 
+// TestDoctorReportsClaudeVersionCountBytesAndPrunable is M7's doctor-row
+// regression test for issue #24 finding 8: the launcher disables Claude
+// Code's own version cleanup, so nothing else in pfm ever reported the
+// growth. Three versions on a clean target HOME: the newest is protected,
+// the middle one is live (a PFM_PROC_ROOT fixture pid's exe points at it),
+// and the oldest is the only one prunable. Unfixed, doctor prints no
+// claude-versions row at all — this test's count=/prunable= assertions fail.
+func TestDoctorReportsClaudeVersionCountBytesAndPrunable(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	home := runtime.Paths.Home
+	versions := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newest := filepath.Join(versions, "2.1.270")
+	live := filepath.Join(versions, "2.1.263")
+	prunable := filepath.Join(versions, "2.1.250")
+	for _, path := range []string{newest, live, prunable} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	procRoot := runtime.Paths.ProcRoot
+	if err := os.MkdirAll(filepath.Join(procRoot, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(live, filepath.Join(procRoot, "4242", "exe")); err != nil {
+		t.Fatal(err)
+	}
+	// Candidate scoping (installer.ProbeLiveClaudeVersions) reads argv[0]
+	// before ever calling Image, so the fixture needs a cmdline record
+	// naming the live build.
+	if err := os.WriteFile(filepath.Join(procRoot, "4242", "cmdline"), []byte(live+"\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	output := stdout.String()
+	if !strings.Contains(output, "doctor: claude-versions dir="+versions) {
+		t.Fatalf("doctor output missing claude-versions row:\n%s", output)
+	}
+	if !strings.Contains(output, "count=3") {
+		t.Fatalf("doctor output missing count=3:\n%s", output)
+	}
+	if !strings.Contains(output, "newest=2.1.270") {
+		t.Fatalf("doctor output missing newest=2.1.270:\n%s", output)
+	}
+	if !strings.Contains(output, "live=2.1.263(1 pids)") {
+		t.Fatalf("doctor output missing live pid count:\n%s", output)
+	}
+	if !strings.Contains(output, "prunable=1") {
+		t.Fatalf("doctor output missing prunable=1:\n%s", output)
+	}
+}
+
 // TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone is
 // M2's regression test for issue #24 finding 1: doctor must distinguish a
 // FAILURE (a required dependency missing) from a WARNING (an advisory row

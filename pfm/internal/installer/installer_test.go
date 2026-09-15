@@ -72,6 +72,88 @@ func genuineExitError() error {
 	return exitErr
 }
 
+// TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem is C: the
+// prune sibling to wireClaudeLauncher, destructive-defaults-to-preview per
+// pfm/CLAUDE.md, and the preview IS the apply's own preview — same
+// classification with and without --apply, only the action differs. Four
+// versions: the newest two are protected by the keep window, a third is
+// protected because a live pid is executing it despite being outside that
+// window, and the fourth is the only one either run may remove.
+func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T) {
+	home := t.TempDir()
+	versions := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newest := filepath.Join(versions, "2.1.270")
+	second := filepath.Join(versions, "2.1.269")
+	live := filepath.Join(versions, "2.1.260")
+	prunable := filepath.Join(versions, "2.1.250")
+	for _, path := range []string{newest, second, live, prunable} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	procRoot := filepath.Join(t.TempDir(), "proc")
+	if err := os.MkdirAll(filepath.Join(procRoot, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(live, filepath.Join(procRoot, "4242", "exe")); err != nil {
+		t.Fatal(err)
+	}
+	// Candidate scoping (ProbeLiveClaudeVersions) reads argv[0] before ever
+	// calling Image, so the fixture needs a cmdline record naming the live
+	// build — the same file a real /proc/<pid>/cmdline is.
+	if err := os.WriteFile(filepath.Join(procRoot, "4242", "cmdline"), []byte(live+"\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var preview bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &preview,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	previewOutput := preview.String()
+	if !strings.Contains(previewOutput, "remove "+prunable) {
+		t.Fatalf("preview did not list the prunable version:\n%s", previewOutput)
+	}
+	if !strings.Contains(previewOutput, "keep "+live+" (live (pids 4242))") {
+		t.Fatalf("preview did not name the live version kept, with its pids:\n%s", previewOutput)
+	}
+	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") || !strings.Contains(previewOutput, "keep "+second+" (newest)") {
+		t.Fatalf("preview did not name the two newest versions kept:\n%s", previewOutput)
+	}
+	for _, path := range []string{newest, second, live, prunable} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("preview removed %s: %v", path, err)
+		}
+	}
+
+	var apply bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &apply,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applyOutput := apply.String()
+	if !strings.Contains(applyOutput, "remove "+prunable) {
+		t.Fatalf("apply did not report the removal:\n%s", applyOutput)
+	}
+	if !strings.Contains(applyOutput, "keep "+live+" (live (pids 4242))") {
+		t.Fatalf("apply did not name the live version kept:\n%s", applyOutput)
+	}
+	if _, err := os.Stat(prunable); !os.IsNotExist(err) {
+		t.Fatalf("apply left the prunable version in place: err=%v", err)
+	}
+	for _, path := range []string{newest, second, live} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("apply removed a protected version %s: %v", path, err)
+		}
+	}
+}
+
 func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true, nameSyncActive: true}

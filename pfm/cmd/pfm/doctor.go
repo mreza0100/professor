@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/ask"
@@ -149,7 +150,7 @@ func runDoctor(
 	} else {
 		switch launcher.State {
 		case installer.LauncherOK:
-			fmt.Fprintln(stdout, "doctor: launcher: ok")
+			fmt.Fprintln(stdout, "doctor: launcher: ok (pfm owns Claude Code version retention — see claude-versions)")
 		case installer.LauncherMissing:
 			tally.fail()
 			fmt.Fprintln(stdout, "doctor: launcher: missing — run pfm install")
@@ -161,6 +162,9 @@ func runDoctor(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
+	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(stdout, resolved.Home, runtime.Config.Claude.Binary, gather.NewProcFS(resolved.ProcRoot))
+	tally.warnings += claudeVersionsWarnings
+	tally.failures += claudeVersionsFailures
 	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
@@ -811,6 +815,64 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 		failures++
 		fmt.Fprintf(stdout, "doctor: host_overlay statusline claude[%d] command=%q, want the overlay — run pfm install --yes\n", account.ID, command)
 	}
+	return warnings, failures
+}
+
+// printClaudeVersionsDoctor reports the growth pfm's launcher causes by
+// disabling Claude Code's own version cleanup (see internal/installer's
+// claude_versions.go): count, total bytes, the newest build, any build a
+// live process is executing, and how much a prune would free. Absence — no
+// native Claude installer ever ran here — is never a warning; a probe
+// failure is, because retention then reads as unknown rather than clean.
+func printClaudeVersionsDoctor(stdout io.Writer, home, configuredBinary string, procs gather.ProcFS) (warnings, failures int) {
+	report, err := installer.InspectClaudeVersions(home, configuredBinary)
+	if err != nil {
+		failures++
+		fmt.Fprintf(stdout, "doctor: claude-versions unreadable error=%v — run pfm install\n", err)
+		return warnings, failures
+	}
+	if len(report.Versions) == 0 {
+		fmt.Fprintf(stdout, "doctor: claude-versions dir=%s absent (native installer never ran)\n", report.Dir)
+		return warnings, failures
+	}
+	report = installer.ProbeLiveClaudeVersions(report, procs, syscall.Kill)
+	if report.LiveProbeErr != nil {
+		warnings++
+		fmt.Fprintf(stdout, "doctor: claude-versions PROBE FAILED error=%v — retention unknown\n", report.LiveProbeErr)
+		return warnings, failures
+	}
+	var totalBytes int64
+	for _, version := range report.Versions {
+		totalBytes += version.Bytes
+	}
+	remove, _ := installer.PlanClaudeVersionPrune(report, installer.ClaudeVersionKeepCount)
+	var prunableBytes int64
+	for _, version := range remove {
+		prunableBytes += version.Bytes
+	}
+	newest := "none"
+	if report.Newest != nil {
+		newest = filepath.Base(report.Newest.Path)
+	}
+	liveText := "none"
+	if len(report.Live) > 0 {
+		parts := make([]string, 0, len(report.Live))
+		for path, pids := range report.Live {
+			parts = append(parts, fmt.Sprintf("%s(%d pids)", filepath.Base(path), len(pids)))
+		}
+		sort.Strings(parts)
+		liveText = strings.Join(parts, ",")
+	}
+	line := fmt.Sprintf(
+		"doctor: claude-versions dir=%s count=%d bytes=%s newest=%s live=%s prunable=%d (%s)",
+		report.Dir, len(report.Versions), installer.FormatClaudeVersionBytes(totalBytes), newest, liveText,
+		len(remove), installer.FormatClaudeVersionBytes(prunableBytes),
+	)
+	if len(remove) > 0 {
+		warnings++
+		line += " — run pfm install --yes to prune"
+	}
+	fmt.Fprintln(stdout, line)
 	return warnings, failures
 }
 

@@ -402,6 +402,9 @@ func runInternal(
 	if len(args) != 0 && args[0] == "launcher-repair" {
 		return runInternalLauncherRepair(args[1:], stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "claude-version" {
+		return runInternalClaudeVersion(args[1:], stdout, stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "explore-deny" {
 		return runExploreDeny(os.Stdin, stdout, stderr)
 	}
@@ -464,7 +467,7 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
 		return 2
 	}
 	if args[0] != "kill-exit" {

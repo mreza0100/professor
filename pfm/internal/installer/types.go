@@ -14,6 +14,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvestpy"
+	"hostops/pfm/internal/paths"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -125,6 +126,13 @@ type Options struct {
 	HarvestPlatform    harvestpy.Platform
 	HarvestOffline     bool
 
+	// ProcRoot is the process table pruneClaudeVersions reads to tell a
+	// version a live chat is executing from one it is safe to remove. Empty
+	// resolves to PFM_PROC_ROOT-or-/proc in normalize, same as the rest of
+	// the fleet; jail tests set it directly so the probe never touches a
+	// real /proc.
+	ProcRoot string
+
 	// InstallThemes enables the optional Claude Code themes, source-fetched and bundled.
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
@@ -173,6 +181,9 @@ func normalize(options Options) (Options, error) {
 	}
 	if options.ConfigDir == "" {
 		options.ConfigDir = options.Home + "/.claude"
+	}
+	if options.ProcRoot == "" {
+		options.ProcRoot = paths.EnvOr(paths.EnvProcRoot, "/proc")
 	}
 	if options.MCPPort == 0 {
 		options.MCPPort = pfmconfig.DefaultMCPPort
