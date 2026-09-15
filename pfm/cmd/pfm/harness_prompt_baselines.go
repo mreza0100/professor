@@ -19,10 +19,10 @@ type harnessPromptModel struct{ alias, stem string }
 
 var harnessPromptModels = []harnessPromptModel{{"sonnet", "harness-original"}, {"opus", "harness-opus"}}
 
-func printHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config) int {
+func printHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config, verboseDir string) int {
 	warnings := 0
 	for _, model := range harnessPromptModels {
-		warnings += printModelHarnessPromptDoctor(ctx, stdout, home, machine, model)
+		warnings += printModelHarnessPromptDoctor(ctx, stdout, home, machine, model, verboseDir)
 	}
 	return warnings
 }
@@ -32,7 +32,7 @@ func printHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string
 // tokens are spent and nothing leaves the machine — and compares its sha256
 // to the staged baseline. Match, instruction drift, unavailable baseline, and
 // failed capture are distinct outcomes. Failed capture is never reported as drift.
-func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config, model harnessPromptModel) int {
+func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config, model harnessPromptModel, verboseDir string) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.alias)
 	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
@@ -58,7 +58,7 @@ func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home s
 		fmt.Fprintf(stdout, "doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q — missing, unreadable or inconsistent baseline; run pfm install\n", fields[1], baselineModel)
 		return 1
 	}
-	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias)
+	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias, verboseDir)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
 	if resolved == "" {
 		resolved = "unknown"

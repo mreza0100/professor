@@ -36,12 +36,12 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				}
 			}
 			called := false
-			harnessCaptureOverride = func(context.Context, string, config.Config, string) (harnessCapture, error) {
+			harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
 				called = true
 				return harnessCapture{Prompt: tc.prompt, ResolvedModel: tc.model, CLIVersion: "2.1.fixture"}, tc.err
 			}
 			var output bytes.Buffer
-			code := printModelHarnessPromptDoctor(context.Background(), &output, home, config.Config{}, harnessPromptModels[0])
+			code := printModelHarnessPromptDoctor(context.Background(), &output, home, config.Config{}, harnessPromptModels[0], "")
 			if (code != 0) != tc.warning || !strings.Contains(output.String(), tc.want) {
 				t.Fatalf("code=%d output=%s", code, &output)
 			}

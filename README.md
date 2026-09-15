@@ -217,7 +217,7 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 - **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pfm` plus a session that has read the quality-prompt contract.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
 - **The wave pipeline.** refine → scheduler → orchestrator → builder → walker: the walker is a 19-seat verification engine (scout, thread walkers, slice sensor, gate sweep, security auditor, invariant hunter, anomaly judge, coverage critic, second opinion, final judge) whose failure states are named.
-- **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED` — never silence.
+- **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
 Optional roles ship for teams that want them — `/officer`, `/km`, `/pm`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
 

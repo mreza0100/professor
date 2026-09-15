@@ -128,7 +128,11 @@ func runDoctor(
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
 	tally.warnings += printPrePushDoctor(context.Background(), stdout)
-	tally.warnings += printHarnessPromptDoctor(context.Background(), stdout, resolved.Home, runtime.Config)
+	verboseDir := ""
+	if *verbose {
+		verboseDir = filepath.Join("tmp", "pfm-doctor")
+	}
+	tally.warnings += printHarnessPromptDoctor(context.Background(), stdout, resolved.Home, runtime.Config, verboseDir)
 	tally.warnings += printSpawnAuditDoctor(
 		context.Background(),
 		stdout,
@@ -156,10 +160,6 @@ func runDoctor(
 			tally.fail()
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
-	}
-	verboseDir := ""
-	if *verbose {
-		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
 	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
 		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
