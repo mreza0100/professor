@@ -6,6 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/testjail"
@@ -489,7 +494,7 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 3 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "doctor: config path=") ||
@@ -890,5 +895,136 @@ func holdClaudeOpen(t *testing.T, root, socket string) func(format string) strin
 			t.Fatalf("read the opened server %s: %v", socket, err)
 		}
 		return strings.TrimSpace(string(output))
+	}
+}
+
+// argsZeroStringLiterals walks body and collects every string literal a
+// "==" or "!=" comparison holds against an args[0] index expression — the
+// shape both run's top-level switch cases and runInternal's if-chain (plus
+// its final "!= kill-exit" negation) use to name a subcommand. It is the
+// structural half of issue #24 F1's reachability proof: reading the actual
+// dispatch, never trusting a second hand-copied list to match it.
+func argsZeroStringLiterals(body *ast.BlockStmt) map[string]bool {
+	literals := map[string]bool{}
+	isArgsZero := func(expr ast.Expr) bool {
+		index, ok := expr.(*ast.IndexExpr)
+		if !ok {
+			return false
+		}
+		ident, ok := index.X.(*ast.Ident)
+		return ok && ident.Name == "args"
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		binary, ok := n.(*ast.BinaryExpr)
+		if !ok || (binary.Op != token.EQL && binary.Op != token.NEQ) {
+			return true
+		}
+		var literal *ast.BasicLit
+		switch {
+		case isArgsZero(binary.X):
+			literal, _ = binary.Y.(*ast.BasicLit)
+		case isArgsZero(binary.Y):
+			literal, _ = binary.X.(*ast.BasicLit)
+		}
+		if literal == nil || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err == nil {
+			literals[value] = true
+		}
+		return true
+	})
+	return literals
+}
+
+// switchCaseStringLiterals collects every string literal a top-level
+// "switch args[0]" case clause names.
+// switchCaseStringLiterals collects every case's plain string literal AND
+// the printed source text of every non-literal case expression — run's own
+// "codex" case matches on pfmengine.MustLookup(pfmengine.Codex).LongName,
+// not a bare "codex" literal, so a caller that needs that one name checks
+// the printed-text set with pfmengine's own known selector text instead.
+func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals map[string]bool, printedExprs map[string]bool) {
+	literals = map[string]bool{}
+	printedExprs = map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		clause, ok := n.(*ast.CaseClause)
+		if !ok {
+			return true
+		}
+		for _, expr := range clause.List {
+			if literal, ok := expr.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				if value, err := strconv.Unquote(literal.Value); err == nil {
+					literals[value] = true
+				}
+				continue
+			}
+			var buf bytes.Buffer
+			if err := printer.Fprint(&buf, fset, expr); err == nil {
+				printedExprs[buf.String()] = true
+			}
+		}
+		return true
+	})
+	return literals, printedExprs
+}
+
+// findFuncDecl parses main.go once and returns the *ast.FuncDecl body for
+// name — "run" or "runInternal", the two functions topLevelSubcommands and
+// internalSubcommands must stay in lockstep with.
+func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return fn.Body, fset
+		}
+	}
+	t.Fatalf("main.go declares no func %s", name)
+	return nil, nil
+}
+
+// TestTopLevelSubcommandsReachTheirHandler pins issue #24 F1's top-level
+// door: every name topLevelSubcommands lists (the same list
+// installer.SetImplementedSubcommands teaches the installer at process
+// start) must be a case run's own "switch args[0]" actually matches — a name
+// listed but unmatched would silently fall to the default "unknown command"
+// arm, and, worse, unknownPFMHookCommand would then treat an operator's own
+// hook naming it as implemented when this binary's dispatch disagrees.
+func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
+	body, fset := findFuncDecl(t, "run")
+	literals, printedExprs := switchCaseStringLiterals(fset, body)
+	// run's own "codex" case matches on the engine registry's LongName, not
+	// a bare string literal — topLevelSubcommands carries the same
+	// expression's runtime value, so this checks the printed source form.
+	const codexSelector = "pfmengine.MustLookup(pfmengine.Codex).LongName"
+	for _, name := range topLevelSubcommands {
+		if literals[name] {
+			continue
+		}
+		if name == pfmengine.MustLookup(pfmengine.Codex).LongName && printedExprs[codexSelector] {
+			continue
+		}
+		t.Fatalf("topLevelSubcommands names %q, but run's switch has no matching case — it falls through to the default \"unknown command\" arm", name)
+	}
+}
+
+// TestInternalSubcommandsReachTheirHandler is TestTopLevelSubcommandsReachTheirHandler's
+// twin for runInternal's if-chain, including "kill-exit"'s
+// "args[0] != \"kill-exit\"" negation — the one entry not shaped like the
+// rest's "args[0] == name" branches.
+func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
+	body, _ := findFuncDecl(t, "runInternal")
+	comparisons := argsZeroStringLiterals(body)
+	for _, name := range internalSubcommands {
+		if !comparisons[name] {
+			t.Fatalf("internalSubcommands names %q, but runInternal's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"", name)
+		}
 	}
 }

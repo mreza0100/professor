@@ -188,21 +188,26 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 // ReportGlobalAgents reports one line per configured Claude account naming
 // whether the machine-global agents the recorded clone ships are linked into
 // that account's agents/ registry — the check that would have caught `pfm
-// install` wiring the primary account only. Every state but Linked, NoClone
-// and NoClaude is a warning carrying its own remediation: NoClone means pfm
-// was never given a clone to check agents against, and NoClaude means the
-// account has no Claude Code binary to wire agents for at all — neither is a
-// defect. The classification and its wording live in InspectGlobalAgents /
-// Describe, so the checker can never drift from the installer it checks.
-func ReportGlobalAgents(w io.Writer, home string, accounts []pfmconfig.Account, claudeAbsent bool) int {
-	warnings := 0
+// install` wiring the primary account only. Linked, NoClone and NoClaude
+// count neither: NoClone means pfm was never given a clone to check agents
+// against, and NoClaude means the account has no Claude Code binary to wire
+// agents for at all — neither is a defect. Missing and Unreadable are a
+// state `pfm install --yes` owns and did not produce, so they are FAILURES;
+// Conflict, NoSources and Unresolved are advisory and stay warnings. The
+// classification and its wording live in InspectGlobalAgents / Describe, so
+// the checker can never drift from the installer it checks.
+func ReportGlobalAgents(w io.Writer, home string, accounts []pfmconfig.Account, claudeAbsent bool) (warnings, failures int) {
 	for _, status := range InspectGlobalAgents(home, accounts, claudeAbsent) {
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
-		if status.State != GlobalAgentsLinked && status.State != GlobalAgentsNoClone && status.State != GlobalAgentsNoClaude {
+		switch status.State {
+		case GlobalAgentsLinked, GlobalAgentsNoClone, GlobalAgentsNoClaude:
+		case GlobalAgentsMissing, GlobalAgentsUnreadable:
+			failures++
+		default:
 			warnings++
 		}
 	}
-	return warnings
+	return warnings, failures
 }
 
 func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources []string) GlobalAgentsStatus {

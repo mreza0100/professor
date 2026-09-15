@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "hostops/pfm/internal/config"
 )
 
 func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
@@ -47,5 +49,39 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 	}
 	if got := readFixture(t, paths[1]); got != replacement {
 		t.Errorf("manual replacement was changed: %s", got)
+	}
+}
+
+// TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough
+// pins issue #24 finding 5: a `claude` typed into a shell that exports
+// CLAUDE_CONFIG_DIR reads THAT directory's .claude.json, not the implicit
+// account's $HOME/.claude.json a bare account-driven fanout would assume —
+// the launcher shim passes the ambient var straight through
+// (launch_command.go), so the registry resolver must list both files, each
+// naming why it is a registry pfm cares about.
+func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
+	home := t.TempDir()
+	ambient := filepath.Join(home, ".cc", "1")
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: ambient, Implicit: true}}
+
+	registries := ClaudeUserRegistries(home, accounts, ambient)
+
+	if len(registries) != 2 {
+		t.Fatalf("registries=%#v, want exactly 2 (implicit account + ambient)", registries)
+	}
+	implicitPath := filepath.Join(home, ".claude.json")
+	if registries[0].Path != implicitPath {
+		t.Fatalf("registries[0].Path=%s, want the implicit account's %s", registries[0].Path, implicitPath)
+	}
+	if registries[0].Reason != "account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)" {
+		t.Fatalf("registries[0].Reason=%q, want the implicit-account reason", registries[0].Reason)
+	}
+	ambientPath := filepath.Join(ambient, ".claude.json")
+	if registries[1].Path != ambientPath {
+		t.Fatalf("registries[1].Path=%s, want the ambient CLAUDE_CONFIG_DIR file %s", registries[1].Path, ambientPath)
+	}
+	wantReason := "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — launch_command.go)"
+	if registries[1].Reason != wantReason {
+		t.Fatalf("registries[1].Reason=%q, want %q", registries[1].Reason, wantReason)
 	}
 }

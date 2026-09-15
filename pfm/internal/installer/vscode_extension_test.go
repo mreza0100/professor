@@ -254,10 +254,10 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 		filepath.Join(home, "z-product", "extensions", "professor"),
 		filepath.Join(home, "a-product", "extensions", "professor"),
 	}
-	if err := installer.writeVSCodeOwnership(path, nil, map[string]vscodeOwnershipRecord{}, unsorted); err != nil {
+	if err := installer.writeVSCodeOwnership(path, nil, map[string]vscodeOwnershipRecord{}, unsorted, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, extensions, _, err := readVSCodeOwnership(path)
+	_, extensions, _, _, err := readVSCodeOwnership(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(relativeDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "invalid extension link path") {
+	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "invalid extension link path") {
 		t.Fatalf("a relative extension path was accepted: err=%v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(duplicateDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "duplicate extension link") {
+	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "duplicate extension link") {
 		t.Fatalf("a duplicate extension path was accepted: err=%v", err)
 	}
 }
@@ -530,6 +530,71 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		if !staged[want] {
 			t.Fatalf("assetFiles() did not stage %s; staged=%v", want, files)
 		}
+	}
+}
+
+// TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions is the
+// M9 regression for issue #24 findings 10-12: professor.newChatTerminal must
+// build its terminal through the SAME contributed-profile route the + dropdown
+// uses (workbench.action.terminal.newWithProfile addressed at professor.terminal),
+// never through a bare createTerminal(options) call, which renders the
+// default profile's icon instead of the extension's own (finding 10).
+func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *testing.T) {
+	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/extension.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	marker := "registerCommand('professor.newChatTerminal'"
+	idx := strings.Index(source, marker)
+	if idx < 0 {
+		t.Fatalf("extension.js does not register professor.newChatTerminal: %s", source)
+	}
+	body := source[idx:]
+	if strings.Contains(body, "createTerminal(") {
+		t.Fatalf("professor.newChatTerminal still calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s", body)
+	}
+	if !strings.Contains(body, "workbench.action.terminal.newWithProfile") {
+		t.Fatalf("professor.newChatTerminal does not delegate through workbench.action.terminal.newWithProfile: %s", body)
+	}
+	if !strings.Contains(body, "id: 'professor.terminal'") && !strings.Contains(body, `id: "professor.terminal"`) {
+		t.Fatalf("professor.newChatTerminal's newWithProfile call does not address id professor.terminal: %s", body)
+	}
+}
+
+// TestVSCodeExtensionContributesOneKeybindingForTheCommand is the M9
+// regression for issue #24 finding 11b: pfm wires a default keybinding for
+// professor.newChatTerminal so the command is reachable without the palette.
+func TestVSCodeExtensionContributesOneKeybindingForTheCommand(t *testing.T) {
+	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Contributes struct {
+			Keybindings []struct {
+				Command string `json:"command"`
+				Key     string `json:"key"`
+				Mac     string `json:"mac"`
+				When    string `json:"when"`
+			} `json:"keybindings"`
+		} `json:"contributes"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Contributes.Keybindings) != 1 {
+		t.Fatalf("contributes.keybindings = %v, want exactly one entry", manifest.Contributes.Keybindings)
+	}
+	kb := manifest.Contributes.Keybindings[0]
+	if kb.Command != "professor.newChatTerminal" {
+		t.Fatalf("keybinding command = %q, want professor.newChatTerminal", kb.Command)
+	}
+	if kb.Key != "ctrl+shift+alt+t" {
+		t.Fatalf("keybinding key = %q, want ctrl+shift+alt+t", kb.Key)
+	}
+	if kb.Mac != "cmd+shift+alt+t" {
+		t.Fatalf("keybinding mac = %q, want cmd+shift+alt+t", kb.Mac)
 	}
 }
 

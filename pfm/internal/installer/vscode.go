@@ -30,7 +30,11 @@ const (
 	// extension contributes (its title in assets/vscode/professor/package.json):
 	// offered in the + dropdown, never selected as the default. An owned
 	// default holding it — written by the release that briefly selected it —
-	// is pfm's own earlier value and moves back to vscodeProfileName.
+	// is pfm's own earlier value and moves back to vscodeProfileName. The
+	// professor.newChatTerminal command now delegates to this same
+	// contributed-profile route (workbench.action.terminal.newWithProfile)
+	// instead of building its own createTerminal options, and the extension
+	// carries a default keybinding for it (extension.js, package.json).
 	vscodeExtensionProfileTitle = "Professor"
 	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
 	// product's extensions directory, and the extension id VS Code records
@@ -40,6 +44,11 @@ const (
 	// walk (assets.go assetFiles) stages the Professor extension under,
 	// relative to managedRoot.
 	vscodeExtensionSource = "vscode/professor"
+	// vscodeExtensionIndexName is the per-product index VS Code itself
+	// scans user extensions from (AbstractExtensionsScannerService.
+	// scanUserExtensions) — a hand-linked directory absent from it is never
+	// loaded, link notwithstanding. See registerVSCodeExtension.
+	vscodeExtensionIndexName = "extensions.json"
 )
 
 var errMalformedVSCodeSettings = errors.New("malformed VS Code settings")
@@ -52,6 +61,13 @@ type vscodeOwnershipDocument struct {
 	// had a settings.json touched (a plain ~/.vscode-server with no Machine
 	// settings yet, for instance).
 	Extensions []string `json:"extensions,omitempty"`
+	// IndexRegistrations records the extensions.json paths pfm appended its
+	// professor.professor entry to — one per kept Extensions target, derived
+	// the same way (<extensions dir>/extensions.json). Uninstall reads it to
+	// know which product indexes to clean; it is never itself the ownership
+	// check (that is relativeLocation=="professor" plus the symlink still
+	// resolving to pfm's source — see unwireVSCode).
+	IndexRegistrations []string `json:"indexRegistrations,omitempty"`
 }
 
 type vscodeOwnershipRecord struct {
@@ -80,12 +96,12 @@ type vscodeOwnershipRecord struct {
 
 func (installer *engine) wireVSCode() error {
 	ownershipPath := filepath.Join(installer.managedRoot, vscodeOwnershipName)
-	ownership, extensions, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
+	ownership, extensions, indexRegistrations, ownershipRaw, err := readVSCodeOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read VS Code ownership %s: %w", ownershipPath, err)
 	}
 	if installer.options.Mode == ModeUninstall {
-		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership, extensions)
+		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations)
 	}
 	if !installer.options.VSCode && len(ownership) == 0 && len(extensions) == 0 {
 		return nil
@@ -142,7 +158,11 @@ func (installer *engine) wireVSCode() error {
 	if err != nil {
 		return err
 	}
-	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions)
+	indexRegistrations = make([]string, 0, len(extensions))
+	for _, target := range extensions {
+		indexRegistrations = append(indexRegistrations, filepath.Join(filepath.Dir(target), vscodeExtensionIndexName))
+	}
+	return installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations)
 }
 
 // vscodeExtensionLinks enumerates the extension-link targets pfm can wire on
@@ -219,6 +239,9 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 		}
 		if _, err := installer.ensureLink(source, target); err != nil {
 			return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
+		}
+		if _, err := installer.registerVSCodeExtension(extensionsDir); err != nil {
+			return nil, fmt.Errorf("register VS Code extension %s: %w", target, err)
 		}
 		kept = append(kept, target)
 	}
@@ -391,7 +414,7 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	return updated, record, changed, nil
 }
 
-func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
+func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string, indexRegistrations []string) error {
 	ordered := make([]string, 0, len(ownership))
 	for settings := range ownership {
 		ordered = append(ordered, settings)
@@ -504,19 +527,30 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 	}
 
 	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	registeredIndexes := make(map[string]bool, len(indexRegistrations))
+	for _, indexPath := range indexRegistrations {
+		registeredIndexes[filepath.Clean(indexPath)] = true
+	}
 	orderedExtensions := append([]string(nil), extensions...)
 	sort.Strings(orderedExtensions)
 	for _, target := range orderedExtensions {
-		if current, linked := resolvedLink(target); linked && current == filepath.Clean(source) {
-			if err := installer.unlinkOne(target); err != nil {
-				return err
-			}
+		current, linked := resolvedLink(target)
+		if !linked || current != filepath.Clean(source) {
+			installer.skip(target + " no longer points at pfm's Professor extension; left in place")
 			continue
 		}
-		installer.skip(target + " no longer points at pfm's Professor extension; left in place")
+		indexPath := filepath.Join(filepath.Dir(target), vscodeExtensionIndexName)
+		if registeredIndexes[filepath.Clean(indexPath)] {
+			if err := installer.unregisterVSCodeExtension(indexPath); err != nil {
+				return err
+			}
+		}
+		if err := installer.unlinkOne(target); err != nil {
+			return err
+		}
 	}
 
-	return installer.writeVSCodeOwnership(path, existing, ownership, nil)
+	return installer.writeVSCodeOwnership(path, existing, ownership, nil, nil)
 }
 
 // writeVSCodeSettings backs up and atomically rewrites a VS Code settings file
@@ -542,8 +576,8 @@ func (installer *engine) writeVSCodeSettings(path string, content []byte) error 
 	return atomicfile.Write(physical, content, mode)
 }
 
-func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string) error {
-	if len(ownership) == 0 && len(extensions) == 0 {
+func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string, indexRegistrations []string) error {
+	if len(ownership) == 0 && len(extensions) == 0 && len(indexRegistrations) == 0 {
 		if len(existing) == 0 {
 			return nil
 		}
@@ -558,6 +592,10 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 		document.Extensions = append([]string(nil), extensions...)
 		sort.Strings(document.Extensions)
 	}
+	if len(indexRegistrations) != 0 {
+		document.IndexRegistrations = append([]string(nil), indexRegistrations...)
+		sort.Strings(document.IndexRegistrations)
+	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err
@@ -570,28 +608,28 @@ func (installer *engine) writeVSCodeOwnership(path string, existing []byte, owne
 	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
 }
 
-func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []string, []byte, error) {
+func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []string, []string, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]vscodeOwnershipRecord{}, nil, nil, nil
+		return map[string]vscodeOwnershipRecord{}, nil, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	var document vscodeOwnershipDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if document.Version != vscodeOwnershipVersion {
-		return nil, nil, nil, fmt.Errorf("unsupported version %d", document.Version)
+		return nil, nil, nil, nil, fmt.Errorf("unsupported version %d", document.Version)
 	}
 	records := make(map[string]vscodeOwnershipRecord, len(document.Files))
 	for _, record := range document.Files {
 		if !filepath.IsAbs(record.Path) || (record.Platform != "linux" && record.Platform != "osx") {
-			return nil, nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
+			return nil, nil, nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
 		}
 		if _, duplicate := records[record.Path]; duplicate {
-			return nil, nil, nil, fmt.Errorf("duplicate record %s", record.Path)
+			return nil, nil, nil, nil, fmt.Errorf("duplicate record %s", record.Path)
 		}
 		records[record.Path] = record
 	}
@@ -599,15 +637,27 @@ func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []strin
 	seenExtensions := make(map[string]bool, len(document.Extensions))
 	for _, extension := range document.Extensions {
 		if !filepath.IsAbs(extension) {
-			return nil, nil, nil, fmt.Errorf("invalid extension link path %q", extension)
+			return nil, nil, nil, nil, fmt.Errorf("invalid extension link path %q", extension)
 		}
 		if seenExtensions[extension] {
-			return nil, nil, nil, fmt.Errorf("duplicate extension link %s", extension)
+			return nil, nil, nil, nil, fmt.Errorf("duplicate extension link %s", extension)
 		}
 		seenExtensions[extension] = true
 		extensions = append(extensions, extension)
 	}
-	return records, extensions, raw, nil
+	indexRegistrations := make([]string, 0, len(document.IndexRegistrations))
+	seenIndexes := make(map[string]bool, len(document.IndexRegistrations))
+	for _, indexPath := range document.IndexRegistrations {
+		if !filepath.IsAbs(indexPath) {
+			return nil, nil, nil, nil, fmt.Errorf("invalid index registration path %q", indexPath)
+		}
+		if seenIndexes[indexPath] {
+			return nil, nil, nil, nil, fmt.Errorf("duplicate index registration %s", indexPath)
+		}
+		seenIndexes[indexPath] = true
+		indexRegistrations = append(indexRegistrations, indexPath)
+	}
+	return records, extensions, indexRegistrations, raw, nil
 }
 
 func (installer *engine) vscodePlatform() (string, error) {
@@ -694,53 +744,6 @@ func cleanUniquePaths(paths []string) []string {
 
 func vscodeSettingKeys(platform string) (string, string) {
 	return "terminal.integrated.profiles." + platform, "terminal.integrated.defaultProfile." + platform
-}
-
-// vscodeLegacyProfileEnvs lists every env shape pfm has EVER written as the
-// canonical profile's "env", oldest first. A profile that matches one of
-// these (and nothing else about the profile has drifted) is pfm's own
-// earlier install caught up by an upgrade, not an operator edit — see
-// isLegacyVSCodeProfile. Each entry is appended, never rewritten, the day
-// vscodeProfile's own "env" changes shape: the previous CURRENT shape
-// becomes a new legacy one so an install still holding it keeps upgrading.
-var vscodeLegacyProfileEnvs = []map[string]any{
-	{"CC_AUTO_OPEN": "pfm"},
-	{"PFM_AUTO_OPEN": "pfm"},
-}
-
-func isLegacyVSCodeProfile(profile any) bool {
-	legacy := vscodeProfile()
-	for _, env := range vscodeLegacyProfileEnvs {
-		legacy["env"] = env
-		if reflect.DeepEqual(profile, legacy) {
-			return true
-		}
-	}
-	return false
-}
-
-func vscodeProfile() map[string]any {
-	return map[string]any{
-		"path": "/bin/zsh",
-		"args": []any{"-l"},
-		// A terminal opened straight from this profile is a shell the operator
-		// typed into, never a nested chat — but it inherits VS Code's own
-		// process env, which (when VS Code was itself launched from inside a
-		// chat) carries that chat's identity markers. `null` is how VS Code
-		// deletes an inherited env var (terminal.integrated.env.<platform> and
-		// a profile's own "env" both honour it), matching the Professor
-		// extension's terminal (extension.js nextTerminal) — see
-		// CC_SESSION_UNSET in pfm.zsh (~line 56) for why each one lies in a
-		// different way, plus the TMUX pair that names its tmux server.
-		"env": map[string]any{
-			"PFM_AUTO_OPEN":             "pfm",
-			"CLAUDECODE":                nil,
-			"CLAUDE_CODE_SESSION_ID":    nil,
-			"CLAUDE_CODE_CHILD_SESSION": nil,
-			"TMUX":                      nil,
-			"TMUX_PANE":                 nil,
-		},
-	}
 }
 
 // vscodeScalarKeys are the fixed-value settings pfm install owns besides the

@@ -16,6 +16,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/compose"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -101,7 +102,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		return 2
 	}
 	primary := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	configDir := config.AmbientClaudeConfigDir()
 	if configDir == "" {
 		if account, found := runtime.Config.AccountByID(primary); found && !account.Implicit {
 			configDir = account.ConfigDir

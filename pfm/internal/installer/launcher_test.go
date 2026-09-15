@@ -94,7 +94,7 @@ func TestRenderedClaudeLauncherUsesConfiguredAbsoluteBinaryThenSkipsItself(t *te
 	if !strings.Contains(rendered, configured) {
 		t.Fatalf("rendered launcher omitted configured binary %q:\n%s", configured, rendered)
 	}
-	for _, want := range []string{"internal launch --real", `"$@"`, ".local/share/claude/versions", "command -v"} {
+	for _, want := range []string{"internal launch --real", `"$@"`, "internal claude-version", "command -v"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered launcher omitted %q:\n%s", want, rendered)
 		}
@@ -110,7 +110,16 @@ func TestAssetRenderersRefuseMissingTemplateMarkers(t *testing.T) {
 	}
 }
 
-func TestRenderedClaudeLauncherChoosesNewestVersionByFreshness(t *testing.T) {
+// TestRenderedClaudeLauncherChoosesTheHighestVersionNotTheFreshestFile
+// REPLACES the old freshness test (TestRenderedClaudeLauncherChoosesNewestVersionByFreshness):
+// its fixture named the newest-mtime file as the winner, pinning the exact
+// defect issue #24 finding 8 reports — a restored or touched older build
+// would win a selection keyed on mtime. D moves the versions/ choice into Go
+// (pfm internal claude-version, see claude_versions.go), so the shim's job
+// is just to call it; this fixture makes the OLDER file win by mtime and the
+// HIGHER version win in the fake pfm's answer, so any regression back to
+// mtime selection in the shim shows up immediately.
+func TestRenderedClaudeLauncherChoosesTheHighestVersionNotTheFreshestFile(t *testing.T) {
 	home := t.TempDir()
 	raw, err := readAsset("bin/claude")
 	if err != nil {
@@ -131,25 +140,35 @@ func TestRenderedClaudeLauncherChoosesNewestVersionByFreshness(t *testing.T) {
 	if err := os.MkdirAll(versions, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	lexicallyLast := filepath.Join(versions, "9.9.9")
-	newest := filepath.Join(versions, "10.0.0")
-	for _, path := range []string{lexicallyLast, newest} {
+	// The higher version has the OLDER mtime; the lower version was touched
+	// more recently, as issue #24 finding 8 describes ("a restored or
+	// touched file would make an older build win").
+	highestVersion := filepath.Join(versions, "2.1.270")
+	touchedNewer := filepath.Join(versions, "2.1.263")
+	for _, path := range []string{highestVersion, touchedNewer} {
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	stamp := time.Now().Add(-time.Minute)
-	if err := os.Chtimes(lexicallyLast, stamp, stamp); err != nil {
+	if err := os.Chtimes(highestVersion, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(newest, stamp.Add(time.Minute), stamp.Add(time.Minute)); err != nil {
+	if err := os.Chtimes(touchedNewer, stamp.Add(time.Minute), stamp.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	pfm := filepath.Join(home, ".local", "bin", "pfm")
 	if err := os.MkdirAll(filepath.Dir(pfm), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(pfm, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\"\n"), 0o700); err != nil {
+	// The fake pfm answers "internal claude-version" with the highest
+	// version's path (what the real Go command computes, tested separately
+	// in claude_versions_test.go) and otherwise echoes its own argv, the
+	// same double the pre-existing launcher tests use for "internal launch".
+	fakePfm := "#!/bin/sh\n" +
+		"if [ \"$1\" = internal ] && [ \"$2\" = claude-version ]; then printf '%s\\n' '" + highestVersion + "'; exit 0; fi\n" +
+		"printf '%s\\n' \"$*\"\n"
+	if err := os.WriteFile(pfm, []byte(fakePfm), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command(launcher, "--resume", "fixture")
@@ -158,9 +177,9 @@ func TestRenderedClaudeLauncherChoosesNewestVersionByFreshness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launcher failed: %v: %s", err, output)
 	}
-	want := "internal launch --real " + newest + " -- --resume fixture\n"
+	want := "internal launch --real " + highestVersion + " -- --resume fixture\n"
 	if string(output) != want {
-		t.Fatalf("launcher output=%q, want newest-by-mtime %q", output, want)
+		t.Fatalf("launcher output=%q, want highest-version %q", output, want)
 	}
 }
 

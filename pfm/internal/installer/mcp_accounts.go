@@ -10,15 +10,52 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
+	pfmconfig "hostops/pfm/internal/config"
 )
 
-// ClaudeUserRegistry is Claude's user scope: the default account stores it
-// beside .claude; an explicit alternate config directory stores it inside.
-func ClaudeUserRegistry(home, configDir string, implicit bool) string {
-	if implicit || filepath.Clean(configDir) == filepath.Join(home, ".claude") {
-		return filepath.Join(home, ".claude.json")
+// ClaudeRegistry is one user-scope Claude Code registry (.claude.json) a
+// pfm-launched `claude` process can actually read, and why: the account it
+// belongs to (0 for the ambient entry, which is not tied to one account) and
+// the human-readable reason ClaudeUserRegistries derived it from.
+type ClaudeRegistry struct {
+	Path    string
+	Reason  string
+	Account int
+}
+
+// ClaudeUserRegistries resolves every user-scope Claude Code registry a
+// pfm-launched claude process can read: one per configured account (the
+// implicit account — the one pfm spawns without CLAUDE_CONFIG_DIR — at
+// $HOME/.claude.json, every other account at its own ConfigDir/.claude.json),
+// plus the ambient CLAUDE_CONFIG_DIR the invoking shell exported, when that
+// path is not already listed (the launcher shim passes it straight through —
+// launch_command.go). Deduplicated by physical path so one file is never
+// listed twice under two reasons.
+func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConfigDir string) []ClaudeRegistry {
+	seen := map[string]bool{}
+	registries := make([]ClaudeRegistry, 0, len(accounts)+1)
+	add := func(path, reason string, account int) {
+		physical := physicalSettingsPath(path)
+		if seen[physical] {
+			return
+		}
+		seen[physical] = true
+		registries = append(registries, ClaudeRegistry{Path: path, Reason: reason, Account: account})
 	}
-	return filepath.Join(configDir, ".claude.json")
+	for _, account := range accounts {
+		if account.Implicit {
+			add(filepath.Join(home, ".claude.json"),
+				fmt.Sprintf("account %d (pfm spawns it without CLAUDE_CONFIG_DIR)", account.ID), account.ID)
+			continue
+		}
+		add(filepath.Join(account.ConfigDir, ".claude.json"),
+			fmt.Sprintf("account %d (CLAUDE_CONFIG_DIR=%s when pfm spawns it)", account.ID, account.ConfigDir), account.ID)
+	}
+	if ambient := strings.TrimSpace(ambientConfigDir); ambient != "" {
+		add(filepath.Join(ambient, ".claude.json"),
+			fmt.Sprintf("ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — launch_command.go)", ambient), 0)
+	}
+	return registries
 }
 
 func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
@@ -55,16 +92,38 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		*receipts = canonical
 	}
 	wantedPaths := map[string]bool{}
+	reasons := map[string]string{}
 	if len(names) > 0 {
 		registries := installer.options.ClaudeRegistries
+		registryReasons := installer.options.ClaudeRegistryReasons
 		if registries == nil {
-			for _, dir := range installer.claudeConfigDirs() {
-				registries = append(registries, ClaudeUserRegistry(installer.options.Home, dir, false))
+			accounts := make([]pfmconfig.Account, 0, len(installer.claudeConfigDirs()))
+			for index, dir := range installer.claudeConfigDirs() {
+				// A direct caller's fanout has no Implicit flag of its own; a
+				// dir that cleans to the canonical ~/.claude carries the same
+				// registry pfm's own implicit account does (the historical
+				// ClaudeUserRegistry special case this fallback preserves).
+				accounts = append(accounts, pfmconfig.Account{
+					ID:        index + 1,
+					ConfigDir: dir,
+					Implicit:  filepath.Clean(dir) == filepath.Join(installer.options.Home, ".claude"),
+				})
+			}
+			resolved := ClaudeUserRegistries(installer.options.Home, accounts, pfmconfig.AmbientClaudeConfigDir())
+			registries = make([]string, 0, len(resolved))
+			registryReasons = map[string]string{}
+			for _, registry := range resolved {
+				registries = append(registries, registry.Path)
+				registryReasons[registry.Path] = registry.Reason
 			}
 		}
 		for _, path := range registries {
 			if strings.TrimSpace(path) != "" {
-				wantedPaths[physicalSettingsPath(path)] = true
+				physical := physicalSettingsPath(path)
+				wantedPaths[physical] = true
+				if reason, ok := registryReasons[path]; ok && reason != "" {
+					reasons[physical] = reason
+				}
 			}
 		}
 	}
@@ -160,6 +219,20 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		// Keep the last receipt until the registry write succeeds. Pending exact
 		// values cover a crash between that write and the final receipt commit.
 		ownership.Pending[path] = next
+		message := changeDescription(path, existed)
+		okMessage := path + " wiring"
+		// Append the registry's reason rather than replacing changeDescription's
+		// create/rewrite wording or the plain "<path> wiring" ok line: both are
+		// pinned verbatim by earlier regression tests (backup-claim and
+		// owned-stdio-recognition), and a reason is extra context, not a
+		// different report.
+		if wantedPaths[path] && len(names) > 0 {
+			if reason := reasons[path]; reason != "" {
+				suffix := fmt.Sprintf(" — register %s (%s)", strings.Join(names, ","), reason)
+				message += suffix
+				okMessage += suffix
+			}
+		}
 		if string(before) != string(after) {
 			if err := installer.saveMCPOwnership(ownership); err != nil {
 				return nil, err
@@ -168,13 +241,13 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := installer.change(changeDescription(path, existed), func() error {
+			if err := installer.change(message, func() error {
 				return installer.writeMCPFile(path, original, append(encoded, '\n'), existed)
 			}); err != nil {
 				return nil, err
 			}
 		} else {
-			installer.ok(path + " wiring")
+			installer.ok(okMessage)
 		}
 		if len(next) > 0 {
 			ownership.Registrations[path] = next

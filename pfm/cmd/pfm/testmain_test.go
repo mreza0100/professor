@@ -75,6 +75,11 @@ func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
+	// Mirrors main()'s own call (issue #24 F1): every test in this package
+	// calls run()/runInternal() directly, never main(), so without this the
+	// registry stays unset for the whole suite and every unknown-pfm-hook
+	// scenario a rollback/residue test stages would never be recognized.
+	installer.SetImplementedSubcommands(topLevelSubcommands, internalSubcommands)
 	installHarvestProvisionerOverride = noNetworkHarvestProvisioner{}
 	installThemeHTTPClientOverride = &http.Client{Transport: noNetworkThemeTransport{}}
 	harvestDoctorOverride = noNetworkHarvestDoctor{}
@@ -105,7 +110,7 @@ func TestMain(m *testing.M) {
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
-	harnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias string) (harnessCapture, error) {
+	harnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias, _ string) (harnessCapture, error) {
 		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-" + alias + "-5", CLIVersion: "fixture"}, nil
 	}
 	os.Exit(testjail.Run(m))

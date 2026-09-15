@@ -67,6 +67,18 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", runtimeErr)
 		return 1
 	}
+	// An explicit --config naming a file that does not exist quietly loads
+	// as defaults (config.go); converging host wiring on that would boot out
+	// and delete every MCP service the missing file actually enabled (issue
+	// #24 finding 3/4). Apply refuses; a preview names the skip and continues.
+	if runtime.ConfigExplicit && !runtime.Config.Exists {
+		refusal := fmt.Sprintf("--config %s does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)", runtime.Config.Path)
+		if mode == installer.ModeApply {
+			fmt.Fprintf(stderr, "pfm install: %s\n", refusal)
+			return 1
+		}
+		fmt.Fprintf(stdout, "  skip    %s\n", refusal)
+	}
 	migrated, migrateCode := migrateMachineConfig(mode, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode
@@ -75,7 +87,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
+	_, preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
 		SkipHarvest: *skipHarvest, SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex}, Provisioning: true,
 	})
 	if preflight != 0 && mode == installer.ModeApply {
@@ -195,10 +207,15 @@ func newInstallerOptions(
 		}
 		if configDir == "" {
 			options.ConfigDirs = make([]string, 0, len(runtime.Config.Accounts))
-			options.ClaudeRegistries = make([]string, 0, len(runtime.Config.Accounts))
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
-				options.ClaudeRegistries = append(options.ClaudeRegistries, installer.ClaudeUserRegistry(runtime.Paths.Home, account.ConfigDir, account.Implicit))
+			}
+			registries := installer.ClaudeUserRegistries(runtime.Paths.Home, runtime.Config.Accounts, pfmconfig.AmbientClaudeConfigDir())
+			options.ClaudeRegistries = make([]string, 0, len(registries))
+			options.ClaudeRegistryReasons = make(map[string]string, len(registries))
+			for _, registry := range registries {
+				options.ClaudeRegistries = append(options.ClaudeRegistries, registry.Path)
+				options.ClaudeRegistryReasons[registry.Path] = registry.Reason
 			}
 		}
 	}

@@ -671,7 +671,12 @@ func (h *e2eHarness) newHome(binary string) string {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	native := filepath.Join(home, ".local", "share", "claude", "versions", "fixture")
+	// Named a real vMAJOR.MINOR.PATCH string (matching the fixture's own
+	// --version output below) rather than an arbitrary "fixture": pfm's
+	// launcher now selects the versions/ candidate by parsed semantic
+	// version, in Go, and an unparsed name is never chosen (see
+	// internal/installer/claude_versions.go).
+	native := filepath.Join(home, ".local", "share", "claude", "versions", "2.1.238")
 	launcherEvidence := filepath.Join(home, "launcher-evidence")
 	body := "#!/bin/sh\n" +
 		"if [ \"${1-}\" = -p ]; then exec env PFM_E2E_CLAUDE_CAPTURE=1 " + shellQuoteFixture(testBinary) + " -test.run '^TestClaudeHarnessCaptureFixture$' -- \"$@\"; fi\n" +
@@ -826,6 +831,13 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf("doctor after --skip-harvest omitted %q; stdout=%q stderr=%q", want, result.stdout, result.stderr)
 		}
+	}
+	// M2 (issue #24 finding 1): the unprovisioned harvestpy sidecar deps
+	// (uv, harvestpy) above are warnings, not failures — the fleet engine
+	// runs without them, and `--skip-harvest` is pfm's own decision not to
+	// provision them. `doctor: failures=` must never appear here.
+	if strings.Contains(output, "doctor: failures=") {
+		h.t.Fatalf("doctor after --skip-harvest printed a failures= line for warnings-only rows; stdout=%q stderr=%q", result.stdout, result.stderr)
 	}
 }
 
@@ -1203,7 +1215,7 @@ func (h *e2eHarness) assertUninstalled(home string) {
 	}
 	canonical := filepath.Join(home, e2eCanonicalClaude)
 	target, err := os.Readlink(canonical)
-	if err != nil || !strings.HasSuffix(filepath.ToSlash(target), "/.local/share/claude/versions/fixture") {
+	if err != nil || !strings.HasSuffix(filepath.ToSlash(target), "/.local/share/claude/versions/2.1.238") {
 		h.t.Fatalf("uninstall failed; differing paths: native Claude launcher restore target=%q status=%v", target, err)
 	}
 	if runtime.GOOS == "linux" {

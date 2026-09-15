@@ -12,11 +12,8 @@ if [ -n "$configured" ] && [ -x "$configured" ] && [ "$configured" != "$launcher
 fi
 
 if [ -z "$real" ]; then
-	for candidate in "$HOME"/.local/share/claude/versions/*; do
-		[ -x "$candidate" ] || continue
-		[ "$candidate" = "$launcher" ] && continue
-		if [ -z "$real" ] || [ "$candidate" -nt "$real" ]; then real=$candidate; fi
-	done
+	real=$("$HOME/.local/bin/pfm" internal claude-version || true)
+	[ "$real" = "$launcher" ] && real=
 fi
 
 if [ -z "$real" ]; then

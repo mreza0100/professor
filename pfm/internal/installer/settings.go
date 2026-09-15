@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -49,7 +50,7 @@ func updateSettings(
 			}
 		})
 	}
-	if removeRetiredHookCommands(document) {
+	if removeRetiredHookCommands(document, pfmBinary) {
 		changed = true
 	}
 	if _, present := document["cleanupPeriodDays"]; !present && !uninstall {
@@ -108,7 +109,7 @@ func updateSettings(
 				hook["type"] = "command"
 				changed = true
 			}
-			if isRetiredHookCommand(command) {
+			if isRetiredHookCommand(command, pfmBinary) {
 				changed = true
 				continue
 			}
@@ -151,7 +152,7 @@ func updateSettings(
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
 			command, _ := hook["command"].(string)
-			if isRetiredHookCommand(command) {
+			if isRetiredHookCommand(command, pfmBinary) {
 				changed = true
 				continue
 			}
@@ -424,16 +425,168 @@ func retiredHookCommandName(command string) (string, bool) {
 	return "", false
 }
 
-func isRetiredHookCommand(command string) bool {
-	_, retired := retiredHookCommandName(command)
-	return retired
+// subcommandRegistry is implementedSubcommands' type, named so a test can
+// reset it to its unset zero value between cases.
+type subcommandRegistry struct {
+	set      bool
+	topLevel map[string]bool
+	internal map[string]bool
+}
+
+// implementedSubcommands is the seam cmd/pfm's main() fills in via
+// SetImplementedSubcommands before argv dispatch — installer cannot import
+// cmd/pfm (a main package), so this package-level registry, set once at
+// process start, is how unknownPFMHookCommand learns what THIS binary's own
+// dispatch actually reaches (issue #24 F1). Left unset (any test or tool
+// that never calls SetImplementedSubcommands), the predicate fails CLOSED:
+// it never reports a command unknown, so nothing in this package ever
+// deletes a hook on the strength of a guess about implementation.
+var implementedSubcommands subcommandRegistry
+
+// SetImplementedSubcommands records the exact top-level and `internal <x>`
+// subcommand names cmd/pfm's own dispatch (main.go's topLevelSubcommands and
+// internalSubcommands) reaches — the single fact unknownPFMHookCommand needs
+// to tell an operator's own hand-wired hook (`pfm doctor`, `pfm internal
+// claude-version`) apart from genuine residue a rolled-back or
+// newer-then-reverted pfm left behind. Call it once, before dispatching
+// argv; every pfm process that skips this call keeps the fail-closed
+// (never-unknown) default above.
+func SetImplementedSubcommands(topLevel, internal []string) {
+	implementedSubcommands.topLevel = make(map[string]bool, len(topLevel))
+	for _, name := range topLevel {
+		implementedSubcommands.topLevel[name] = true
+	}
+	implementedSubcommands.internal = make(map[string]bool, len(internal))
+	for _, name := range internal {
+		implementedSubcommands.internal[name] = true
+	}
+	implementedSubcommands.set = true
+}
+
+// subcommandIsImplemented reports whether the registry SetImplementedSubcommands
+// filled in names word as a subcommand THIS binary's dispatch reaches — a
+// no-op "yes" (fail closed toward keeping the hook) until the registry is
+// set. word is the first token only: a hook naming "doctor --verbose" is
+// judged on "doctor", the subcommand dispatch itself switches on.
+func subcommandIsImplemented(isInternal bool, name string) bool {
+	if !implementedSubcommands.set {
+		return true
+	}
+	word, _, _ := strings.Cut(name, " ")
+	if isInternal {
+		return implementedSubcommands.internal[word]
+	}
+	return implementedSubcommands.topLevel[word]
+}
+
+// unknownPFMHookCommand reports whether command is shaped like a hook this
+// or a prior pfm binary would have written — "<pfmBinary> internal <name>"
+// or "<pfmBinary> <name>", or the bare "pfm"/"cc-fleet" and any-path "/pfm"/
+// "/cc-fleet" suffix forms retiredHookCommandName already accepts — naming a
+// subcommand this binary's OWN dispatch does not implement, per the registry
+// SetImplementedSubcommands fills in from cmd/pfm's topLevelSubcommands /
+// internalSubcommands (issue #24 F1). Unlike the table-retired shapes, that
+// combination only arises when a newer or rolled-back pfm wrote it: this
+// binary can name the entry but not run it, and no exact-string removal path
+// this binary owns ever strips it. The guard is on the binary token alone —
+// a command that merely CONTAINS "pfm" elsewhere (an operator's own script
+// invoked with a "--tag pfm" argument, say) never matches, because its first
+// token is not one of these forms. A subcommand this binary DOES implement —
+// an operator's own `pfm doctor` or `pfm internal claude-version` hook — is
+// never reported unknown, whether or not it also happens to be one of the
+// installer's own automatic templates.
+func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", false
+	}
+	head, rest, found := strings.Cut(command, " ")
+	if !found || strings.TrimSpace(rest) == "" {
+		return "", false
+	}
+	isPFMBinary := head == pfmBinary || head == "pfm" || head == "cc-fleet" ||
+		strings.HasSuffix(head, "/pfm") || strings.HasSuffix(head, "/cc-fleet")
+	if !isPFMBinary {
+		return "", false
+	}
+	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
+	for _, hook := range append(claudeHookTemplates(home), codexHookTemplate(home)) {
+		if _, hookRest, ok := strings.Cut(hook.Command, " "); ok && hookRest == rest {
+			return "", false
+		}
+	}
+	if _, retired := retiredHookCommandName(command); retired {
+		return "", false
+	}
+	name := rest
+	isInternal := false
+	if sub, ok := strings.CutPrefix(rest, "internal "); ok {
+		name = sub
+		isInternal = true
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	if subcommandIsImplemented(isInternal, name) {
+		return "", false
+	}
+	return name, true
+}
+
+// UnknownPFMHookCommands parses a settings.json or Codex hooks.json document
+// and returns the names (unknownPFMHookCommand's shape) of every hook
+// command present that is of pfm's own shape but names a subcommand this
+// binary neither implements nor recognizes as retired — the residue a
+// stranded rollback leaves (issue #24 finding 2). A document this binary
+// cannot parse returns nil, never a guess.
+func UnknownPFMHookCommands(raw []byte, home string) []string {
+	var document map[string]any
+	if json.Unmarshal(raw, &document) != nil {
+		return nil
+	}
+	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
+	seen := map[string]bool{}
+	events, _ := document["hooks"].(map[string]any)
+	for _, eventValue := range events {
+		entries, _ := eventValue.([]any)
+		for _, entryValue := range entries {
+			entry, _ := entryValue.(map[string]any)
+			hooks, _ := entry["hooks"].([]any)
+			for _, hookValue := range hooks {
+				hook, _ := hookValue.(map[string]any)
+				command, _ := hook["command"].(string)
+				if name, ok := unknownPFMHookCommand(command, pfmBinary); ok {
+					seen[name] = true
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func isRetiredHookCommand(command, pfmBinary string) bool {
+	if _, retired := retiredHookCommandName(command); retired {
+		return true
+	}
+	_, unknown := unknownPFMHookCommand(command, pfmBinary)
+	return unknown
 }
 
 // removeRetiredHookCommands strips retired automatic hooks from every event,
 // not only from the event where the installer once wrote them. Operators and
 // older installers may have copied a hook under another event; a real pause
 // must not leave those copies firing while preserving unrelated neighbors.
-func removeRetiredHookCommands(document map[string]any) bool {
+// Alongside the table-retired shapes, it also strips a hook of pfm's own
+// shape naming a subcommand THIS binary does not implement — what a
+// rolled-back or newer-then-reverted update leaves behind
+// (unknownPFMHookCommand).
+func removeRetiredHookCommands(document map[string]any, pfmBinary string) bool {
 	events, _ := document["hooks"].(map[string]any)
 	changed := false
 	for event, eventValue := range events {
@@ -459,7 +612,7 @@ func removeRetiredHookCommands(document map[string]any) bool {
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
 				command, _ := hook["command"].(string)
-				if isRetiredHookCommand(command) {
+				if isRetiredHookCommand(command, pfmBinary) {
 					entryChanged = true
 					eventChanged = true
 					changed = true

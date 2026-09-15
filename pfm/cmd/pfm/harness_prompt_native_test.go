@@ -39,7 +39,7 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 
 		var previous harnessCapture
 		for attempt := 0; attempt < 3; attempt++ {
-			captured, err := captureHarnessPrompt(context.Background(), t.TempDir(), machine, model.alias)
+			captured, err := captureHarnessPrompt(context.Background(), t.TempDir(), machine, model.alias, "")
 			if err != nil {
 				t.Fatal(err)
 			}

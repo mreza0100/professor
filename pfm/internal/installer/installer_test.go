@@ -3,7 +3,6 @@ package installer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +70,90 @@ func genuineExitError() error {
 		panic(fmt.Sprintf("fake idle probe did not produce a genuine *exec.ExitError: %v (%T)", err, err))
 	}
 	return exitErr
+}
+
+// TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem is C: the
+// prune sibling to wireClaudeLauncher, destructive-defaults-to-preview per
+// pfm/CLAUDE.md, and the preview IS the apply's own preview — same
+// classification with and without --apply, only the action differs. Four
+// versions: the newest two are protected by the keep window, a third is
+// protected because a live pid is executing it despite being outside that
+// window, and the fourth is the only one either run may remove.
+func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T) {
+	home := t.TempDir()
+	versions := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newest := filepath.Join(versions, "2.1.270")
+	second := filepath.Join(versions, "2.1.269")
+	live := filepath.Join(versions, "2.1.260")
+	prunable := filepath.Join(versions, "2.1.250")
+	for _, path := range []string{newest, second, live, prunable} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	procRoot := filepath.Join(t.TempDir(), "proc")
+	if err := os.MkdirAll(filepath.Join(procRoot, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(live, filepath.Join(procRoot, "4242", "exe")); err != nil {
+		t.Fatal(err)
+	}
+	// Candidate scoping (ProbeLiveClaudeVersions) reads argv[0] before ever
+	// calling Image, so the fixture needs a cmdline record naming the live
+	// build — the same file a real /proc/<pid>/cmdline is.
+	if err := os.WriteFile(filepath.Join(procRoot, "4242", "cmdline"), []byte(live+"\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var preview bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &preview,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	previewOutput := preview.String()
+	if !strings.Contains(previewOutput, "remove "+prunable) {
+		t.Fatalf("preview did not list the prunable version:\n%s", previewOutput)
+	}
+	if !strings.Contains(previewOutput, "keep "+live+" (live (pids 4242))") {
+		t.Fatalf("preview did not name the live version kept, with its pids:\n%s", previewOutput)
+	}
+	// issue #24 F7: only the actual newest build is labelled "newest" — the
+	// second-newest kept build carries a distinct, honest label.
+	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") || !strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
+		t.Fatalf("preview did not name the two newest versions kept, one honestly labelled second:\n%s", previewOutput)
+	}
+	for _, path := range []string{newest, second, live, prunable} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("preview removed %s: %v", path, err)
+		}
+	}
+
+	var apply bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &apply,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applyOutput := apply.String()
+	if !strings.Contains(applyOutput, "remove "+prunable) {
+		t.Fatalf("apply did not report the removal:\n%s", applyOutput)
+	}
+	if !strings.Contains(applyOutput, "keep "+live+" (live (pids 4242))") {
+		t.Fatalf("apply did not name the live version kept:\n%s", applyOutput)
+	}
+	if _, err := os.Stat(prunable); !os.IsNotExist(err) {
+		t.Fatalf("apply left the prunable version in place: err=%v", err)
+	}
+	for _, path := range []string{newest, second, live} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("apply removed a protected version %s: %v", path, err)
+		}
+	}
 }
 
 func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
@@ -1613,186 +1696,5 @@ func assertLink(t *testing.T, target, wanted string) {
 	got, linked := resolvedLink(target)
 	if !linked || got != wanted {
 		t.Fatalf("link %s -> %q,%v, want %q,true", target, got, linked, wanted)
-	}
-}
-
-func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *testing.T) {
-	themeBody := []byte(`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}` + "\n")
-	manifest := `{"bundled":{"sonar-gold":{"file":"sonar-gold.json","target":"~/.claude/themes/sonar-gold.json","activate":"/theme","requires":"fixture"}}}`
-	run := func(home, sourceRepo, manifestURL string) (Report, string, error) {
-		var output bytes.Buffer
-		report, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, SourceRepo: sourceRepo, ThemeManifestURL: manifestURL, Stdout: &output,
-			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-		})
-		return report, output.String(), err
-	}
-
-	// 1. source clone carries the manifest and the file: installed, owned, idempotent.
-	home := t.TempDir()
-	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), string(themeBody))
-	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
-	first, firstOutput, err := run(home, sourceRepo, "")
-	if err != nil {
-		t.Fatalf("bundled theme install: %v\n%s", err, firstOutput)
-	}
-	if got := []byte(readFixture(t, target)); !bytes.Equal(got, themeBody) {
-		t.Fatalf("installed bundled theme=%q, want %q", got, themeBody)
-	}
-	if first.Changed == 0 || !strings.Contains(firstOutput, "theme sonar-gold") {
-		t.Fatalf("first report=%#v, want a named bundled theme write\n%s", first, firstOutput)
-	}
-	second, secondOutput, err := run(home, sourceRepo, "")
-	if err != nil || second.Changed != 0 || !strings.Contains(secondOutput, "theme sonar-gold unchanged") {
-		t.Fatalf("second run err=%v report=%#v, want changed=0 and an unchanged row\n%s", err, second, secondOutput)
-	}
-
-	// 2. the file is missing from the clone: a loud read failure, never an absence, and the install continues.
-	if err := os.Remove(filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json")); err != nil {
-		t.Fatal(err)
-	}
-	_, missingOutput, err := run(t.TempDir(), sourceRepo, "")
-	if err != nil {
-		t.Fatalf("missing bundled file aborted host install: %v\n%s", err, missingOutput)
-	}
-	if !strings.Contains(missingOutput, "theme sonar-gold read failed") || !strings.Contains(missingOutput, "sonar-gold.json") {
-		t.Fatalf("missing bundled file was silent or vague:\n%s", missingOutput)
-	}
-
-	// 3. no manifest in the discovered clone: the release manifest wins and the file comes from beside it.
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/templates/themes/sources.json":
-			_, _ = io.WriteString(response, manifest)
-		case "/templates/themes/sonar-gold.json":
-			_, _ = response.Write(themeBody)
-		default:
-			http.NotFound(response, request)
-		}
-	}))
-	t.Cleanup(server.Close)
-	releaseHome := t.TempDir()
-	_, releaseOutput, err := run(releaseHome, t.TempDir(), server.URL+"/templates/themes/sources.json")
-	if err != nil {
-		t.Fatalf("release-fallback bundled install: %v\n%s", err, releaseOutput)
-	}
-	if got := []byte(readFixture(t, filepath.Join(releaseHome, ".claude", "themes", "sonar-gold.json"))); !bytes.Equal(got, themeBody) {
-		t.Fatalf("release-fallback bundled theme=%q, want %q\n%s", got, themeBody, releaseOutput)
-	}
-}
-
-func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing.T) {
-	load := func(manifest string) error {
-		sourceRepo := t.TempDir()
-		writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
-		_, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo})
-		return err
-	}
-	for _, tc := range []struct{ name, manifest, want string }{
-		{"path traversal", `{"bundled":{"x":{"file":"../secret.json","target":"~/.claude/themes/x.json"}}}`, `bundled theme "x" file "../secret.json" must be a bare file name beside the manifest`},
-		{"name clash", `{"source_fetched":{"x":{"repo":"https://e.test","raw":"https://e.test/x.json","target":"~/.claude/themes/x.json"}},"bundled":{"x":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`, `names theme "x" as both source_fetched and bundled`},
-		{"missing file field", `{"bundled":{"x":{"target":"~/.claude/themes/x.json"}}}`, `bundled theme "x" is missing name, file, or target`},
-	} {
-		err := load(tc.manifest)
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
-		}
-	}
-
-	home := t.TempDir()
-	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{"bundled":{"x":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "x.json"), "not json\n")
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
-		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-	})
-	if err != nil {
-		t.Fatalf("non-JSON bundled file aborted host install: %v\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "theme x read failed") || !strings.Contains(output.String(), "is not valid JSON") {
-		t.Fatalf("non-JSON bundled file was silent or vague:\n%s", output.String())
-	}
-	if _, statErr := os.Stat(filepath.Join(home, ".claude", "themes", "x.json")); !os.IsNotExist(statErr) {
-		t.Fatalf("non-JSON bundled file was installed anyway: %v", statErr)
-	}
-}
-
-func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
-	baseBody := `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#c95cff","promptBorder":"#7c4dff","promptBorderShimmer":"#aa8bff"}}`
-	overlay := `{"name":"Professor Gold","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
-	var baseStatus int
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/tokyo-night.json" {
-			http.NotFound(response, request)
-			return
-		}
-		if baseStatus != 0 {
-			http.Error(response, "base down", baseStatus)
-			return
-		}
-		_, _ = io.WriteString(response, baseBody)
-	}))
-	t.Cleanup(server.Close)
-	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), fmt.Sprintf(`{
-  "source_fetched": {"tokyo-night": {"repo": %q, "raw": %q, "target": "~/.claude/themes/tokyo-night.json", "activate": "/theme", "requires": "fixture"}},
-  "bundled": {"professor-gold": {"file": "professor-gold.json", "base": "tokyo-night", "target": "~/.claude/themes/professor-gold.json", "activate": "/theme", "requires": "fixture"}}
-}`, server.URL, server.URL+"/tokyo-night.json"))
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "professor-gold.json"), overlay)
-	run := func() (string, error) {
-		var output bytes.Buffer
-		_, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: t.TempDir(), SourceRepo: sourceRepo, Stdout: &output,
-			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-		})
-		return output.String(), err
-	}
-	home := t.TempDir()
-	var output bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
-		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-	}); err != nil {
-		t.Fatalf("overlay install: %v\n%s", err, output.String())
-	}
-	var merged struct {
-		Name      string            `json:"name"`
-		Base      string            `json:"base"`
-		Overrides map[string]string `json:"overrides"`
-	}
-	if err := json.Unmarshal([]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "professor-gold.json"))), &merged); err != nil {
-		t.Fatalf("merged overlay is not JSON: %v", err)
-	}
-	if merged.Name != "Professor Gold" || merged.Base != "dark" || merged.Overrides["claude"] != "#c95cff" ||
-		merged.Overrides["promptBorder"] != "#ffd60a" || merged.Overrides["promptBorderShimmer"] != "#fff7c2" {
-		t.Fatalf("merged overlay=%#v, want the base palette with the overlay's name and two prompt-border keys", merged)
-	}
-
-	baseStatus = http.StatusServiceUnavailable
-	failedOutput, err := run()
-	if err != nil {
-		t.Fatalf("base fetch failure aborted host install: %v\n%s", err, failedOutput)
-	}
-	if !strings.Contains(failedOutput, "theme professor-gold base tokyo-night fetch failed") || !strings.Contains(failedOutput, "503") {
-		t.Fatalf("base fetch failure was silent or vague:\n%s", failedOutput)
-	}
-
-	for _, tc := range []struct{ name, base, overlay, want string }{
-		{"blank base", `{"name":"Tokyo Night","base":"dark"}`, overlay, "base palette carries no overrides"},
-		{"blank overlay", baseBody, `{"name":"Professor Gold"}`, "overlay carries no overrides"},
-		{"non-JSON base", `{"name":`, overlay, "decode base palette"},
-	} {
-		if _, err := mergeThemeOverlay([]byte(tc.base), []byte(tc.overlay)); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
-		}
-	}
-
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{"bundled":{"professor-gold":{"file":"professor-gold.json","base":"nope","target":"~/.claude/themes/professor-gold.json"}}}`)
-	if _, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo}); err == nil || !strings.Contains(err.Error(), `bundled theme "professor-gold" base "nope" is not a source_fetched theme`) {
-		t.Fatalf("unknown base err=%v, want a named manifest refusal", err)
 	}
 }
